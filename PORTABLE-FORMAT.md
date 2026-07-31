@@ -21,6 +21,12 @@ immutable capability-bound receipts. Unknown native-close outcomes preserve
 toxic unpublished residue. No public decoder, filesystem publisher,
 destination-generation publisher, Admin command, or administration API ships.
 
+The canonical wire bytes, encoder/decoder, in-memory validation, and golden
+fixtures are verified on Linux, macOS, and Windows. The current filesystem
+staging and Admin lifecycle is a separate POSIX local-profile contract verified
+only on reviewed Linux and macOS filesystems. Portable wire compatibility does
+not imply that the local SQLite/Admin profile is available on every host.
+
 ## 1. Purpose and boundary
 
 A `.atgx` artifact transfers the logical AttuneGraph projection journal and its exact final

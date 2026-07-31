@@ -577,10 +577,6 @@ it("proves stale cross-Worker CAS, monotone generations, and exact physical coun
 
 it("bounds busy exhaustion without an orphan journal or changed head", async () => {
   const databasePath = await temporaryDatabase("busy.sqlite");
-  const holder = await openSqliteAttuneGraphStore({
-    databasePath,
-    testFixtureMode: true
-  });
   const contender = await openSqliteAttuneGraphStore({
     databasePath,
     testFixtureMode: true
@@ -589,19 +585,35 @@ it("bounds busy exhaustion without an orphan journal or changed head", async () 
     scope: SCOPE,
     store: createAttuneGraphStore(contender.backend)
   });
+  const writeLock = new DatabaseSync(databasePath, { timeout: 0 });
+  let writeLockHeld = false;
 
-  await holder.holdWriteLockForTesting(1_500);
-  await expect(
-    contenderAttuneGraph.project(command("busy-contender"))
-  ).rejects.toMatchObject({ code: "STORE_FAILURE" });
-  expect(await holder.inspectForTesting()).toEqual({
-    headRows: 0,
-    journalRows: 0,
-    maxGeneration: 0
-  });
-  await new Promise((resolve) => setTimeout(resolve, 600));
-  await contenderAttuneGraph.close();
-  await Promise.all([holder.close(), contender.close()]);
+  try {
+    try {
+      writeLock.exec("BEGIN IMMEDIATE");
+      writeLockHeld = true;
+      await expect(
+        contenderAttuneGraph.project(command("busy-contender"))
+      ).rejects.toMatchObject({ code: "STORE_FAILURE" });
+      expect(await contender.inspectForTesting()).toEqual({
+        headRows: 0,
+        journalRows: 0,
+        maxGeneration: 0
+      });
+    } finally {
+      try {
+        if (writeLockHeld) writeLock.exec("ROLLBACK");
+      } finally {
+        writeLock.close();
+      }
+    }
+  } finally {
+    try {
+      await contenderAttuneGraph.close();
+    } finally {
+      await contender.close();
+    }
+  }
 });
 
 it("awaits request and close timeout termination before the file can reopen", async () => {

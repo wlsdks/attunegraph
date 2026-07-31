@@ -8,10 +8,18 @@ The package does not treat graph proximity as truth, feedback, policy,
 permission, or action authority. Authoritative data remains in its source
 system; AttuneGraph stores rebuildable relations and exact source references.
 
-The core and in-memory adapter require Node.js 22.12 or newer. The
-worker-isolated local SQLite adapter requires Node.js 24.15 or newer because
-that is the first Node 24 release carrying a reviewed WAL-reset-safe SQLite.
-Opening the local adapter on an older runtime fails closed.
+The core, in-memory adapter, and portable wire contract require Node.js 22.12
+or newer and are tested on Linux, macOS, and Windows. The worker-isolated local
+SQLite adapter and offline Admin require Node.js 24.15 or newer and currently
+have reviewed filesystem profiles for Linux and macOS only. Opening either
+interface on an older runtime or Windows fails closed; it does not silently
+fall back to a weaker store.
+
+| Interface | Runtime | Reviewed operating systems |
+| --- | --- | --- |
+| Core, in-memory, portable wire/decoder | Node.js >=22.12 | Linux, macOS, Windows |
+| Local SQLite (`./local`) | Node.js >=24.15 | Linux, macOS |
+| Offline Admin (`./admin`) | Node.js >=24.15 | Linux, macOS |
 
 ## Package boundary
 
@@ -185,7 +193,9 @@ not carry a compatibility alias or migration path.
 pnpm install
 pnpm typecheck
 pnpm test:focused
-pnpm test
+pnpm test                 # cross-platform core/in-memory/portable contracts
+pnpm test:local-profile   # reviewed Linux/macOS local SQLite and Admin
+pnpm test:supported       # both profiles on a reviewed local-profile host
 pnpm build
 pnpm example
 pnpm pack:dry-run
@@ -197,6 +207,10 @@ pnpm verify:local
 Fixture generation is deterministic. Regeneration must reproduce the checked-in
 inputs, `.atgx` artifacts, manifest hashes, byte counts, record identities, and
 state identities exactly.
+
+`pnpm test:local-profile` intentionally fails closed on unsupported hosts; CI
+runs it only on reviewed Linux and macOS profiles. No platform test is silently
+skipped.
 
 Passing these checks proves the package contracts. It does not prove that an
 agent has learned a person, improved its timing, or produced a real-world

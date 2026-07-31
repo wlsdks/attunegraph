@@ -11,5 +11,7 @@ agent or product.
   compatibility decisions.
 - Use `pnpm test:focused` while editing. Run slow or broad verification
   separately so it does not block unrelated implementation.
-- Before merge, use Node 24.15 or newer and run `pnpm typecheck`, `pnpm test`,
-  `pnpm example`, and `pnpm pack:dry-run`.
+- Before merge, run `pnpm typecheck`, `pnpm test`, `pnpm example`, and
+  `pnpm pack:dry-run`. On a reviewed Linux/macOS local-profile host with Node
+  24.15 or newer, also run `pnpm test:local-profile`; do not skip or weaken that
+  gate on unsupported hosts.

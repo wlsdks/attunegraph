@@ -26,7 +26,7 @@ jobs:
       - run: node examples/basic-agent.mjs
       - run: npm pack --dry-run --json
 
-  verify:
+  cross-platform:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -45,6 +45,25 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check:naming
       - run: pnpm typecheck
-      - run: pnpm test
+      - run: pnpm test:cross-platform
       - run: node examples/basic-agent.mjs
       - run: npm pack --dry-run --json
+
+  local-profile:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+        node: ["24.15.0", "24"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:local-profile
