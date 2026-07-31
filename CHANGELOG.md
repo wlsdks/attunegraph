@@ -7,7 +7,10 @@ All notable changes to AttuneGraph are recorded here.
 ### Fixed
 
 - Invoke the pinned TypeScript compiler without platform command shims so builds work on Windows.
-- Verify the full Node 24 floor and current-major suite on Linux, macOS, and Windows.
+- Verify cross-platform contracts on Linux, macOS, and Windows while keeping
+  local SQLite and Admin verification on their reviewed Linux/macOS profiles.
+- Pin canonical portable fixtures to LF checkouts on every operating system.
+- Remove the timer race from the SQLite busy-exhaustion qualification.
 
 ## [0.1.0] - 2026-07-31
 

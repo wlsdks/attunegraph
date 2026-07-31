@@ -1,0 +1,3 @@
+* text=auto eol=lf
+*.atgx text eol=lf
+/fixtures/portable-v1/** text eol=lf
