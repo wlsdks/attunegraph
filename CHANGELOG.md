@@ -6,6 +6,9 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add a fixed Working Graph golden corpus and strict verifier for ordered
+  retrieval, bitemporal filtering, explicit thread roots, freshness, budget
+  partials, and abstention.
 - Add an Ubuntu Node 24.15 clean-room consumer CI proof that packs the built
   package, installs it offline outside the checkout, and exercises its public
   export boundary through a canonical-projection@2 Working Graph.

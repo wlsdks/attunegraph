@@ -1,0 +1,5 @@
+{
+  "schema": "attunegraph-working-graph-golden-manifest@1",
+  "corpusFile": "corpus.json",
+  "corpusSha256": "sha256:904b4ef03d680c4fc4338a679699cf794a37ef95b03ea87017ad15d0e012177a"
+}
