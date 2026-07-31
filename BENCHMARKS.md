@@ -145,7 +145,10 @@ measurements. `portable` times the production encoder, contiguous `.atgx` materi
 production decoder separately while verifying exact terminal convergence.
 
 Process peak RSS comes from `process.resourceUsage().maxRSS` normalized to bytes and is combined
-with phase-boundary RSS. The checked-in policy uses absolute ceilings only for that resource
-measurement. Throughput gates use the pairwise p50; latency, open, and decode-ratio gates use p95.
-See [`PERFORMANCE-QUALIFICATION.md`](PERFORMANCE-QUALIFICATION.md) for the six-report matrix and
+with phase-boundary RSS. Absolute p50/p95/p99 throughput and latency summaries are mandatory and
+the qualifier derives ratios and throughputs again from raw samples. The checked-in policy has
+absolute RSS ceilings but leaves absolute throughput/latency thresholds pending independent full-
+matrix calibration. Until then it can establish evidence integrity and relative-policy status,
+not performance qualification. See
+[`PERFORMANCE-QUALIFICATION.md`](PERFORMANCE-QUALIFICATION.md) for the six-report matrix and
 fail-closed qualifier contract.

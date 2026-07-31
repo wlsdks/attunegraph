@@ -41,6 +41,9 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Fixed
 
+- Close performance-evidence forgery paths with exact nested schemas, corpus-bound correctness
+  counts, deterministic AB/BA ordering, raw-sample recomputation, and an explicit distinction
+  between evidence integrity and absolute performance qualification.
 - Read pnpm provenance portably on Windows and POSIX benchmark runners.
 - Isolate the real 10K lifecycle qualification from the normal cross-platform
   suite so slower runners do not turn measurement into a flaky correctness

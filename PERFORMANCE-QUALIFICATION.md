@@ -5,9 +5,11 @@ speed claim. The checked-in [`performance-thresholds.json`](performance-threshol
 only approved policy consumed by `performance:qualify`. It requires six clean reports: the 10K,
 100K, and 1M corpora for both `local-session-concurrent` and `portable`.
 
-The reference class is explicit in the policy. Absolute thresholds are limited to process peak
-RSS ceilings. Latency and throughput thresholds are same-run relative comparisons so a faster or
-slower machine cannot manufacture a claim from an arbitrary absolute deadline.
+The reference class is explicit in the policy. Resource ceilings are absolute. Latency and
+throughput comparisons are same-run relative measurements, while their absolute p50, p95, and p99
+summaries remain required report fields. Approved absolute throughput and latency thresholds need
+independent 10K/100K/1M calibration and are deliberately still marked pending in the policy; the
+qualifier cannot claim full performance qualification until that calibration is checked in.
 
 ## Measurement contracts
 
@@ -27,10 +29,13 @@ RSS uses the larger of phase-boundary `process.memoryUsage().rss` and the proces
 water mark from `process.resourceUsage().maxRSS`, normalized from KiB to bytes. The method is
 recorded in every run. It is not an interval-sampled allocation trace.
 
-Concurrent reports require at least two repetitions so both pair orders are present. Throughput
-uses the p50 of pairwise ratios. Concurrent latency, warm/cold open, and portable decode/encode
-latency use p95; a good median cannot hide a regressed tail. Resource ceilings are 512 MiB, 1 GiB,
-and 4 GiB for 10K, 100K, and 1M respectively, additionally capped at half of host RAM.
+Concurrent reports require at least two repetitions and the exact baseline-first, candidate-first
+alternation for every pair. The qualifier recomputes assertion throughput from ingestion latency,
+portable byte and assertion throughput from artifact size and encode/decode latency, and every
+relative ratio from those raw samples. It does not trust claimed ratios. Throughput uses the p50
+of pairwise ratios. Concurrent latency, warm/cold open, and portable decode/encode latency use p95;
+a good median cannot hide a regressed tail. Resource ceilings are 512 MiB, 1 GiB, and 4 GiB for
+10K, 100K, and 1M respectively, additionally capped at half of host RAM.
 
 ## Produce the matrix
 
@@ -60,10 +65,19 @@ pnpm performance:qualify -- --as-of=2026-08-02T00:00:00.000Z \
 ```
 
 The qualifier rejects malformed, stale, duplicate, cross-host, dirty, SHA/tree/lockfile-mismatched,
-wrong-corpus, wrong-concurrency, and incomplete evidence. Threshold misses produce a nonzero exit
-and `qualified: false`. Until all six clean reports exist, AttuneGraph is not performance-qualified.
+wrong-corpus, wrong-concurrency, incomplete, inconsistent, or non-producer-shaped evidence. Host,
+RSS, correctness, configuration, metric, and raw-summary objects use exact schemas. Correctness
+counts must equal the deterministic corpus shard count. A structurally valid matrix can report
+`integrityQualified: true`; that means internal evidence integrity only, not provenance or speed.
+`relativePolicyQualified` records the existing relative/resource policy result.
+
+`performanceQualified` remains `false` and the command exits nonzero while the checked-in policy
+states `pending-independent-calibration` for absolute throughput and latency thresholds. This
+fail-closed state prevents two equally slow implementations from passing on ratios alone without
+inventing unmeasured 100K/1M limits.
 
 The local hashes make a report revision-bound and tamper-evident within its evidence set; they do
-not authenticate who executed it. Hand-authored, self-consistent files are not independent proof.
+not authenticate who executed it. A hand-authored file that perfectly reproduces the strict
+producer schema can still only establish internal integrity, never independent provenance.
 Release/readiness evidence must ultimately bind these reports to trusted CI artifact provenance or
 an independent evaluator before making a public qualification claim.

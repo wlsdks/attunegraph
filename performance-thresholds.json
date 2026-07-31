@@ -1,6 +1,6 @@
 {
-  "schema": "attunegraph-performance-policy@1",
-  "policyId": "attunegraph-external-project-reference-v1",
+  "schema": "attunegraph-performance-policy@2",
+  "policyId": "attunegraph-external-project-reference-v2",
   "approvedAt": "2026-08-01T00:00:00.000Z",
   "maximumEvidenceAgeHours": 168,
   "referenceEnvironment": {
@@ -24,6 +24,18 @@
     "maximumWarmToColdOpen": 1.5,
     "maximumDecodeToEncodeLatency": 4,
     "minimumDecodeToEncodeThroughput": 0.25
+  },
+  "absolutePerformanceThresholds": {
+    "status": "pending-independent-calibration",
+    "requiredSummaryFields": [
+      "local-session-concurrent.candidateAssertionsPerSecond.p50",
+      "local-session-concurrent.candidateIngestionMilliseconds.p95",
+      "local-session-concurrent.candidateProjectionMilliseconds.p95",
+      "portable.encodeBytesPerSecond.p50",
+      "portable.encodeMilliseconds.p95",
+      "portable.decodeBytesPerSecond.p50",
+      "portable.decodeMilliseconds.p95"
+    ]
   },
   "resourceCeilingsByScale": {
     "10000": { "maximumSampledPeakRssBytes": 536870912 },

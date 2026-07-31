@@ -309,8 +309,10 @@ product-usefulness claim.
 
 Performance measurement and qualification remain separate. Every performance report is
 measurement-only. The checked-in policy requires clean 10K, 100K, and 1M reports for concurrent
-local-session ingestion and portable encode/decode before `performance:qualify` can return true.
-See [`PERFORMANCE-QUALIFICATION.md`](PERFORMANCE-QUALIFICATION.md).
+local-session ingestion and portable encode/decode. The qualifier strictly recomputes throughput
+and ratios from raw samples; it currently reports evidence-integrity and relative-policy status
+but fails closed on full performance qualification until independent absolute throughput/latency
+thresholds are calibrated. See [`PERFORMANCE-QUALIFICATION.md`](PERFORMANCE-QUALIFICATION.md).
 
 Fixture generation is deterministic. Regeneration must reproduce the checked-in
 inputs, `.atgx` artifacts, manifest hashes, byte counts, record identities, and
