@@ -213,8 +213,11 @@ that self-reported provenance is externally authoritative.
 expected repository, host, and CLI configuration values. The CLI captures
 the initial repository identity and host, uses them to construct the report,
 then recaptures the repository identity after measurement. It requires exact
-initial/end commit, tree, clean state, and lockfile equality through the
-authority verifier before emitting evidence.
+initial/end commit, tree, and lockfile equality through the authority verifier,
+and both captures must be clean, before emitting evidence. Git commands and
+the lockfile are bound to the canonical script package root, which must itself
+be the Git top level; invoking the absolute script from another repository
+cannot substitute that caller working directory's provenance.
 
 The decision-read script is included in the npm tarball and its module boundary
 is import-smoked from an installed package. Authoritative benchmark execution

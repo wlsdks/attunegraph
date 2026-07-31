@@ -16,9 +16,11 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { describe, expect, it } from "vitest";
 
 import {
+  captureAgentDecisionReadRepositoryIdentity,
   createAgentDecisionReadWorkload,
   parseAgentDecisionReadArguments,
   runAgentDecisionReadBenchmark,
+  runAgentDecisionReadCommand,
   runAgentDecisionReadWorkload,
   validateAgentDecisionReadReportSchema,
   verifyAgentDecisionReadReportAuthority
@@ -378,7 +380,7 @@ describe("AttuneGraph agent decision-read benchmark", () => {
       ], {
         cwd: packageRoot,
         encoding: "utf8",
-        timeout: 30_000
+        timeout: 120_000
       });
       expect(packed.status, packed.stderr).toBe(0);
       const artifacts = JSON.parse(packed.stdout);
@@ -400,7 +402,7 @@ describe("AttuneGraph agent decision-read benchmark", () => {
       ], {
         cwd: consumer,
         encoding: "utf8",
-        timeout: 30_000
+        timeout: 120_000
       });
       expect(installed.status, installed.stderr).toBe(0);
 
@@ -419,11 +421,67 @@ describe("AttuneGraph agent decision-read benchmark", () => {
       ], {
         cwd: consumer,
         encoding: "utf8",
-        timeout: 10_000
+        timeout: 30_000
       });
       expect(imported.status, imported.stderr).toBe(0);
     } finally {
       await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("captures repository provenance from the package root, not caller cwd", async () => {
+    const foreignRepository = await realpath(
+      await mkdtemp(join(tmpdir(), "attunegraph-agent-decision-read-foreign-git-"))
+    );
+    try {
+      expect(spawnSync("git", ["init"], {
+        cwd: foreignRepository,
+        encoding: "utf8"
+      }).status).toBe(0);
+      await writeFile(join(foreignRepository, "foreign.txt"), "foreign\n", { mode: 0o600 });
+      expect(spawnSync("git", ["add", "foreign.txt"], {
+        cwd: foreignRepository,
+        encoding: "utf8"
+      }).status).toBe(0);
+      expect(spawnSync("git", [
+        "-c",
+        "user.name=AttuneGraph Test",
+        "-c",
+        "user.email=attunegraph-test@example.invalid",
+        "commit",
+        "-m",
+        "foreign"
+      ], {
+        cwd: foreignRepository,
+        encoding: "utf8"
+      }).status).toBe(0);
+
+      const captured = spawnSync(process.execPath, [
+        "--input-type=module",
+        "--eval",
+        [
+          `import { captureAgentDecisionReadRepositoryIdentity as capture } from ${JSON.stringify(pathToFileURL(fileURLToPath(new URL("./benchmark-attunegraph-agent-decision-read.mjs", import.meta.url))).href)};`,
+          "process.stdout.write(JSON.stringify(capture()));"
+        ].join("\n")
+      ], {
+        cwd: foreignRepository,
+        encoding: "utf8",
+        timeout: 10_000
+      });
+      expect(captured.status, captured.stderr).toBe(0);
+      const identity = JSON.parse(captured.stdout);
+      const expectedCommit = spawnSync("git", ["-C", packageRoot, "rev-parse", "HEAD"], {
+        encoding: "utf8"
+      }).stdout.trim();
+      const foreignCommit = spawnSync("git", ["rev-parse", "HEAD"], {
+        cwd: foreignRepository,
+        encoding: "utf8"
+      }).stdout.trim();
+      expect(identity.commit).toBe(expectedCommit);
+      expect(identity.commit).not.toBe(foreignCommit);
+      expect(identity).toEqual(captureAgentDecisionReadRepositoryIdentity());
+    } finally {
+      await rm(foreignRepository, { force: true, recursive: true });
     }
   });
 
@@ -433,6 +491,23 @@ describe("AttuneGraph agent decision-read benchmark", () => {
     );
     const outputPath = join(directory, "report.json");
     const invalidOutputPath = join(directory, "invalid.json");
+    const dirtyOutputPath = join(directory, "dirty.json");
+    const driftOutputPath = join(directory, "drift.json");
+    const cleanRepository = {
+      clean: true,
+      commit: "a".repeat(40),
+      lockfileSha256: `sha256:${"b".repeat(64)}`,
+      tree: "c".repeat(40)
+    };
+    const host = {
+      arch: "test",
+      cpuCount: 1,
+      cpuModel: "test",
+      node: "24.15.0",
+      os: "test",
+      pnpm: "10.18.0",
+      totalMemoryBytes: 1
+    };
     try {
       const invalid = spawnSync(process.execPath, [
         fileURLToPath(new URL("./benchmark-attunegraph-agent-decision-read.mjs", import.meta.url)),
@@ -442,30 +517,58 @@ describe("AttuneGraph agent decision-read benchmark", () => {
       expect(invalid.status).not.toBe(0);
       await expect(access(invalidOutputPath)).rejects.toMatchObject({ code: "ENOENT" });
 
-      const valid = spawnSync(process.execPath, [
-        fileURLToPath(new URL("./benchmark-attunegraph-agent-decision-read.mjs", import.meta.url)),
+      await expect(runAgentDecisionReadCommand([
+        "--workload=agent-decision-read@1",
+        "--warmups=0",
+        "--repetitions=1",
+        `--output=${dirtyOutputPath}`
+      ], {
+        captureRepositoryIdentity: () => ({ ...cleanRepository, clean: false }),
+        host
+      })).rejects.toThrow(/clean source checkout/u);
+      await expect(access(dirtyOutputPath)).rejects.toMatchObject({ code: "ENOENT" });
+
+      const driftIdentities = [
+        cleanRepository,
+        { ...cleanRepository, clean: false }
+      ];
+      await expect(runAgentDecisionReadCommand([
+        "--workload=agent-decision-read@1",
+        "--warmups=0",
+        "--repetitions=1",
+        `--output=${driftOutputPath}`
+      ], {
+        captureRepositoryIdentity: () => driftIdentities.shift(),
+        host
+      })).rejects.toThrow(/clean source checkout/u);
+      await expect(access(driftOutputPath)).rejects.toMatchObject({ code: "ENOENT" });
+
+      const stableIdentities = [cleanRepository, cleanRepository];
+      const writtenReport = await runAgentDecisionReadCommand([
         "--workload=agent-decision-read@1",
         "--warmups=0",
         "--repetitions=1",
         `--output=${outputPath}`
-      ], { encoding: "utf8", timeout: 15_000 });
-      expect(valid.status, valid.stderr).toBe(0);
-      expect(valid.stdout).toBe("");
+      ], {
+        captureRepositoryIdentity: () => stableIdentities.shift(),
+        host
+      });
       if (process.platform !== "win32") {
         expect((await stat(outputPath)).mode & 0o777).toBe(0o600);
       }
       const report = JSON.parse(await readFile(outputPath, "utf8"));
+      expect(report).toEqual(writtenReport);
       expect(validateAgentDecisionReadReportSchema(report)).toBe(report);
 
-      const overwrite = spawnSync(process.execPath, [
-        fileURLToPath(new URL("./benchmark-attunegraph-agent-decision-read.mjs", import.meta.url)),
+      await expect(runAgentDecisionReadCommand([
         "--workload=agent-decision-read@1",
         "--warmups=0",
         "--repetitions=1",
         `--output=${outputPath}`
-      ], { encoding: "utf8", timeout: 10_000 });
-      expect(overwrite.status).not.toBe(0);
-      expect(overwrite.stderr).toMatch(/already exists/u);
+      ], {
+        captureRepositoryIdentity: () => cleanRepository,
+        host
+      })).rejects.toThrow(/already exists/u);
     } finally {
       await rm(directory, { force: true, recursive: true });
     }

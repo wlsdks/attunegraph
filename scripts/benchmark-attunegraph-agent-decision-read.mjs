@@ -1,12 +1,12 @@
 import { Buffer } from "node:buffer";
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { lstat, realpath, writeFile } from "node:fs/promises";
 import { arch, cpus, platform, totalmem } from "node:os";
 import { dirname, isAbsolute, normalize, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { openAttuneGraph } from "@attunegraph/core";
 import { createInMemoryAttuneGraphStore } from "@attunegraph/core/testing";
@@ -16,6 +16,7 @@ const NOW = "2026-08-01T12:00:00.000Z";
 const OBSERVED_AT = "2026-08-01T11:59:00.000Z";
 const RECORDED_AT = "2026-08-01T10:00:00.000Z";
 const GENERATION = 8;
+const PACKAGE_ROOT = realpathSync(fileURLToPath(new URL("../", import.meta.url)));
 const SUPPORTED_ARGUMENTS = new Set([
   "output",
   "repetitions",
@@ -494,16 +495,20 @@ function summarizeDistribution(samples, independentRuns) {
   });
 }
 
-function repositoryIdentity() {
-  const git = (...args) => execFileSync("git", args, {
+export function captureAgentDecisionReadRepositoryIdentity() {
+  const git = (...args) => execFileSync("git", ["-C", PACKAGE_ROOT, ...args], {
     encoding: "utf8",
     stdio: ["ignore", "pipe", "ignore"]
   }).trim();
+  const repositoryRoot = realpathSync(git("rev-parse", "--show-toplevel"));
+  if (repositoryRoot !== PACKAGE_ROOT) {
+    throw new Error("agent decision-read script must be inside the package repository root");
+  }
   return Object.freeze({
     clean: git("status", "--porcelain=v1", "--untracked-files=all") === "",
     commit: git("rev-parse", "HEAD"),
     lockfileSha256: sha256(
-      readFileSync(new URL("../pnpm-lock.yaml", import.meta.url))
+      readFileSync(resolve(PACKAGE_ROOT, "pnpm-lock.yaml"))
     ),
     tree: git("rev-parse", "HEAD^{tree}")
   });
@@ -703,7 +708,7 @@ export async function runAgentDecisionReadBenchmark(options, runtime = {}) {
     measurementOnly: true,
     metrics: reportMetrics(workload, runs, options.repetitions),
     observedAt: (runtime.now ?? new Date()).toISOString(),
-    repository: runtime.repository ?? repositoryIdentity(),
+    repository: runtime.repository ?? captureAgentDecisionReadRepositoryIdentity(),
     schema: "attunegraph-agent-decision-read-benchmark@1",
     workload: reportWorkload(workload)
   });
@@ -1152,11 +1157,7 @@ async function validateOutputPath(outputPath) {
   if (canonicalParent !== parent) {
     throw new Error("agent decision-read output parent must not traverse a symlink");
   }
-  const repositoryRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"]
-  }).trim();
-  const fromRepository = relative(repositoryRoot, outputPath);
+  const fromRepository = relative(PACKAGE_ROOT, outputPath);
   if (
     fromRepository === ""
     || (!fromRepository.startsWith("..") && !isAbsolute(fromRepository))
@@ -1179,20 +1180,29 @@ async function validateOutputPath(outputPath) {
   }
 }
 
-async function main() {
-  const argv = process.argv.slice(2);
+export async function runAgentDecisionReadCommand(argv, runtime = {}) {
   const options = parseAgentDecisionReadArguments(argv);
   if (options.outputPath !== undefined) {
     await validateOutputPath(options.outputPath);
   }
-  const repository = repositoryIdentity();
-  const host = hostIdentity();
+  const captureRepositoryIdentity = runtime.captureRepositoryIdentity
+    ?? captureAgentDecisionReadRepositoryIdentity;
+  const repository = captureRepositoryIdentity();
+  if (repository.clean !== true) {
+    throw new Error("agent decision-read evidence requires a clean source checkout");
+  }
+  const host = runtime.host ?? hostIdentity();
   const report = await runAgentDecisionReadBenchmark(options, {
     argv,
     host,
-    repository
+    repository,
+    ...(runtime.now === undefined ? {} : { now: runtime.now }),
+    ...(runtime.runWorkload === undefined ? {} : { runWorkload: runtime.runWorkload })
   });
-  const endRepository = repositoryIdentity();
+  const endRepository = captureRepositoryIdentity();
+  if (endRepository.clean !== true) {
+    throw new Error("agent decision-read evidence requires a clean source checkout");
+  }
   verifyAgentDecisionReadReportAuthority(report, {
     configuration: {
       argv,
@@ -1206,7 +1216,7 @@ async function main() {
   const document = `${JSON.stringify(report, null, 2)}\n`;
   if (options.outputPath === undefined) {
     process.stdout.write(document);
-    return;
+    return report;
   }
   try {
     await writeFile(options.outputPath, document, {
@@ -1220,6 +1230,11 @@ async function main() {
     }
     throw cause;
   }
+  return report;
+}
+
+async function main() {
+  await runAgentDecisionReadCommand(process.argv.slice(2));
 }
 
 const invokedDirectly = process.argv[1] !== undefined
