@@ -14,7 +14,7 @@ import {
 } from "./benchmark-attunegraph-agent-decision-read-scale.mjs";
 
 const OPTIONS = Object.freeze({
-  repetitions: 5,
+  repetitions: 1,
   timeoutMs: 300_000,
   warmups: 0,
   workload: "agent-decision-read-scale@1"
@@ -85,11 +85,11 @@ describe("AttuneGraph agent decision-read scale benchmark", () => {
     expect(report.cells.map((cell) => cell.batchAssertionVisitedPairs)).toEqual([48, 96, 144, 272, 1056, 2352, 2352, 9408, 75264]);
     for (const cell of report.cells) {
       expect(cell.canonicalProjection.outputBytes).toBeLessThanOrEqual(15_500);
-      expect(cell.timing.cold.batchExecuteMilliseconds.p50).not.toBeNull();
-      expect(cell.timing.warm.batchWallMilliseconds.p50).not.toBeNull();
+      expect(cell.timing.cold.batchExecuteMilliseconds.p50).toBeNull();
+      expect(cell.timing.warm.batchWallMilliseconds.p50).toBeNull();
       expect(cell.timing.cold.batchExecuteMilliseconds.p95).toBeNull();
       expect(cell.timing.warm.batchWallMilliseconds.p99).toBeNull();
-      expect(cell.timing.raw).toHaveLength(5);
+      expect(cell.timing.raw).toHaveLength(1);
       expect(cell.timing.raw.every((entry) => entry.cold.batchWallMilliseconds >= entry.cold.batchExecuteMilliseconds)).toBe(true);
     }
     expect(report.authoritySentinel).toMatchObject({
@@ -99,17 +99,6 @@ describe("AttuneGraph agent decision-read scale benchmark", () => {
       generationTwo: { authorityObserved: false, generation: 2, sourceFreshness: "stale", status: "abstained" }
     });
     expect(createAgentDecisionReadScaleWorkload()).toEqual(createAgentDecisionReadScaleWorkload());
-  });
-
-  it("keeps p50 ineligible below five independent repetitions and all tail claims unavailable", async () => {
-    const short = await generateAgentDecisionReadScaleReport({ ...OPTIONS, repetitions: 4 });
-    for (const cell of short.cells) {
-      expect(cell.timing.cold.batchExecuteMilliseconds.p50).toBeNull();
-      expect(cell.timing.warm.positions.every((entry) => entry.p50 === null)).toBe(true);
-      expect(cell.timing.cold.batchWallMilliseconds.p95).toBeNull();
-      expect(cell.timing.warm.batchWallMilliseconds.p99).toBeNull();
-    }
-    expect(short.measurementIdentitySha256).toBe(report.measurementIdentitySha256);
   });
 
   it("rejects forged workload, cell, timing, memory, semantic, and authority evidence", () => {

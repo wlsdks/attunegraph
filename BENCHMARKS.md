@@ -449,6 +449,15 @@ pnpm benchmark:agent-decision-read-scale -- \
   --output=/absolute/non-repository/evidence/agent-decision-read-scale.json
 ```
 
+The default cross-platform suite keeps a one-repetition smoke and every strict
+schema/adversarial check. The real five-repetition p50 eligibility exercise is
+kept in the slower qualification lane so it does not stall ordinary edit/test
+loops:
+
+```sh
+pnpm test:benchmark-qualification
+```
+
 The command accepts only absolute, normalized, non-existing paths beneath a
 non-symlink external directory. On POSIX it requests mode `0600`; on Windows,
 Node's mode is not an ACL guarantee, so the containing directory's ACL remains
