@@ -99,11 +99,12 @@ function canonicalEnvelope(
   value: unknown,
   profile: "external-mutable" | "attunegraph-frozen",
   label: string,
-  code: AttuneGraphError["code"] = "INVALID_INPUT"
+  code: AttuneGraphError["code"] = "INVALID_INPUT",
+  version: 1 | 2 = 1
 ): { readonly envelope: Readonly<Record<string, unknown>>; readonly canonicalJson: string; readonly contentId: string } {
   try {
     return canonicalizeImmutableEnvelope(value, profile, {
-      hashDomain: "attunegraph.canonical-projection.v1",
+      hashDomain: `attunegraph.canonical-projection.v${version}`,
       idField: "observationId",
       idPrefix: "attunegraph-observation:"
     });
@@ -127,15 +128,67 @@ function dedupeAssertions(
   return Object.freeze([...byId.values()].sort((left, right) => left.id.localeCompare(right.id)));
 }
 
+function requireThreadRootedObservation(
+  assertions: readonly GraphAssertion[],
+  threadRoot: GraphRef,
+  code: AttuneGraphError["code"]
+): void {
+  if (assertions.length === 0) return;
+
+  const adjacency = new Map<
+    string,
+    { readonly assertionIndex: number; readonly next: string }[]
+  >();
+  const connect = (from: string, assertionIndex: number, next: string): void => {
+    const entries = adjacency.get(from);
+    const entry = { assertionIndex, next };
+    if (entries) entries.push(entry);
+    else adjacency.set(from, [entry]);
+  };
+
+  for (let index = 0; index < assertions.length; index += 1) {
+    const assertion = assertions[index]!;
+    const subject = graphRefKey(assertion.subject);
+    const object = graphRefKey(assertion.object);
+    connect(subject, index, object);
+    connect(object, index, subject);
+  }
+
+  const root = graphRefKey(threadRoot);
+  const queue = [root];
+  const visitedRefs = new Set(queue);
+  const reachedAssertions = new Set<number>();
+  for (let cursor = 0; cursor < queue.length; cursor += 1) {
+    for (const entry of adjacency.get(queue[cursor]!) ?? []) {
+      reachedAssertions.add(entry.assertionIndex);
+      if (!visitedRefs.has(entry.next)) {
+        visitedRefs.add(entry.next);
+        queue.push(entry.next);
+      }
+    }
+  }
+
+  if (reachedAssertions.size !== assertions.length) {
+    attuneGraphError(
+      code,
+      "source observation assertions must form one component rooted at its thread scope"
+    );
+  }
+}
+
 function normalizedObservationFromEnvelope(
   envelope: Readonly<Record<string, unknown>>,
   canonicalProjection: string,
   observationId: string,
   expectedScope: AttuneGraphScope,
-  code: AttuneGraphError["code"]
+  code: AttuneGraphError["code"],
+  version: 1 | 2
 ): NormalizedObservation {
-  const input = record(envelope, "source observation", ["schemaVersion", "observationId", "observationKey", "scope", "observedAt", "sourceFreshness", "assertions"], ["schemaVersion", "observationId", "observationKey", "scope", "observedAt", "sourceFreshness", "assertions"], code);
-  if (input.schemaVersion !== 1) attuneGraphError(code, "source observation.schemaVersion must be 1");
+  const fields = version === 1
+    ? ["schemaVersion", "observationId", "observationKey", "scope", "observedAt", "sourceFreshness", "assertions"]
+    : ["schemaVersion", "observationId", "observationKey", "scope", "threadRoot", "observedAt", "sourceFreshness", "assertions"];
+  const input = record(envelope, "source observation", fields, fields, code);
+  if (input.schemaVersion !== version) attuneGraphError(code, `source observation.schemaVersion must be ${version}`);
   text(input.observationKey, "source observation.observationKey", code);
   const observedScope = normalizeAttuneGraphScope(input.scope, "source observation.scope", code);
   if (!sameScope(observedScope, expectedScope)) attuneGraphError(code === "INVALID_INPUT" ? "INVALID_SCOPE" : code, "source observation must match the opened scope");
@@ -146,6 +199,27 @@ function normalizedObservationFromEnvelope(
   } catch (cause) {
     if (cause instanceof AttuneGraphError) throw cause;
     throw new AttuneGraphError(code, "source observation assertions are invalid", { cause });
+  }
+  if (version === 2) {
+    const rootInput = record(
+      input.threadRoot,
+      "source observation.threadRoot",
+      ["id", "kind"],
+      ["id", "kind"],
+      code
+    );
+    if (rootInput.kind !== "thread") {
+      attuneGraphError(code, "source observation.threadRoot.kind must be thread");
+    }
+    const threadRoot = Object.freeze({
+      id: text(rootInput.id, "source observation.threadRoot.id", code),
+      kind: "thread" as const
+    });
+    requireThreadRootedObservation(
+      assertions,
+      threadRoot,
+      code === "INVALID_INPUT" ? "DISCONNECTED_OBSERVATION" : code
+    );
   }
   const derivedId = text(input.observationId, "source observation.observationId", code);
   if (derivedId !== observationId) attuneGraphError(code, "source observation content identifier mismatches its canonical envelope");
@@ -159,17 +233,43 @@ function normalizedObservationFromEnvelope(
   });
 }
 
-function normalizeObservation(value: unknown, expectedScope: AttuneGraphScope): NormalizedObservation {
-  const canonical = canonicalEnvelope(value, "external-mutable", "source observation");
-  return normalizedObservationFromEnvelope(canonical.envelope, canonical.canonicalJson, canonical.contentId, expectedScope, "INVALID_INPUT");
+function normalizeObservation(
+  value: unknown,
+  expectedScope: AttuneGraphScope,
+  version: 1 | 2
+): NormalizedObservation {
+  const canonical = canonicalEnvelope(
+    value,
+    "external-mutable",
+    "source observation",
+    "INVALID_INPUT",
+    version
+  );
+  return normalizedObservationFromEnvelope(
+    canonical.envelope,
+    canonical.canonicalJson,
+    canonical.contentId,
+    expectedScope,
+    "INVALID_INPUT",
+    version
+  );
 }
 
 function normalizeProject(command: AttuneGraphProjectCommand, expectedScope: AttuneGraphScope): { readonly expectedSnapshot: AttuneGraphSnapshot | undefined; readonly observation: NormalizedObservation } {
   const input = record(command, "project command", ["operator", "observation", "expectedSnapshot"], ["operator", "observation"]);
-  if (input.operator !== "canonical-projection@1") attuneGraphError("UNSUPPORTED_OPERATOR", "project supports only canonical-projection@1");
+  if (input.operator !== "canonical-projection@1" && input.operator !== "canonical-projection@2") {
+    attuneGraphError("UNSUPPORTED_OPERATOR", "project supports canonical-projection@1 and canonical-projection@2");
+  }
   const expectedSnapshot = input.expectedSnapshot === undefined ? undefined : snapshot(input.expectedSnapshot, "project command.expectedSnapshot");
   if (expectedSnapshot && !sameScope(expectedSnapshot.scope, expectedScope)) attuneGraphError("SNAPSHOT_SCOPE_MISMATCH", "expected snapshot belongs to another scope");
-  return Object.freeze({ expectedSnapshot, observation: normalizeObservation(input.observation, expectedScope) });
+  return Object.freeze({
+    expectedSnapshot,
+    observation: normalizeObservation(
+      input.observation,
+      expectedScope,
+      input.operator === "canonical-projection@2" ? 2 : 1
+    )
+  });
 }
 
 function safeRef(value: unknown): GraphRef {
@@ -217,14 +317,37 @@ function normalizeStoredProjectionShared(
   const canonicalProjection = text(input.canonicalProjection, "stored projection.canonicalProjection", "CORRUPT_STORE", MAX_STORED_PROJECTION_TEXT);
   let parsed: unknown;
   try { parsed = JSON.parse(canonicalProjection); } catch (cause) { throw new AttuneGraphError("CORRUPT_STORE", "stored canonical projection is invalid JSON", { cause }); }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    attuneGraphError("CORRUPT_STORE", "stored canonical projection is not an observation");
+  }
+  const parsedVersion = Object.getOwnPropertyDescriptor(
+    parsed,
+    "schemaVersion"
+  )?.value;
+  if (parsedVersion !== 1 && parsedVersion !== 2) {
+    attuneGraphError(
+      typeof parsedVersion === "number" && parsedVersion > 2
+        ? "FUTURE_STORE_STATE"
+        : "CORRUPT_STORE",
+      "stored canonical projection has an unsupported observation schema"
+    );
+  }
   const canonical = canonicalEnvelope(
     parsed,
     "external-mutable",
     "stored canonical projection",
-    "CORRUPT_STORE"
+    "CORRUPT_STORE",
+    parsedVersion
   );
   if (canonical.canonicalJson !== canonicalProjection || canonical.contentId !== observationId) attuneGraphError("CORRUPT_STORE", "stored canonical projection fingerprint is invalid");
-  const observation = normalizedObservationFromEnvelope(canonical.envelope, canonical.canonicalJson, canonical.contentId, storedSnapshot.scope, "CORRUPT_STORE");
+  const observation = normalizedObservationFromEnvelope(
+    canonical.envelope,
+    canonical.canonicalJson,
+    canonical.contentId,
+    storedSnapshot.scope,
+    "CORRUPT_STORE",
+    parsedVersion
+  );
   if (input.projectionFingerprint !== observation.observationId) attuneGraphError("CORRUPT_STORE", "stored projection fingerprint does not match its observation");
   if (storedSnapshot.commitId !== `attunegraph-commit:${observation.observationId}`) attuneGraphError("CORRUPT_STORE", "stored snapshot commit does not match its observation");
   const rawObservedAt = instant(input.observedAt, "stored projection.observedAt", "CORRUPT_STORE");

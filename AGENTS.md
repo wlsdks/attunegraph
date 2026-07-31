@@ -9,6 +9,10 @@ agent or product.
 - Unknown, stale, corrupt, and over-budget states fail closed or abstain.
 - Portable-format and persisted-store changes require explicit version and
   compatibility decisions.
+- New complete observations use `canonical-projection@2` with an exact
+  `threadRoot` inside the content-addressed observation; never infer that root
+  from `scope.threadId`.
+  V1 is a legacy root-unverified compatibility profile.
 - Use `pnpm test:focused` while editing. Run slow or broad verification
   separately so it does not block unrelated implementation.
 - Before merge, run `pnpm typecheck`, `pnpm test`, `pnpm example`, and

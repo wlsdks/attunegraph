@@ -23,6 +23,8 @@ export type {
   AttuneGraphSourceAdapter,
   AttuneGraphSourceFreshness,
   AttuneGraphSourceObservation,
+  AttuneGraphSourceObservationV1,
+  AttuneGraphSourceObservationV2,
   AttuneGraphStore,
   AttuneGraphWorkingGraph,
   OpenAttuneGraphOptions

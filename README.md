@@ -67,13 +67,14 @@ const scope: AttuneGraphScope = {
   sourceId: "notes",
   threadId: "trip-planning"
 };
+const threadRoot = { kind: "thread" as const, id: "thread:trip-planning" };
 
 const assertion: GraphAssertion = {
   schemaVersion: 1,
   id: "trip-linked-to-hotel-comparison",
   subject: { kind: "artifact", id: "hotel-comparison" },
   predicate: "LINKED_TO",
-  object: { kind: "thread", id: "trip-planning" },
+  object: { ...threadRoot },
   epistemicClass: "source-observed",
   sourceRefs: [{
     namespace: "example.notes",
@@ -89,11 +90,12 @@ const attuneGraph = await openAttuneGraph({
 });
 
 const snapshot = await attuneGraph.project({
-  operator: "canonical-projection@1",
+  operator: "canonical-projection@2",
   observation: {
-    schemaVersion: 1,
+    schemaVersion: 2,
     observationKey: "notes-sync-42",
     scope,
+    threadRoot,
     observedAt: "2026-07-30T09:00:00.000Z",
     sourceFreshness: {
       state: "fresh",
@@ -105,7 +107,7 @@ const snapshot = await attuneGraph.project({
 
 const result = await attuneGraph.execute({
   operator: "working-graph@1",
-  seed: { kind: "thread", id: "trip-planning" },
+  seed: threadRoot,
   now: "2026-07-30T09:00:00.000Z",
   maxEstimatedTokens: 2_000
 });
@@ -114,7 +116,27 @@ console.log(snapshot.commitId, result.status, result.workingGraph);
 await attuneGraph.close();
 ```
 
-After an exact replay check, `canonical-projection@1` refuses a source
+`canonical-projection@2` adds **Thread-rooted Admission**. The exact
+`threadRoot` is part of the content-addressed observation; the engine requires
+every normalized assertion to belong to its undirected connected component
+before it performs a Store read or compare-and-swap. Empty observations remain
+valid. A mixed projection containing useful thread context plus disconnected
+graph debris fails closed with `DISCONNECTED_OBSERVATION`, so there is no
+partial generation or hidden orphan component.
+
+`scope.threadId` is an isolation key, not an inferred graph node ID. Agents may
+use opaque or content-addressed thread roots and must declare the exact
+`GraphRef`. The legacy `canonical-projection@1` profile remains readable and
+writable for compatibility, but is root-unverified; new agent integrations
+should write v2. Stored and portable v1 projections remain readable without
+being retroactively certified as thread-rooted.
+
+V2 observation IDs use the `attunegraph.canonical-projection.v2` hash domain;
+v1 IDs retain their original domain and bytes. The Store envelope and `.atgx`
+transport versions do not change because both re-admit the embedded observation
+according to its declared schema version.
+
+After an exact replay check, both canonical projection profiles refuse a source
 observation whose `observedAt` precedes the active head. This prevents a delayed
 older source read from replacing newer truth; equal-instant distinct writes
 retain the existing expected-snapshot CAS semantics.

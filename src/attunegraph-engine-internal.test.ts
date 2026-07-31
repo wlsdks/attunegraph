@@ -17,13 +17,13 @@ const SCOPE = { sourceId: "source-a", threadId: "thread-a" };
 const OTHER_SCOPE = { sourceId: "source-a", threadId: "thread-b" };
 const NOW = "2026-07-30T00:00:00.000Z";
 
-function assertion(): GraphAssertion {
+function assertion(threadId = SCOPE.threadId): GraphAssertion {
   return {
     schemaVersion: 1,
     id: "stored-assertion",
     subject: { id: "stored-artifact", kind: "artifact" },
     predicate: "LINKED_TO",
-    object: { id: SCOPE.threadId, kind: "thread" },
+    object: { id: threadId, kind: "thread" },
     epistemicClass: "source-observed",
     sourceRefs: [{ id: "stored-source", namespace: "test.source" }],
     recordedAt: NOW,
@@ -31,7 +31,7 @@ function assertion(): GraphAssertion {
   };
 }
 
-async function engineProjection(): Promise<AttuneGraphStoredProjection> {
+async function engineProjection(version: 1 | 2 = 1): Promise<AttuneGraphStoredProjection> {
   let captured: AttuneGraphStoredProjection | undefined;
   const attuneGraph = await openAttuneGraph({
     scope: SCOPE,
@@ -45,7 +45,8 @@ async function engineProjection(): Promise<AttuneGraphStoredProjection> {
       }
     })
   });
-  await attuneGraph.project({
+  const threadRoot = { id: "opaque-thread-root", kind: "thread" as const };
+  await attuneGraph.project((version === 1 ? {
     operator: "canonical-projection@1",
     observation: {
       schemaVersion: 1,
@@ -55,7 +56,18 @@ async function engineProjection(): Promise<AttuneGraphStoredProjection> {
       sourceFreshness: { state: "fresh", observedAt: NOW },
       assertions: [assertion()]
     }
-  });
+  } : {
+    operator: "canonical-projection@2",
+    observation: {
+      schemaVersion: 2,
+      observationKey: "stored-projection-v2",
+      scope: SCOPE,
+      threadRoot,
+      observedAt: NOW,
+      sourceFreshness: { state: "fresh", observedAt: NOW },
+      assertions: [assertion(threadRoot.id)]
+    }
+  }));
   await attuneGraph.close();
   expect(captured).toBeDefined();
   return captured!;
@@ -114,6 +126,24 @@ it("normalizes the exact valid projection produced by the current Engine", async
   expect(Object.isFrozen(normalized)).toBe(true);
   expect(Object.isFrozen(normalized.snapshot)).toBe(true);
   expect(Object.isFrozen(normalized.assertions)).toBe(true);
+});
+
+it("re-admits one thread-rooted v2 projection through Store and portable boundaries", async () => {
+  const projection = await engineProjection(2);
+  const normalized = normalizeStoredProjection(projection, SCOPE);
+  const admitted = admitPortableProjection(mutableProjection(projection), SCOPE);
+
+  expect(normalized).toEqual(projection);
+  expect(admitted.projection).toEqual(projection);
+  expect(JSON.parse(projection.canonicalProjection)).toMatchObject({
+    schemaVersion: 2,
+    threadRoot: { id: "opaque-thread-root", kind: "thread" }
+  });
+  expect(admitted.identity).toMatchObject({
+    scope: SCOPE,
+    generation: 1,
+    commitId: projection.snapshot.commitId
+  });
 });
 
 it("rejects exact stored-projection corruption with current typed semantics", async () => {

@@ -156,6 +156,92 @@ it("deduplicates assertions, reports a depth-boundary omission, and abstains onl
   expect(abstained.workingGraph.diagnostics.truncationReasons).toEqual([]);
 });
 
+it("admits only complete thread-rooted observations before any Store operation", async () => {
+  const backing = new InMemoryAttuneGraphStoreBackend();
+  let reads = 0;
+  let swaps = 0;
+  const counted: AttuneGraphStoreBackend = {
+    async read(scope) {
+      reads += 1;
+      return backing.read(scope);
+    },
+    async compareAndSwap(scope, expected, proposed) {
+      swaps += 1;
+      return backing.compareAndSwap(scope, expected, proposed);
+    }
+  };
+  const attuneGraph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(counted)
+  });
+  const disconnected = assertion("disconnected");
+  const debris: GraphAssertion = {
+    ...disconnected,
+    subject: { id: "orphan-a", kind: "artifact" },
+    predicate: "DERIVED_FROM",
+    object: { id: "orphan-b", kind: "evidence" }
+  };
+
+  const v2Command = (
+    id: string,
+    assertions: readonly GraphAssertion[],
+    scope = SCOPE
+  ) => ({
+    operator: "canonical-projection@2" as const,
+    observation: {
+      ...command(id, { assertions, scope }).observation,
+      schemaVersion: 2 as const,
+      threadRoot: { id: scope.threadId, kind: "thread" as const }
+    }
+  });
+
+  await expect(attuneGraph.project(v2Command("debris", [
+    assertion("connected"),
+    debris
+  ]))).rejects.toMatchObject({ code: "DISCONNECTED_OBSERVATION" });
+  expect({ reads, swaps }).toEqual({ reads: 0, swaps: 0 });
+  await expect(backing.read(SCOPE)).resolves.toBeUndefined();
+
+  const rooted = await attuneGraph.project(v2Command(
+    "reordered-chain",
+    [...chainAssertions()].reverse()
+  ));
+  expect(rooted).toMatchObject({ generation: 1 });
+  await expect(attuneGraph.head()).resolves.toEqual(rooted);
+
+  const callsBeforeRejectedUpdate = { reads, swaps };
+  await expect(attuneGraph.project({
+    ...v2Command("orphan-update", [debris]),
+    expectedSnapshot: rooted
+  })).rejects.toMatchObject({ code: "DISCONNECTED_OBSERVATION" });
+  expect({ reads, swaps }).toEqual(callsBeforeRejectedUpdate);
+  await expect(attuneGraph.head()).resolves.toEqual(rooted);
+
+  await expect(attuneGraph.project({
+    operator: "canonical-projection@2",
+    observation: {
+      ...v2Command("wrong-root-kind", [assertion("wrong-root-kind")]).observation,
+      threadRoot: { id: SCOPE.threadId, kind: "artifact" }
+    },
+    expectedSnapshot: rooted
+  } as never)).rejects.toMatchObject({ code: "INVALID_INPUT" });
+
+  const empty = await openAttuneGraph({
+    scope: OTHER_SCOPE,
+    store: createInMemoryAttuneGraphStore()
+  });
+  await expect(empty.project(v2Command("empty", [], OTHER_SCOPE))).resolves.toMatchObject({ generation: 1 });
+
+  const legacy = await openAttuneGraph({
+    scope: SCOPE,
+    store: createInMemoryAttuneGraphStore()
+  });
+  const legacySnapshot = await legacy.project(command("legacy-v1", {
+    assertions: [debris]
+  }));
+  await expect(legacy.head()).resolves.toEqual(legacySnapshot);
+});
+
 it("detaches nested caller values and pins one validated Store head per execute", async () => {
   const backend = new InMemoryAttuneGraphStoreBackend();
   let reads = 0;

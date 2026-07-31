@@ -43,12 +43,14 @@ function command(
   key: string,
   scope: AttuneGraphScope = SCOPE
 ): AttuneGraphProjectCommand {
+  const threadRoot = { id: scope.threadId, kind: "thread" as const };
   return {
-    operator: "canonical-projection@1",
+    operator: "canonical-projection@2",
     observation: {
-      schemaVersion: 1,
+      schemaVersion: 2,
       observationKey: key,
       scope,
+      threadRoot,
       observedAt: NOW,
       sourceFreshness: { state: "fresh", observedAt: NOW },
       assertions: [{
@@ -56,7 +58,7 @@ function command(
         id: `assertion-${key}`,
         subject: { id: `artifact-${key}`, kind: "artifact" },
         predicate: "LINKED_TO",
-        object: { id: scope.threadId, kind: "thread" },
+        object: { ...threadRoot },
         epistemicClass: "source-observed",
         sourceRefs: [{ id: `source-ref-${key}`, namespace: "example.local-test" }],
         recordedAt: NOW,

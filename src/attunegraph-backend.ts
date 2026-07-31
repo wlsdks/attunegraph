@@ -12,7 +12,7 @@ export interface AttuneGraphStoredProjection {
   readonly schemaVersion: 1;
   readonly snapshot: AttuneGraphSnapshot;
   readonly observationId: string;
-  /** Exact canonical JSON of the admitted canonical-projection@1 envelope. */
+  /** Exact canonical JSON of the admitted versioned canonical-projection envelope. */
   readonly canonicalProjection: string;
   /** Content-addressed identifier derived from canonicalProjection. */
   readonly projectionFingerprint: string;
