@@ -380,9 +380,10 @@ describe("AttuneGraph agent decision-read benchmark", () => {
       ], {
         cwd: packageRoot,
         encoding: "utf8",
+        shell: process.platform === "win32",
         timeout: 120_000
       });
-      expect(packed.status, packed.stderr).toBe(0);
+      expect(packed.status, packed.error?.stack ?? packed.stderr).toBe(0);
       const artifacts = JSON.parse(packed.stdout);
       expect(artifacts).toHaveLength(1);
 
@@ -402,9 +403,10 @@ describe("AttuneGraph agent decision-read benchmark", () => {
       ], {
         cwd: consumer,
         encoding: "utf8",
+        shell: process.platform === "win32",
         timeout: 120_000
       });
-      expect(installed.status, installed.stderr).toBe(0);
+      expect(installed.status, installed.error?.stack ?? installed.stderr).toBe(0);
 
       const installedEntry = join(
         consumer,
