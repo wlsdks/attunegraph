@@ -73,6 +73,13 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Changed
 
+- Build one execute-local adjacency index for each Working Graph compilation
+  instead of rescanning every usable assertion for every visited ref. Exact
+  ordering, temporal filtering, budgets, diagnostics, authority, provenance,
+  abstention, and storage validation remain unchanged. Five clean rebuilt
+  AB/BA pairs record paired-median reductions of 9.5% cold and 9.8% warm for
+  `thread-frontier-48`, and 8.0% cold and 9.1% warm for its batch-32 cell;
+  focused-read medians remain near noise and carry no speed claim.
 - Remove the redundant post-freeze unsigned canonical re-encode and SHA-256
   pass while retaining deep frozen-output verification, exact content-ID
   verification, and byte-for-byte full-envelope re-encoding. Five clean

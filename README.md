@@ -374,6 +374,13 @@ its encode and SHA-256 pass. The bounded one-host checkpoint and its explicit
 claim limits are recorded in
 [BENCHMARKS.md](BENCHMARKS.md#post-freeze-canonical-verification-checkpoint-2026-08-01).
 
+Working Graph compilation builds a bounded execute-local adjacency index from
+the already validated, temporally active assertion set. It does not cache or
+trust Store output across reads. Exact output and diagnostics remain pinned by
+the golden corpus and endpoint-direction regression test; the one-host
+measurement-only checkpoint is recorded in
+[BENCHMARKS.md](BENCHMARKS.md#working-graph-adjacency-checkpoint-2026-08-01).
+
 Fixture generation is deterministic. Regeneration must reproduce the checked-in
 inputs, `.atgx` artifacts, manifest hashes, byte counts, record identities, and
 state identities exactly.

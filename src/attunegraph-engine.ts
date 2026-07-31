@@ -465,6 +465,19 @@ function compileWorkingGraph(projection: AttuneGraphStoredProjection, command: R
     .filter((assertion) => ACTIVATION_PREDICATES.includes(assertion.predicate) && assertionActive(assertion, command.now))
     .sort(compareAssertions);
   const assertionBytes = new Map(usable.map((assertion) => [assertion.id, jsonBytes(assertion)]));
+  const adjacency = new Map<string, GraphAssertion[]>();
+  for (const assertion of usable) {
+    const subjectKey = graphRefKey(assertion.subject);
+    const objectKey = graphRefKey(assertion.object);
+    const subjectAssertions = adjacency.get(subjectKey);
+    if (subjectAssertions) subjectAssertions.push(assertion);
+    else adjacency.set(subjectKey, [assertion]);
+    if (objectKey !== subjectKey) {
+      const objectAssertions = adjacency.get(objectKey);
+      if (objectAssertions) objectAssertions.push(assertion);
+      else adjacency.set(objectKey, [assertion]);
+    }
+  }
   const seedBytes = jsonBytes(command.seed);
   const queue: Array<{ ref: GraphRef; depth: number }> = [{ ref: command.seed, depth: 0 }];
   const visited = new Set<string>([graphRefKey(command.seed)]);
@@ -480,7 +493,7 @@ function compileWorkingGraph(projection: AttuneGraphStoredProjection, command: R
     if (!current) break;
     maxDepthReached = Math.max(maxDepthReached, current.depth);
     const currentKey = graphRefKey(current.ref);
-    const reachable = usable.filter((assertion) => graphRefKey(assertion.subject) === currentKey || graphRefKey(assertion.object) === currentKey);
+    const reachable = adjacency.get(currentKey) ?? [];
     if (current.depth >= MAX_WORKING_DEPTH) {
       if (reachable.some((assertion) => !selectedIds.has(assertion.id))) traversalTruncated = true;
       continue;
