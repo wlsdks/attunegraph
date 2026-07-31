@@ -5,9 +5,11 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 const CAPTURE_ENTRYPOINT = fileURLToPath(new URL("./capture-attunegraph-readiness.mjs", import.meta.url));
+
+let repositoryFixture;
 
 function git(repository, arguments_) {
   return execFileSync("git", ["-C", repository, ...arguments_], { encoding: "utf8" }).trim();
@@ -22,18 +24,27 @@ async function initializeRepository(path, filename) {
   git(path, ["commit", "-qm", `add ${filename}`]);
 }
 
-async function createFixture() {
+async function createRepositoryFixture() {
   const directory = await mkdtemp(join(tmpdir(), "attunegraph-capture-v2-"));
   const attunegraph = join(directory, "attunegraph");
   const muse = join(directory, "muse");
-  const output = join(directory, "evidence");
   await Promise.all([mkdir(attunegraph), mkdir(muse)]);
   await initializeRepository(attunegraph, "attunegraph.txt");
   await initializeRepository(muse, "muse.txt");
   git(muse, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", attunegraph, "packages/attunegraph"]);
   git(muse, ["add", ".gitmodules", "packages/attunegraph"]);
   git(muse, ["commit", "-qm", "bind AttuneGraph gitlink"]);
-  return { attunegraph, directory, muse, output };
+  return { attunegraph, directory, muse };
+}
+
+async function createFixture() {
+  const directory = await mkdtemp(join(repositoryFixture.directory, "case-"));
+  return {
+    attunegraph: repositoryFixture.attunegraph,
+    directory,
+    muse: repositoryFixture.muse,
+    output: join(directory, "evidence")
+  };
 }
 
 function capture(fixture, argv = [], overrides = {}) {
@@ -52,12 +63,18 @@ function capture(fixture, argv = [], overrides = {}) {
 
 async function withFixture(callback) {
   const fixture = await createFixture();
-  try {
-    await callback(fixture);
-  } finally {
-    await rm(fixture.directory, { force: true, recursive: true });
-  }
+  await callback(fixture);
 }
+
+beforeAll(async () => {
+  repositoryFixture = await createRepositoryFixture();
+});
+
+afterAll(async () => {
+  if (repositoryFixture) {
+    await rm(repositoryFixture.directory, { force: true, recursive: true });
+  }
+});
 
 describe("AttuneGraph readiness evidence capture v2", () => {
   it("captures an unavailable fixed contract only as local-unattested not-run", async () => {
