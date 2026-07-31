@@ -1,0 +1,32 @@
+{
+  "schema": "attunegraph-performance-regression-policy@1",
+  "policyId": "attunegraph-performance-regression-reference-v1",
+  "approvedAt": "2026-08-01T00:00:00.000Z",
+  "requiredPairCount": 5,
+  "percentileMinimumPairs": {
+    "p50": 5,
+    "p95": 40,
+    "p99": 200
+  },
+  "absoluteMaximumRssBytes": 536870912,
+  "referenceClasses": [
+    {
+      "id": "github-hosted-shared",
+      "kind": "shared-github",
+      "hardLatencyThresholds": {
+        "p50": null,
+        "p95": null,
+        "p99": null
+      }
+    },
+    {
+      "id": "dedicated-unapproved",
+      "kind": "dedicated",
+      "hardLatencyThresholds": {
+        "p50": null,
+        "p95": null,
+        "p99": null
+      }
+    }
+  ]
+}

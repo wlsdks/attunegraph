@@ -301,6 +301,8 @@ pnpm benchmark:scale -- --scale=10000 --profile=local-session-update-comparison 
 pnpm benchmark:agent-decision-read -- --workload=agent-decision-read@1 --warmups=0 --repetitions=1
 pnpm benchmark:performance -- --scale=10000 --profile=local-session-concurrent --concurrency=4 --warmups=1 --repetitions=2
 pnpm benchmark:performance -- --scale=10000 --profile=portable --concurrency=1 --warmups=1 --repetitions=1
+pnpm performance:regression -- --manifest=/absolute/path/performance-regression-manifest.json
+pnpm performance:regression:advisory -- --manifest=/absolute/path/performance-regression-manifest.json
 pnpm readiness:capture -- \
   --name=inspect \
   --output-directory=/absolute/path/readiness-evidence \
@@ -341,6 +343,17 @@ local-session ingestion and portable encode/decode. The qualifier strictly recom
 and ratios from raw samples; it currently reports evidence-integrity and relative-policy status
 but fails closed on full performance qualification until independent absolute throughput/latency
 thresholds are calibrated. See [`PERFORMANCE-QUALIFICATION.md`](PERFORMANCE-QUALIFICATION.md).
+
+`attunegraph-performance-regression@1` compares an exact frozen AB/BA bundle
+against the packaged policy and recomputes paired ratios, absolute deltas,
+eligible percentiles, correctness identity, and RSS policy math. Local bundles
+are explicitly unattested: `claimEligible`, `latencyAuthoritative`,
+`resourceAuthoritative`, `resourceQualified`, and `regressionQualified` remain
+false. The default command therefore exits nonzero. The separately named
+`performance:regression:advisory` command may exit zero only when the packaged
+shared-GitHub policy's structural integrity and self-reported resource checks
+pass; that exit is not a latency, resource, or regression qualification. See
+[BENCHMARKS.md](BENCHMARKS.md#offline-performance-regression-verifier).
 
 Fixture generation is deterministic. Regeneration must reproduce the checked-in
 inputs, `.atgx` artifacts, manifest hashes, byte counts, record identities, and

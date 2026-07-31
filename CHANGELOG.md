@@ -6,6 +6,14 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add the dependency-free `attunegraph-performance-regression@1` offline
+  verifier and CLI. It strictly binds a five-pair AB/BA manifest to exact
+  base/candidate evidence bytes, distinct immutable revision/package
+  identities, correctness output, environment, harness, corpus, contract,
+  chronology, paired ratio/delta recomputation, percentile eligibility, and
+  absolute/half-host RSS policy checks. Unattested bundles remain
+  measurement-only and claim-ineligible; only the explicitly named shared-
+  runner advisory gate can succeed without asserting qualification.
 - Add a strict measurement-only `agent-decision-read@1` benchmark for the
   public Working Graph path. Its isolated generation-8 in-memory workloads
   cover wide-hot and deep-cold/bitemporal complete, partial, and abstained
