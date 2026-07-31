@@ -1,0 +1,86 @@
+{
+  "name": "@attunegraph/core",
+  "version": "0.1.0",
+  "description": "A dependency-free temporal and provenance graph engine for AI agents.",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/wlsdks/attunegraph.git"
+  },
+  "bugs": {
+    "url": "https://github.com/wlsdks/attunegraph/issues"
+  },
+  "homepage": "https://github.com/wlsdks/attunegraph#readme",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md",
+    "CHANGELOG.md",
+    "PORTABLE-FORMAT.md",
+    "LICENSE",
+    "attunegraph-local-runtime-manifest.json"
+  ],
+  "keywords": [
+    "ai-agent",
+    "agent-memory",
+    "graph",
+    "provenance",
+    "temporal-graph",
+    "sqlite"
+  ],
+  "engines": {
+    "node": ">=24.12.0"
+  },
+  "packageManager": "pnpm@10.18.0",
+  "publishConfig": {
+    "access": "public"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./testing": {
+      "types": "./dist/testing.d.ts",
+      "import": "./dist/testing.js"
+    },
+    "./backend": {
+      "types": "./dist/attunegraph-backend.d.ts",
+      "import": "./dist/attunegraph-backend.js"
+    },
+    "./local": {
+      "types": "./dist/local.d.ts",
+      "import": "./dist/local.js"
+    },
+    "./admin": {
+      "types": "./dist/admin.d.ts",
+      "import": "./dist/admin.js"
+    },
+    "./readonly-working-graph": {
+      "types": "./dist/readonly-working-graph.d.ts",
+      "import": "./dist/readonly-working-graph.js"
+    },
+    "./extension-kit": {
+      "types": "./dist/extension-kit.d.ts",
+      "import": "./dist/extension-kit.js"
+    }
+  },
+  "scripts": {
+    "build": "node scripts/clean-dist.mjs && tsc -b tsconfig.build.json --pretty false",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
+    "test": "pnpm build && vitest run",
+    "test:focused": "pnpm build && vitest run src/attunegraph-engine.test.ts",
+    "example": "pnpm build && node examples/basic-agent.mjs",
+    "pack:dry-run": "pnpm build && npm pack --dry-run --json",
+    "fixtures:portable": "pnpm build && node scripts/generate-attunegraph-portable-fixtures.mjs",
+    "verify:local": "pnpm build && node scripts/verify-attunegraph-local.mjs",
+    "verify:portable-fixtures": "node scripts/verify-attunegraph-portable-fixtures.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.0",
+    "@typescript/native": "npm:typescript@^7.0.2",
+    "vitest": "^4.1.10"
+  }
+}
