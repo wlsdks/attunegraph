@@ -236,6 +236,53 @@ report is created with mode `0600`. Windows still uses exclusive creation and
 refuses overwrite, but Node mode bits do not establish Windows ACLs; the host's
 ACL policy governs access there.
 
+## Offline performance regression verifier
+
+`attunegraph-performance-regression@1` is a dependency-free, read-only
+comparison contract for exact frozen base/candidate bundles. The CLI always
+uses the packaged `performance-regression-policy.json`; a caller-selected
+policy is rejected. The manifest must bind exactly five contiguous attempts
+in `AB`, `BA`, `AB`, `BA`, `AB` order, the exact SHA-256 of every bundle and
+the packaged policy, and expected base/candidate commit, tree, lockfile, and
+package identities. Base and candidate commit, tree, and package SHA must each
+differ. Every revision remains clean and fixed across its five measurements.
+
+For each pair the verifier divides candidate latency by base latency, computes
+candidate-minus-base milliseconds, then takes percentiles over those paired
+values. p50 is eligible at five pairs, p95 at 40, and p99 at 200. The packaged
+five-pair policy can therefore compute only p50. A dedicated hard threshold
+must carry a prior approval plus both a maximum ratio and an absolute delta
+floor; the structural policy result fails only when both are exceeded. Shared
+GitHub latency is always advisory. Absolute RSS policy math checks both the
+packaged byte ceiling and 50% of reported host memory.
+
+```sh
+# Qualification gate: v1 local evidence is unattested, so this exits nonzero.
+pnpm performance:regression -- \
+  --manifest=/absolute/evidence/performance-regression-manifest.json
+
+# Explicit shared-runner structural/resource advisory gate only.
+pnpm performance:regression:advisory -- \
+  --manifest=/absolute/evidence/performance-regression-manifest.json
+```
+
+Both commands emit the same honest result. Offline evidence is always
+`evidenceAuthority: "unattested"`, `claimEligible: false`,
+`measurementOnly: true`, `latencyAuthoritative: false`,
+`resourceAuthoritative: false`, `resourceQualified: false`, and
+`regressionQualified: false`. `latencyPolicySatisfied` and
+`resourcePolicySatisfied` expose recomputed policy math without upgrading its
+authority. The default qualification command consequently exits 1. The
+explicit advisory command exits 0 only for the packaged shared-GitHub class
+when strict evidence integrity and the self-reported RSS policy both pass.
+
+V1 deliberately records the remaining limits instead of implying attestation:
+the AB/BA plan and attempt ledger, artifact/output identities, host/runtime/
+harness/corpus identities, and scalar RSS are self-reported. There is no
+signature, append-only precommit service, dedicated-runner attestation, raw
+process-tree RSS trace, or performance SLA. Those gaps keep qualification
+closed even when all structural and policy calculations pass.
+
 ## Portable decoder framing hygiene evidence (2026-08-01)
 
 This slice replaces per-byte `number[]` accumulation and `Uint8Array.from`
