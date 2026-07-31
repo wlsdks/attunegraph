@@ -28,9 +28,13 @@ All notable changes to AttuneGraph are recorded here.
   `openLocalAttuneGraph` semantics and no global pool.
 - Add a separate measurement-only `local-session` scale benchmark profile for
   the fixed 313-shard 10K workload.
-- Add a revision-bound, fail-closed readiness evidence scorer with eight fixed
-  gates, 37 check-bound artifacts, exact Muse gitlink verification, and an
-  explicit no-product-usefulness boundary.
+- Add a revision-bound readiness-integrity scorer with eight gates, 37
+  registry-bound checks, exact Muse gitlink verification, fixed performance
+  parameters, and local-unattested eligibility closure.
+- Add readiness evidence v2 with immutable hashed artifacts, strict unavailable
+  check handling, substitute-command rejection, provenance boundaries, v1
+  rejection, Ubuntu/Windows Node 24.15 tests, and a GitHub producer-contract
+  attestation skeleton.
 - Add a deterministic connected-v2 10K/100K/1M scale benchmark with fixed
   shards, revision/toolchain/corpus binding, raw latency and RSS samples,
   in-memory and local SQLite profiles, safe non-overwriting JSON output, and an
