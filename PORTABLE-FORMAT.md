@@ -141,6 +141,19 @@ projection/content ID, metadata, assertion, snapshot commit, hostile-object, and
 checks. Portable code MUST NOT read scope from the supplied projection first or
 substitute the weaker local Worker parser.
 
+The stored projection may contain a legacy `canonical-projection@1` observation
+or a thread-rooted `canonical-projection@2` observation. V2 carries its exact
+`threadRoot` in canonical bytes and portable re-admission verifies that every
+assertion belongs to that root's undirected connected component. V1 remains
+`legacy-root-unverified` for byte-compatible import; portable v1 transport does
+not upgrade or synthesize graph edges. Each generation is validated independently
+and cannot borrow connectivity from an earlier generation.
+
+The embedded v1 observation ID retains the
+`attunegraph.canonical-projection.v1` hash domain. V2 uses
+`attunegraph.canonical-projection.v2`. This observation-profile distinction does
+not alter the outer `attunegraph.store-projection.v1` or portable record domains.
+
 `projectionId` is the `storeEnvelopeId` validated or minted by that exact admission
 path. The ID is:
 

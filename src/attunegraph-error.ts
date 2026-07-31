@@ -1,5 +1,6 @@
 export type AttuneGraphErrorCode =
   | "CLOSED"
+  | "DISCONNECTED_OBSERVATION"
   | "INVALID_INPUT"
   | "INVALID_SCOPE"
   | "CORRUPT_STORE"

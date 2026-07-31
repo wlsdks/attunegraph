@@ -4,6 +4,13 @@ All notable changes to AttuneGraph are recorded here.
 
 ## [Unreleased]
 
+### Added
+
+- Add `canonical-projection@2` with an explicit `threadRoot` inside the
+  content-addressed observation.
+- Reject disconnected graph debris before any Store read or compare-and-swap,
+  while retaining byte-compatible v1 Store and `.atgx` re-admission.
+
 ### Fixed
 
 - Invoke the pinned TypeScript compiler without platform command shims so builds work on Windows.

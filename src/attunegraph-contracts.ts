@@ -34,7 +34,7 @@ export interface AttuneGraphSourceFreshness {
  * Caller-declared source truth. It is self-consistent evidence, not a claim that
  * a source was independently observed or that the source remains fresh.
  */
-export interface AttuneGraphSourceObservation {
+export interface AttuneGraphSourceObservationV1 {
   readonly schemaVersion: 1;
   /** Caller-declared bounded correlation key. The engine mints observationId. */
   readonly observationKey: string;
@@ -44,11 +44,35 @@ export interface AttuneGraphSourceObservation {
   readonly assertions: readonly GraphAssertion[];
 }
 
-export interface AttuneGraphProjectCommand {
-  readonly operator: "canonical-projection@1";
-  readonly observation: AttuneGraphSourceObservation;
+export interface AttuneGraphSourceObservationV2 {
+  readonly schemaVersion: 2;
+  /** Exact graph root declared by the source; it is not derived from scope text. */
+  readonly threadRoot: GraphRef;
+  /** Caller-declared bounded correlation key. The engine mints observationId. */
+  readonly observationKey: string;
+  readonly scope: AttuneGraphScope;
+  readonly observedAt: string;
+  readonly sourceFreshness: AttuneGraphSourceFreshness;
+  readonly assertions: readonly GraphAssertion[];
+}
+
+export type AttuneGraphSourceObservation =
+  | AttuneGraphSourceObservationV1
+  | AttuneGraphSourceObservationV2;
+
+interface AttuneGraphProjectCommandBase {
   readonly expectedSnapshot?: AttuneGraphSnapshot;
 }
+
+export type AttuneGraphProjectCommand =
+  | (AttuneGraphProjectCommandBase & {
+    readonly operator: "canonical-projection@1";
+    readonly observation: AttuneGraphSourceObservationV1;
+  })
+  | (AttuneGraphProjectCommandBase & {
+    readonly operator: "canonical-projection@2";
+    readonly observation: AttuneGraphSourceObservationV2;
+  });
 
 export interface AttuneGraphExecuteCommand {
   readonly operator: "working-graph@1";
