@@ -298,6 +298,8 @@ pnpm verify:local
 pnpm benchmark:scale -- --scale=10000 --profile=core --warmups=0 --repetitions=1
 pnpm benchmark:scale -- --scale=10000 --profile=local-session --warmups=0 --repetitions=1
 pnpm benchmark:scale -- --scale=10000 --profile=local-session-update-comparison --warmups=0 --repetitions=1
+pnpm benchmark:performance -- --scale=10000 --profile=local-session-concurrent --concurrency=4 --warmups=1 --repetitions=2
+pnpm benchmark:performance -- --scale=10000 --profile=portable --concurrency=1 --warmups=1 --repetitions=1
 pnpm readiness:capture -- \
   --name=inspect \
   --output-directory=/absolute/path/readiness-evidence \
@@ -329,6 +331,13 @@ metadata-only evidence. Freshness is measured through exactly 168 hours from
 the captured command end. Local artifacts produce an unattested integrity
 coverage report with `eligible: false`, never an execution-authentic or
 product-usefulness claim.
+
+Performance measurement and qualification remain separate. Every performance report is
+measurement-only. The checked-in policy requires clean 10K, 100K, and 1M reports for concurrent
+local-session ingestion and portable encode/decode. The qualifier strictly recomputes throughput
+and ratios from raw samples; it currently reports evidence-integrity and relative-policy status
+but fails closed on full performance qualification until independent absolute throughput/latency
+thresholds are calibrated. See [`PERFORMANCE-QUALIFICATION.md`](PERFORMANCE-QUALIFICATION.md).
 
 Fixture generation is deterministic. Regeneration must reproduce the checked-in
 inputs, `.atgx` artifacts, manifest hashes, byte counts, record identities, and

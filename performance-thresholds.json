@@ -1,0 +1,46 @@
+{
+  "schema": "attunegraph-performance-policy@2",
+  "policyId": "attunegraph-external-project-reference-v2",
+  "approvedAt": "2026-08-01T00:00:00.000Z",
+  "maximumEvidenceAgeHours": 168,
+  "referenceEnvironment": {
+    "operatingSystems": ["darwin", "linux"],
+    "architectures": ["arm64", "x64"],
+    "minimumCpuCount": 4,
+    "minimumMemoryBytes": 8589934592,
+    "minimumNode": "24.15.0"
+  },
+  "requiredReports": [
+    { "profile": "local-session-concurrent", "scale": 10000, "concurrency": 4, "minimumRepetitions": 2, "minimumWarmups": 1 },
+    { "profile": "local-session-concurrent", "scale": 100000, "concurrency": 4, "minimumRepetitions": 2, "minimumWarmups": 1 },
+    { "profile": "local-session-concurrent", "scale": 1000000, "concurrency": 4, "minimumRepetitions": 2, "minimumWarmups": 1 },
+    { "profile": "portable", "scale": 10000, "concurrency": 1, "minimumRepetitions": 1, "minimumWarmups": 1 },
+    { "profile": "portable", "scale": 100000, "concurrency": 1, "minimumRepetitions": 1, "minimumWarmups": 1 },
+    { "profile": "portable", "scale": 1000000, "concurrency": 1, "minimumRepetitions": 1, "minimumWarmups": 1 }
+  ],
+  "relativeThresholds": {
+    "minimumConcurrentToSequentialThroughput": 0.8,
+    "maximumConcurrentToSequentialLatency": 1.25,
+    "maximumWarmToColdOpen": 1.5,
+    "maximumDecodeToEncodeLatency": 4,
+    "minimumDecodeToEncodeThroughput": 0.25
+  },
+  "absolutePerformanceThresholds": {
+    "status": "pending-independent-calibration",
+    "requiredSummaryFields": [
+      "local-session-concurrent.candidateAssertionsPerSecond.p50",
+      "local-session-concurrent.candidateIngestionMilliseconds.p95",
+      "local-session-concurrent.candidateProjectionMilliseconds.p95",
+      "portable.encodeBytesPerSecond.p50",
+      "portable.encodeMilliseconds.p95",
+      "portable.decodeBytesPerSecond.p50",
+      "portable.decodeMilliseconds.p95"
+    ]
+  },
+  "resourceCeilingsByScale": {
+    "10000": { "maximumSampledPeakRssBytes": 536870912 },
+    "100000": { "maximumSampledPeakRssBytes": 1073741824 },
+    "1000000": { "maximumSampledPeakRssBytes": 4294967296 }
+  },
+  "absoluteThresholdScope": "resource-ceilings-only"
+}
