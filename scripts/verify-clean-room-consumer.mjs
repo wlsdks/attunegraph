@@ -100,6 +100,10 @@ await assert.rejects(
 );
 
 const { openAttuneGraph } = await import(packageName);
+const {
+  defineAttuneGraphSourceAdapter,
+  projectAttuneGraphSource
+} = await import("@attunegraph/core/source-adapter");
 const { createInMemoryAttuneGraphStore } = await import("@attunegraph/core/testing");
 const scope = { sourceId: "clean-room-consumer", threadId: "release-proof" };
 const threadRoot = { id: "thread:release-proof", kind: "thread" };
@@ -127,11 +131,29 @@ try {
       derivation: { kind: "projection", version: "clean-room@1" }
     }]
   };
-  const first = await graph.project({
-    operator: "canonical-projection@2",
-    observation: {
-      ...observation
+  const adapter = defineAttuneGraphSourceAdapter({
+    capabilities: {
+      maxAssertionsPerExtraction: 4,
+      sourceKinds: ["markdown"],
+      supportsIncremental: false
+    },
+    extract: (hostInput) => ({ assertions: hostInput.assertions }),
+    metadata: {
+      id: "clean.room.markdown",
+      label: "Clean-room Markdown",
+      version: "1"
     }
+  });
+  const firstProjection = await projectAttuneGraphSource({
+    adapter,
+    attuneGraph: graph,
+    correlationKey: "clean-room-release-proof",
+    input: { assertions: observation.assertions },
+    observedAt: now,
+    scope,
+    sourceFreshness: { state: "fresh", observedAt: now },
+    sourceKind: "markdown",
+    threadRoot
   });
   const snapshot = await graph.projectAgainstHead({
     operator: "canonical-projection@2",
@@ -149,7 +171,9 @@ try {
     maxEstimatedTokens: 500
   });
   assert.equal(snapshot.scope.threadId, scope.threadId);
-  assert.equal(first.generation, 1);
+  assert.equal(firstProjection.snapshot.generation, 1);
+  assert.equal(firstProjection.observation.schemaVersion, 2);
+  assert.match(firstProjection.observation.observationKey, /clean\.room\.markdown/);
   assert.equal(snapshot.generation, 2);
   assert.equal(result.status, "complete");
   assert.deepEqual(result.workingGraph.seed, threadRoot);

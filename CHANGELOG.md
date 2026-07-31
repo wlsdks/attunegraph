@@ -6,6 +6,11 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add a zero-dependency `@attunegraph/core/source-adapter` SDK for typed,
+  factory-defined external adapters. It validates bounded metadata,
+  capabilities, host extraction results, exact evidence references, and v2
+  projection inputs before Store I/O, then uses `projectAgainstHead` without
+  parsing or retaining authoritative source bytes.
 - Add a fixed Working Graph golden corpus and strict verifier for ordered
   retrieval, bitemporal filtering, explicit thread roots, freshness, budget
   partials, and abstention.
