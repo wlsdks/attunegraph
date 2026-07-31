@@ -26,6 +26,21 @@ jobs:
       - run: node examples/basic-agent.mjs
       - run: npm pack --dry-run --json
 
+  clean-room-consumer:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.15.0"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm verify:clean-room-consumer
+
   cross-platform:
     runs-on: ${{ matrix.os }}
     strategy:
