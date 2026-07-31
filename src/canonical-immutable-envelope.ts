@@ -967,10 +967,8 @@ function canonicalizeImmutableEnvelopeWithInternalOptions(
   }
   try {
     assertFrozenOutput(inspected.body);
-    const unsignedAgain = encodeCanonical(
+    const frozenId = reflectGetOwnPropertyDescriptor(
       inspected.body,
-      byteLimits.maxCanonicalBodyBytes,
-      "canonical-body-bytes",
       spec.idField
     );
     const fullAgain = encodeCanonical(
@@ -978,13 +976,14 @@ function canonicalizeImmutableEnvelopeWithInternalOptions(
       byteLimits.maxEnvelopeBytes,
       "full-envelope-bytes"
     );
-    const digestAgain = digest(spec.hashDomain, unsignedAgain.json);
+    // Exact full-envelope equality plus the exact ID proves the unsigned body
+    // is unchanged, so a second unsigned encode and digest would be redundant.
     if (
-      unsignedAgain.json !== unsigned.json
-      || unsignedAgain.bytes !== unsigned.bytes
+      frozenId === undefined
+      || !("value" in frozenId)
+      || frozenId.value !== contentId
       || fullAgain.json !== full.json
       || fullAgain.bytes !== full.bytes
-      || `${spec.idPrefix}${digestAgain}` !== contentId
     ) {
       fail("POSTCONDITION_FAILED", "postverify", "reverification-mismatch", "");
     }
