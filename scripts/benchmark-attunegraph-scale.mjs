@@ -282,6 +282,20 @@ function repositoryIdentity() {
   });
 }
 
+export function pnpmVersion(userAgent = process.env.npm_config_user_agent) {
+  const userAgentVersion = /(?:^|\s)pnpm\/([^\s]+)/u.exec(userAgent ?? "")?.[1];
+  if (userAgentVersion !== undefined) {
+    return userAgentVersion;
+  }
+  const command = platform() === "win32"
+    ? [process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", "pnpm --version"]]
+    : ["pnpm", ["--version"]];
+  return execFileSync(command[0], command[1], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"]
+  }).trim();
+}
+
 function hostIdentity() {
   const processors = cpus();
   return Object.freeze({
@@ -290,10 +304,7 @@ function hostIdentity() {
     cpuModel: processors[0]?.model ?? "unknown",
     node: process.versions.node,
     os: platform(),
-    pnpm: execFileSync("pnpm", ["--version"], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"]
-    }).trim(),
+    pnpm: pnpmVersion(),
     sqlite: process.versions.sqlite ?? null,
     totalMemoryBytes: totalmem()
   });

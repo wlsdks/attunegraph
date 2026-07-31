@@ -11,6 +11,7 @@ import {
   createBenchmarkShard,
   inspectBenchmarkCorpus,
   parseBenchmarkArguments,
+  pnpmVersion,
   runScaleBenchmark,
   summarizeBenchmarkSamples
 } from "./benchmark-attunegraph-scale.mjs";
@@ -18,6 +19,10 @@ import { openAttuneGraph } from "@attunegraph/core";
 import { createInMemoryAttuneGraphStore } from "@attunegraph/core/testing";
 
 describe("AttuneGraph scale benchmark CLI", () => {
+  it("reads the pnpm version from the cross-platform package-manager user agent", () => {
+    expect(pnpmVersion("pnpm/10.18.0 npm/? node/v24.15.0 win32 x64")).toBe("10.18.0");
+  });
+
   it("accepts only an explicit supported corpus scale and runtime profile", () => {
     expect(parseBenchmarkArguments([
       "--",
