@@ -11,6 +11,9 @@ All notable changes to AttuneGraph are recorded here.
   capabilities, host extraction results, exact evidence references, and v2
   projection inputs before Store I/O, then uses `projectAgainstHead` without
   parsing or retaining authoritative source bytes.
+- Add a fixed Working Graph golden corpus and strict verifier for ordered
+  retrieval, bitemporal filtering, explicit thread roots, freshness, budget
+  partials, and abstention.
 - Add explicit `projectAgainstHead` optimistic concurrency for agents that
   intend the latest committed head at operation start, using one initial
   validated Store read and one exact CAS without weakening `project` semantics;

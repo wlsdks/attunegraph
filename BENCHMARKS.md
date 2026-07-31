@@ -5,6 +5,13 @@ never prints a readiness score or PASS result. A separate evidence-gated
 qualification process must define and approve thresholds before measurements
 can support a readiness claim.
 
+Retrieval correctness is measured separately by the checked-in
+`attunegraph-working-graph-golden@1` corpus. Run
+`pnpm verify:working-graph-golden` to verify exact ordered results for current
+context, bitemporal exclusion, explicit opaque roots, source freshness,
+token-budget partials, and true empty-result abstention. A perfect result is
+limited to those deterministic cases and does not imply open-world relevance.
+
 ## Corpus contract
 
 `attunegraph-benchmark-corpus@1` has three exact sizes: 10,000, 100,000, and

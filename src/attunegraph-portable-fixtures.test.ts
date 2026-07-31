@@ -302,7 +302,7 @@ describe("production AttuneGraph portable fixture integration", () => {
     ]);
     expect(Object.keys(packageJson.exports).sort()).toEqual([
       ".", "./admin", "./backend", "./extension-kit", "./local",
-      "./readonly-working-graph", "./testing"
+      "./readonly-working-graph", "./source-adapter", "./testing"
     ]);
   });
 });

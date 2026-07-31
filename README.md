@@ -31,6 +31,8 @@ This is a standalone, publishable package boundary. It has:
 - a provider-neutral engine and store capability;
 - an in-memory semantic oracle and a worker-isolated SQLite adapter;
 - a canonical NDJSON portable format with checked-in golden fixtures;
+- a checked-in Working Graph retrieval corpus covering exact roots,
+  bitemporal cutoffs, budget partials, freshness, and abstention;
 - a revision-bound, measurement-only 10K/100K/1M scale harness.
 
 The package is not yet published to a registry and does not provide a hosted
@@ -157,6 +159,12 @@ same snapshot.
 
 The process-local in-memory adapter is intended for tests and experiments. It
 does not provide durable storage.
+
+The deterministic retrieval contract can be replayed independently with
+`pnpm verify:working-graph-golden`. It requires exact ordered assertion IDs,
+terminal status, truncation reasons, and source freshness for every checked-in
+query. Its precision/recall report measures this declared corpus only; it is
+not a claim about open-world semantic relevance or personal usefulness.
 
 ## External source adapters
 
