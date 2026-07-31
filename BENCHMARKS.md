@@ -648,3 +648,64 @@ Every report remains `measurementOnly: true` and `claimEligible: false`. This
 checkpoint supports a bounded hot-path observation on one host. It does not
 establish p95/p99 tails, a production SLA, cross-machine behavior, or a general
 graph-database performance claim.
+
+### Working Graph adjacency checkpoint (2026-08-01)
+
+The Working Graph compiler previously filtered the complete validated active
+assertion array for every visited ref. The candidate builds one execute-local
+adjacency index from that same sorted array, registers each admitted assertion
+under both distinct endpoint keys, and performs direct lookups during traversal.
+The index is discarded after the decision read. Store re-admission, canonical
+verification, temporal filtering, ordering, token and traversal budgets,
+diagnostics, provenance, authority non-inference, and abstention remain on the
+same paths. A regression test pins bidirectional endpoint lookup without
+double-counting one edge.
+
+The base was clean commit
+`ac0c725ce053fd7c71f4d8c494371567d1416f74`, tree
+`4c4caa4855168d8eefca966532c1748a37ed9bdc`. The candidate source was clean
+commit `83042dcdcfdce909dcc24d60728ca1deded1e641`, tree
+`abe689b6698695a2a7d2d56e9d1f995809d52be6`. Both used lockfile SHA-256
+`c696e0cdde9b5e21ee598af9101b4611b5e60e4b75b14c5f5a36e47f8a6338c4`.
+
+Five fresh-process pairs ran in AB, BA, AB, BA, AB order after the benchmark
+rebuilt each checkout. All reports used Node 22.22.0 and pnpm 10.18.0 on macOS
+arm64, Apple M2 Max, 12 logical CPUs, and 68,719,476,736 bytes of memory with
+`--workload=agent-decision-read-scale@1 --warmups=1 --repetitions=5`. Every
+workload, authority sentinel, semantic, canonical-projection, scope-isolation,
+assertion-count, and work anchor matched exactly.
+
+Each percentage is the median of five adjacent candidate-versus-base p50
+reductions, calculated inside each pair before taking the median.
+
+| Cell | Paired cold median reduction | Paired warm median reduction |
+| --- | ---: | ---: |
+| `focused-resumption-16` | 2.1% | 2.2% |
+| `focused-resumption-32` | -1.5% | -0.1% |
+| `focused-resumption-48` | 2.2% | 0.3% |
+| `thread-frontier-16` | 0.8% | 3.5% |
+| `thread-frontier-32` | 4.4% | 0.7% |
+| `thread-frontier-48` | 9.5% | 9.8% |
+| `thread-frontier-48-batch-1` | 6.6% | 6.8% |
+| `thread-frontier-48-batch-4` | 9.6% | 6.4% |
+| `thread-frontier-48-batch-32` | 8.0% | 9.1% |
+
+Every one of the five `thread-frontier-48` pairs improved in both phases. The
+focused cells remain near noise and this checkpoint makes no focused-read speed
+claim: individual pairs included a 6.7% cold and 7.1% warm regression in
+`focused-resumption-48`, while their paired medians remained close to neutral.
+
+The evidence SHA-256 values are:
+
+| Pair order | Base report SHA-256 | Candidate report SHA-256 |
+| --- | --- | --- |
+| AB | `12d099351d459211f991ac6edc432e1cf676521e44e49c7212e8af74cdca3765` | `aebdbdeab71e5deb7d74f6facbf21c779dc4c66477ad61e2995d870a2872b3eb` |
+| BA | `b06fe7d7d5201b88f58c0040635fd17f2e2535cf46f1f1d973114e56a95eb92c` | `ab6b71086c5893b486e1b1107c41f418348541eb98f82361eaef6161e458e24b` |
+| AB | `e1bf1f11ae93c57cdbbb6930e95f59b1bc7244821592a7c9dc547e05f03352b6` | `05ee4893f7c6d17991bf275398503dc5c13332bcbc1e42408e6c3ce6aabfd4ba` |
+| BA | `8e16283ae2db7464b4319bcd3629cd1488d639851aeb1793c0ebb01651e2e8a7` | `1d4800deb0f3f7588039504e4e955ccf238ebd2bfdaf2b45426a0ca19f741419` |
+| AB | `f4a5509215e98aa81fb972fcad7473b4689e8dfa2ed2d3c32454cea93dbf623f` | `235af0c3e9e71945654edd6a91a6f56e662d7596c4823d905fe636d4da0a6b89` |
+
+Every report remains `measurementOnly: true` and `claimEligible: false`. This
+checkpoint supports a bounded one-host frontier hot-path observation only. It
+does not establish p95/p99 tails, a production SLA, cross-machine behavior,
+SQLite/backend performance, or a general graph-database performance claim.
