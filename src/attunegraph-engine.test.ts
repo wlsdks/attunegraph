@@ -429,6 +429,29 @@ it("deduplicates assertions, reports a depth-boundary omission, and abstains onl
   expect(abstained.workingGraph.diagnostics.truncationReasons).toEqual([]);
 });
 
+it("indexes both endpoint directions without double-counting one edge", async () => {
+  const seed = { id: SCOPE.threadId, kind: "thread" as const };
+  const edge = assertion("two-endpoints");
+  const attuneGraph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createInMemoryAttuneGraphStore()
+  });
+  await attuneGraph.project(command("two-endpoints", { assertions: [edge] }));
+
+  const result = await attuneGraph.execute({
+    operator: "working-graph@1",
+    seed,
+    now: NOW,
+    maxEstimatedTokens: 4_000
+  });
+
+  expect(result.workingGraph.assertions.map((item) => item.id)).toEqual(["two-endpoints"]);
+  expect(result.workingGraph.refs).toEqual([edge.subject, seed]);
+  expect(result.workingGraph.diagnostics.consideredAssertions).toBe(1);
+  expect(result.workingGraph.diagnostics.visitedRefs).toBe(2);
+  await attuneGraph.close();
+});
+
 it("admits only complete thread-rooted observations before any Store operation", async () => {
   const backing = new InMemoryAttuneGraphStoreBackend();
   let reads = 0;
