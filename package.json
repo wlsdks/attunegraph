@@ -84,6 +84,7 @@
     "example": "pnpm build && node examples/basic-agent.mjs",
     "pack:dry-run": "pnpm build && npm pack --dry-run --json",
     "verify:clean-room-consumer": "node scripts/verify-clean-room-consumer.mjs",
+    "verify:working-graph-golden": "pnpm build && node scripts/verify-working-graph-golden-corpus.mjs",
     "readiness:score": "node scripts/score-attunegraph-readiness.mjs",
     "fixtures:portable": "pnpm build && node scripts/generate-attunegraph-portable-fixtures.mjs",
     "verify:local": "pnpm build && node scripts/verify-attunegraph-local.mjs",

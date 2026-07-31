@@ -1,0 +1,378 @@
+{
+  "schema": "attunegraph-working-graph-golden@1",
+  "cases": [
+    {
+      "name": "connected-current-context",
+      "scope": {
+        "sourceId": "golden.current",
+        "threadId": "scope-current"
+      },
+      "threadRoot": {
+        "id": "thread:current",
+        "kind": "thread"
+      },
+      "observedAt": "2026-07-31T12:00:00.000Z",
+      "sourceFreshness": {
+        "state": "fresh",
+        "observedAt": "2026-07-31T12:00:00.000Z"
+      },
+      "assertions": [
+        {
+          "schemaVersion": 1,
+          "id": "current-link",
+          "subject": {
+            "id": "artifact:runbook",
+            "kind": "artifact"
+          },
+          "predicate": "LINKED_TO",
+          "object": {
+            "id": "thread:current",
+            "kind": "thread"
+          },
+          "epistemicClass": "source-observed",
+          "sourceRefs": [
+            {
+              "id": "runbook",
+              "namespace": "golden.fixture"
+            }
+          ],
+          "recordedAt": "2026-07-31T09:00:00.000Z",
+          "derivation": {
+            "kind": "projection",
+            "version": "golden@1"
+          }
+        },
+        {
+          "schemaVersion": 1,
+          "id": "current-next",
+          "subject": {
+            "id": "artifact:comparison-draft",
+            "kind": "artifact"
+          },
+          "predicate": "NEXT_STEP_FOR",
+          "object": {
+            "id": "thread:current",
+            "kind": "thread"
+          },
+          "epistemicClass": "user-asserted",
+          "sourceRefs": [
+            {
+              "id": "next-step",
+              "namespace": "golden.fixture"
+            }
+          ],
+          "recordedAt": "2026-07-31T09:00:00.000Z",
+          "derivation": {
+            "kind": "projection",
+            "version": "golden@1"
+          }
+        },
+        {
+          "schemaVersion": 1,
+          "id": "current-support",
+          "subject": {
+            "id": "artifact:runbook",
+            "kind": "artifact"
+          },
+          "predicate": "SUPPORTED_BY",
+          "object": {
+            "id": "evidence:source",
+            "kind": "evidence"
+          },
+          "epistemicClass": "deterministic-derived",
+          "sourceRefs": [
+            {
+              "id": "source",
+              "namespace": "golden.fixture"
+            }
+          ],
+          "recordedAt": "2026-07-31T09:00:00.000Z",
+          "derivation": {
+            "kind": "rule",
+            "version": "golden@1"
+          }
+        }
+      ],
+      "queries": [
+        {
+          "name": "retrieves-exact-connected-context",
+          "seed": {
+            "id": "thread:current",
+            "kind": "thread"
+          },
+          "now": "2026-07-31T12:00:00.000Z",
+          "maxEstimatedTokens": 4000,
+          "expected": {
+            "status": "complete",
+            "assertionIds": [
+              "current-link",
+              "current-next",
+              "current-support"
+            ],
+            "truncationReasons": [],
+            "sourceFreshnessState": "fresh"
+          }
+        }
+      ]
+    },
+    {
+      "name": "bitemporal-cutoff",
+      "scope": {
+        "sourceId": "golden.temporal",
+        "threadId": "scope-temporal"
+      },
+      "threadRoot": {
+        "id": "thread:temporal",
+        "kind": "thread"
+      },
+      "observedAt": "2026-07-31T12:00:00.000Z",
+      "sourceFreshness": {
+        "state": "fresh",
+        "observedAt": "2026-07-31T12:00:00.000Z"
+      },
+      "assertions": [
+        {
+          "schemaVersion": 1,
+          "id": "temporal-active",
+          "subject": {
+            "id": "artifact:active",
+            "kind": "artifact"
+          },
+          "predicate": "LINKED_TO",
+          "object": {
+            "id": "thread:temporal",
+            "kind": "thread"
+          },
+          "epistemicClass": "source-observed",
+          "sourceRefs": [
+            {
+              "id": "active",
+              "namespace": "golden.fixture"
+            }
+          ],
+          "recordedAt": "2026-07-31T08:00:00.000Z",
+          "derivation": {
+            "kind": "projection",
+            "version": "golden@1"
+          }
+        },
+        {
+          "schemaVersion": 1,
+          "id": "temporal-expired",
+          "subject": {
+            "id": "artifact:expired",
+            "kind": "artifact"
+          },
+          "predicate": "LINKED_TO",
+          "object": {
+            "id": "thread:temporal",
+            "kind": "thread"
+          },
+          "epistemicClass": "source-observed",
+          "sourceRefs": [
+            {
+              "id": "expired",
+              "namespace": "golden.fixture"
+            }
+          ],
+          "validTo": "2026-07-31T09:00:00.000Z",
+          "recordedAt": "2026-07-31T08:00:00.000Z",
+          "derivation": {
+            "kind": "projection",
+            "version": "golden@1"
+          }
+        },
+        {
+          "schemaVersion": 1,
+          "id": "temporal-future-world",
+          "subject": {
+            "id": "artifact:future-world",
+            "kind": "artifact"
+          },
+          "predicate": "LINKED_TO",
+          "object": {
+            "id": "thread:temporal",
+            "kind": "thread"
+          },
+          "epistemicClass": "source-observed",
+          "sourceRefs": [
+            {
+              "id": "future-world",
+              "namespace": "golden.fixture"
+            }
+          ],
+          "validFrom": "2026-07-31T11:00:00.000Z",
+          "recordedAt": "2026-07-31T08:00:00.000Z",
+          "derivation": {
+            "kind": "projection",
+            "version": "golden@1"
+          }
+        },
+        {
+          "schemaVersion": 1,
+          "id": "temporal-future-record",
+          "subject": {
+            "id": "artifact:future-record",
+            "kind": "artifact"
+          },
+          "predicate": "LINKED_TO",
+          "object": {
+            "id": "thread:temporal",
+            "kind": "thread"
+          },
+          "epistemicClass": "source-observed",
+          "sourceRefs": [
+            {
+              "id": "future-record",
+              "namespace": "golden.fixture"
+            }
+          ],
+          "recordedAt": "2026-07-31T11:00:00.000Z",
+          "derivation": {
+            "kind": "projection",
+            "version": "golden@1"
+          }
+        },
+        {
+          "schemaVersion": 1,
+          "id": "temporal-superseded",
+          "subject": {
+            "id": "artifact:superseded",
+            "kind": "artifact"
+          },
+          "predicate": "LINKED_TO",
+          "object": {
+            "id": "thread:temporal",
+            "kind": "thread"
+          },
+          "epistemicClass": "source-observed",
+          "sourceRefs": [
+            {
+              "id": "superseded",
+              "namespace": "golden.fixture"
+            }
+          ],
+          "recordedAt": "2026-07-31T08:00:00.000Z",
+          "supersededAt": "2026-07-31T09:00:00.000Z",
+          "derivation": {
+            "kind": "projection",
+            "version": "golden@1"
+          }
+        }
+      ],
+      "queries": [
+        {
+          "name": "filters-world-and-record-time",
+          "seed": {
+            "id": "thread:temporal",
+            "kind": "thread"
+          },
+          "now": "2026-07-31T10:00:00.000Z",
+          "maxEstimatedTokens": 4000,
+          "expected": {
+            "status": "complete",
+            "assertionIds": [
+              "temporal-active"
+            ],
+            "truncationReasons": [],
+            "sourceFreshnessState": "fresh"
+          }
+        }
+      ]
+    },
+    {
+      "name": "explicit-root-and-abstention",
+      "scope": {
+        "sourceId": "golden.root",
+        "threadId": "scope-label-is-not-root"
+      },
+      "threadRoot": {
+        "id": "thread:opaque-root",
+        "kind": "thread"
+      },
+      "observedAt": "2026-07-31T12:00:00.000Z",
+      "sourceFreshness": {
+        "state": "stale",
+        "observedAt": "2026-07-31T11:00:00.000Z"
+      },
+      "assertions": [
+        {
+          "schemaVersion": 1,
+          "id": "opaque-root-link",
+          "subject": {
+            "id": "artifact:opaque",
+            "kind": "artifact"
+          },
+          "predicate": "LINKED_TO",
+          "object": {
+            "id": "thread:opaque-root",
+            "kind": "thread"
+          },
+          "epistemicClass": "source-observed",
+          "sourceRefs": [
+            {
+              "id": "opaque",
+              "namespace": "golden.fixture"
+            }
+          ],
+          "recordedAt": "2026-07-31T10:00:00.000Z",
+          "derivation": {
+            "kind": "projection",
+            "version": "golden@1"
+          }
+        }
+      ],
+      "queries": [
+        {
+          "name": "uses-declared-root-not-scope-text",
+          "seed": {
+            "id": "thread:opaque-root",
+            "kind": "thread"
+          },
+          "now": "2026-07-31T12:00:00.000Z",
+          "maxEstimatedTokens": 4000,
+          "expected": {
+            "status": "complete",
+            "assertionIds": [
+              "opaque-root-link"
+            ],
+            "truncationReasons": [],
+            "sourceFreshnessState": "stale"
+          }
+        },
+        {
+          "name": "abstains-for-scope-label",
+          "seed": {
+            "id": "scope-label-is-not-root",
+            "kind": "thread"
+          },
+          "now": "2026-07-31T12:00:00.000Z",
+          "maxEstimatedTokens": 4000,
+          "expected": {
+            "status": "abstained",
+            "assertionIds": [],
+            "truncationReasons": [],
+            "sourceFreshnessState": "stale"
+          }
+        },
+        {
+          "name": "reports-budget-abstention-as-partial",
+          "seed": {
+            "id": "thread:opaque-root",
+            "kind": "thread"
+          },
+          "now": "2026-07-31T12:00:00.000Z",
+          "maxEstimatedTokens": 1,
+          "expected": {
+            "status": "partial",
+            "assertionIds": [],
+            "truncationReasons": [
+              "token-budget"
+            ],
+            "sourceFreshnessState": "stale"
+          }
+        }
+      ]
+    }
+  ]
+}
