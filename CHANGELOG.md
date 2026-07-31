@@ -10,8 +10,10 @@ All notable changes to AttuneGraph are recorded here.
   public Working Graph path. Its isolated generation-8 in-memory workloads
   cover wide-hot and deep-cold/bitemporal complete, partial, and abstained
   decisions in independent single-seed batches of 1, 4, and 32, with exact
-  counters, output bytes, semantic anchors, provenance, and honest tail
-  ineligibility.
+  counters, output bytes, semantic anchors, provenance, packed-entry smoke,
+  separate Engine-sum versus harness-wall timing, unambiguous head/input
+  assertion counts, fixed `@1` semantic expectations, independently supplied
+  provenance authority verification, and honest tail ineligibility.
 - Add revision-bound external-project performance measurement and qualification: bounded
   concurrent local-session ingestion with alternating same-run baselines, portable `.atgx`
   encode/materialize/decode metrics, cold/warm SQLite session open, process peak RSS, and a

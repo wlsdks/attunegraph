@@ -1,8 +1,17 @@
 import { spawnSync } from "node:child_process";
-import { access, mkdtemp, readFile, realpath, rm, stat } from "node:fs/promises";
+import {
+  access,
+  mkdir,
+  mkdtemp,
+  readFile,
+  realpath,
+  rm,
+  stat,
+  writeFile
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
@@ -11,8 +20,12 @@ import {
   parseAgentDecisionReadArguments,
   runAgentDecisionReadBenchmark,
   runAgentDecisionReadWorkload,
-  validateAgentDecisionReadReport
+  validateAgentDecisionReadReportSchema,
+  verifyAgentDecisionReadReportAuthority
 } from "./benchmark-attunegraph-agent-decision-read.mjs";
+
+const packageRoot = fileURLToPath(new URL("../", import.meta.url));
+const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
 
 describe("AttuneGraph agent decision-read benchmark", () => {
   it("accepts only the explicit bounded workload configuration", () => {
@@ -53,9 +66,11 @@ describe("AttuneGraph agent decision-read benchmark", () => {
       schema: "attunegraph-agent-decision-read-workload@1",
       generation: 8,
       now: "2026-08-01T12:00:00.000Z",
+      projectedAssertionInputs: 1_232,
       sha256: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
-      totalAssertions: 154
+      uniqueAssertionsAtHead: 154
     });
+    expect(first).not.toHaveProperty("totalAssertions");
     expect(first.cases.map((entry) => ({
       expectedStatus: entry.expected.status,
       name: entry.name,
@@ -186,8 +201,9 @@ describe("AttuneGraph agent decision-read benchmark", () => {
       schema: "attunegraph-agent-decision-read-benchmark@1",
       workload: {
         generation: 8,
+        projectedAssertionInputs: 1_232,
         sha256: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
-        totalAssertions: 154
+        uniqueAssertionsAtHead: 154
       }
     });
     expect(Object.keys(report).sort()).toEqual([
@@ -225,6 +241,11 @@ describe("AttuneGraph agent decision-read benchmark", () => {
         p95: null,
         p99: null
       },
+      batchWallMilliseconds: {
+        sampleCount: 1,
+        p95: null,
+        p99: null
+      },
       executeMilliseconds: {
         sampleCount: 1,
         p95: null,
@@ -240,6 +261,11 @@ describe("AttuneGraph agent decision-read benchmark", () => {
       },
       name: "wide-hot-complete-32"
     });
+    expect(report.metrics.cases.every((entry) =>
+      entry.batchWallMilliseconds.samples.every((wall, index) =>
+        wall >= entry.batchExecuteMilliseconds.samples[index]
+      )
+    )).toBe(true);
     expect(report.metrics.cases[5].emittedAssertions.samples).toEqual(
       Array.from({ length: 32 }, () => 0)
     );
@@ -247,17 +273,158 @@ describe("AttuneGraph agent decision-read benchmark", () => {
       Array.from({ length: 4 }, () => 2)
     );
     expect(report.metrics.cases[4].estimatedTokens.sampleCount).toBe(4);
-    expect(validateAgentDecisionReadReport(report)).toBe(report);
+    expect(validateAgentDecisionReadReportSchema(report)).toBe(report);
 
     const extraConfiguration = structuredClone(report);
     extraConfiguration.configuration.extra = true;
-    expect(() => validateAgentDecisionReadReport(extraConfiguration))
+    expect(() => validateAgentDecisionReadReportSchema(extraConfiguration))
       .toThrow(/configuration/u);
 
     const inventedTail = structuredClone(report);
     inventedTail.metrics.cases[0].executeMilliseconds.p95 = 1;
-    expect(() => validateAgentDecisionReadReport(inventedTail))
+    expect(() => validateAgentDecisionReadReportSchema(inventedTail))
       .toThrow(/p95/u);
+
+    const droppedCounterSample = structuredClone(report);
+    droppedCounterSample.metrics.cases[2].consideredAssertions.samples.pop();
+    droppedCounterSample.metrics.cases[2].consideredAssertions.sampleCount -= 1;
+    expect(() => validateAgentDecisionReadReportSchema(droppedCounterSample))
+      .toThrow(/sampleCount/u);
+
+    const contradictoryBatchExecute = structuredClone(report);
+    const batchExecute = contradictoryBatchExecute.metrics.cases[0]
+      .batchExecuteMilliseconds;
+    batchExecute.samples[0] += 1;
+    batchExecute.min = batchExecute.samples[0];
+    batchExecute.max = batchExecute.samples[0];
+    batchExecute.p50 = batchExecute.samples[0];
+    expect(() => validateAgentDecisionReadReportSchema(contradictoryBatchExecute))
+      .toThrow(/batchExecuteMilliseconds/u);
+
+    const impossibleBatchWall = structuredClone(report);
+    const batchWall = impossibleBatchWall.metrics.cases[0].batchWallMilliseconds;
+    batchWall.samples[0] = 0;
+    batchWall.min = 0;
+    batchWall.max = 0;
+    batchWall.p50 = 0;
+    expect(() => validateAgentDecisionReadReportSchema(impossibleBatchWall))
+      .toThrow(/batchWallMilliseconds/u);
+
+    const gamedCounter = structuredClone(report);
+    const considered = gamedCounter.metrics.cases[0].consideredAssertions;
+    considered.samples[0] = 999_999;
+    considered.min = 999_999;
+    considered.max = 999_999;
+    considered.p50 = 999_999;
+    expect(() => validateAgentDecisionReadReportSchema(gamedCounter))
+      .toThrow(/consideredAssertions/u);
+
+    const arbitraryAnchor = structuredClone(report);
+    arbitraryAnchor.correctness.cases[0].anchorSha256 = `sha256:${"0".repeat(64)}`;
+    expect(() => validateAgentDecisionReadReportSchema(arbitraryAnchor))
+      .toThrow(/correctness.cases\[0\]/u);
+
+    const arbitraryHead = structuredClone(report);
+    arbitraryHead.correctness.cases[0].latestHeadCommitId =
+      `attunegraph-commit:attunegraph-observation:${"0".repeat(64)}`;
+    expect(() => validateAgentDecisionReadReportSchema(arbitraryHead))
+      .toThrow(/correctness.cases\[0\]/u);
+
+    const contradictoryArgv = structuredClone(report);
+    contradictoryArgv.configuration.argv = [
+      "--workload=agent-decision-read@1",
+      "--warmups=1",
+      "--repetitions=1"
+    ];
+    expect(() => validateAgentDecisionReadReportSchema(contradictoryArgv))
+      .toThrow(/configuration.argv/u);
+
+    const programmatic = structuredClone(report);
+    programmatic.configuration.argv = [];
+    expect(validateAgentDecisionReadReportSchema(programmatic)).toBe(programmatic);
+
+    const expectedAuthority = {
+      configuration: {
+        argv: [...report.configuration.argv],
+        repetitions: report.configuration.repetitions,
+        warmups: report.configuration.warmups,
+        workload: report.configuration.workload
+      },
+      host: structuredClone(report.host),
+      repository: structuredClone(report.repository)
+    };
+    expect(verifyAgentDecisionReadReportAuthority(report, expectedAuthority)).toBe(report);
+    const contradictoryRepository = structuredClone(report);
+    contradictoryRepository.repository.commit = "0".repeat(40);
+    expect(validateAgentDecisionReadReportSchema(contradictoryRepository))
+      .toBe(contradictoryRepository);
+    expect(() => verifyAgentDecisionReadReportAuthority(
+      contradictoryRepository,
+      expectedAuthority
+    )).toThrow(/repository authority/u);
+  });
+
+  it("imports the decision-read entry from the packed package", async () => {
+    const directory = await realpath(
+      await mkdtemp(join(tmpdir(), "attunegraph-agent-decision-read-pack-"))
+    );
+    const consumer = join(directory, "consumer");
+    try {
+      const packed = spawnSync(npmCommand, [
+        "pack",
+        "--json",
+        "--pack-destination",
+        directory
+      ], {
+        cwd: packageRoot,
+        encoding: "utf8",
+        timeout: 30_000
+      });
+      expect(packed.status, packed.stderr).toBe(0);
+      const artifacts = JSON.parse(packed.stdout);
+      expect(artifacts).toHaveLength(1);
+
+      await mkdir(consumer, { mode: 0o700 });
+      await writeFile(
+        join(consumer, "package.json"),
+        JSON.stringify({ name: "attunegraph-benchmark-pack-smoke", private: true }),
+        { mode: 0o600 }
+      );
+      const installed = spawnSync(npmCommand, [
+        "install",
+        "--offline",
+        "--ignore-scripts",
+        "--no-audit",
+        "--no-fund",
+        join(directory, artifacts[0].filename)
+      ], {
+        cwd: consumer,
+        encoding: "utf8",
+        timeout: 30_000
+      });
+      expect(installed.status, installed.stderr).toBe(0);
+
+      const installedEntry = join(
+        consumer,
+        "node_modules",
+        "@attunegraph",
+        "core",
+        "scripts",
+        "benchmark-attunegraph-agent-decision-read.mjs"
+      );
+      const imported = spawnSync(process.execPath, [
+        "--input-type=module",
+        "--eval",
+        `await import(${JSON.stringify(pathToFileURL(installedEntry).href)})`
+      ], {
+        cwd: consumer,
+        encoding: "utf8",
+        timeout: 10_000
+      });
+      expect(imported.status, imported.stderr).toBe(0);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
   });
 
   it("writes only a new owner-private out-of-repository report", async () => {
@@ -284,9 +451,11 @@ describe("AttuneGraph agent decision-read benchmark", () => {
       ], { encoding: "utf8", timeout: 15_000 });
       expect(valid.status, valid.stderr).toBe(0);
       expect(valid.stdout).toBe("");
-      expect((await stat(outputPath)).mode & 0o777).toBe(0o600);
+      if (process.platform !== "win32") {
+        expect((await stat(outputPath)).mode & 0o777).toBe(0o600);
+      }
       const report = JSON.parse(await readFile(outputPath, "utf8"));
-      expect(validateAgentDecisionReadReport(report)).toBe(report);
+      expect(validateAgentDecisionReadReportSchema(report)).toBe(report);
 
       const overwrite = spawnSync(process.execPath, [
         fileURLToPath(new URL("./benchmark-attunegraph-agent-decision-read.mjs", import.meta.url)),

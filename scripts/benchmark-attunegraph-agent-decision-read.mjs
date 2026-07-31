@@ -10,7 +10,6 @@ import { pathToFileURL } from "node:url";
 
 import { openAttuneGraph } from "@attunegraph/core";
 import { createInMemoryAttuneGraphStore } from "@attunegraph/core/testing";
-import { pnpmVersion } from "./benchmark-attunegraph-scale.mjs";
 
 const WORKLOAD = "agent-decision-read@1";
 const NOW = "2026-08-01T12:00:00.000Z";
@@ -23,6 +22,68 @@ const SUPPORTED_ARGUMENTS = new Set([
   "warmups",
   "workload"
 ]);
+const EXPECTED_CASE_SEMANTICS = Object.freeze({
+  "deep-cold-complete-1": Object.freeze({
+    anchorSha256: "sha256:95831f25a66a7fe2c0f1f15942d2656db97c2a214f778b182b075ada22bc2117",
+    consideredAssertions: 2,
+    emittedAssertions: 2,
+    estimatedTokens: 204,
+    latestHeadCommitId: "attunegraph-commit:attunegraph-observation:ca42f591dab167f5505a588210dfaa8ddf66744644b8a4ae537531443772f4fa",
+    maxDepthReached: 2,
+    outputBytes: 1_442,
+    visitedRefs: 3
+  }),
+  "deep-cold-traversal-partial-4": Object.freeze({
+    anchorSha256: "sha256:b271c1f84385f49e2ebbb167f381711ce8c81a880596af8147e775a6ae9e4711",
+    consideredAssertions: 2,
+    emittedAssertions: 2,
+    estimatedTokens: 206,
+    latestHeadCommitId: "attunegraph-commit:attunegraph-observation:3807006ace371c716d69202578070c829802d79141edf42b9e9e9885c77678b0",
+    maxDepthReached: 2,
+    outputBytes: 1_480,
+    visitedRefs: 3
+  }),
+  "deep-cold-valid-time-abstain-32": Object.freeze({
+    anchorSha256: "sha256:fb3435136b631c3ee4583b352f319e81f511d56cae702d3dafddf1ba8ed72c74",
+    consideredAssertions: 0,
+    emittedAssertions: 0,
+    estimatedTokens: 15,
+    latestHeadCommitId: "attunegraph-commit:attunegraph-observation:66b59efb0911af7e4b621862b9924bcc86da70efeeaeb5a55611d517471e1bb3",
+    maxDepthReached: 0,
+    outputBytes: 634,
+    visitedRefs: 1
+  }),
+  "wide-hot-complete-1": Object.freeze({
+    anchorSha256: "sha256:52fcd01322e77218e772794bbc5caf50d1c61b7f7adce70f4800a5a1e368e8f3",
+    consideredAssertions: 32,
+    emittedAssertions: 32,
+    estimatedTokens: 3_015,
+    latestHeadCommitId: "attunegraph-commit:attunegraph-observation:51f7ed899516bf7e021bb3e15f6e73b8b17899e9488149116d5c200ae4816e97",
+    maxDepthReached: 2,
+    outputBytes: 13_737,
+    visitedRefs: 33
+  }),
+  "wide-hot-complete-32": Object.freeze({
+    anchorSha256: "sha256:b1b842cfca395afde617bd6a99a55b317e66232c22504a148f901c8222cb08f5",
+    consideredAssertions: 32,
+    emittedAssertions: 32,
+    estimatedTokens: 3_047,
+    latestHeadCommitId: "attunegraph-commit:attunegraph-observation:5b706e56257a539a42c312f82c7433f748ec6c88c9565b9aeb0bcf06907e66fa",
+    maxDepthReached: 2,
+    outputBytes: 13_900,
+    visitedRefs: 33
+  }),
+  "wide-hot-token-partial-4": Object.freeze({
+    anchorSha256: "sha256:f390a3c014b1b48c85e97a33e4ae28c92ad3f1f3982d06890888d8e48d2ce9da",
+    consideredAssertions: 32,
+    emittedAssertions: 2,
+    estimatedTokens: 202,
+    latestHeadCommitId: "attunegraph-commit:attunegraph-observation:4dbbc90c9b4c28d37563f6afc87f7b2d1bdb8cd3729337c3be2291815ddd4e8d",
+    maxDepthReached: 2,
+    outputBytes: 1_453,
+    visitedRefs: 3
+  })
+});
 
 function sha256(value) {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
@@ -234,7 +295,7 @@ export function createAgentDecisionReadWorkload() {
     sourceFreshness: "stale"
   }));
 
-  const totalAssertions = cases.reduce(
+  const uniqueAssertionsAtHead = cases.reduce(
     (sum, entry) => sum + entry.command.observation.assertions.length,
     0
   );
@@ -242,8 +303,9 @@ export function createAgentDecisionReadWorkload() {
     cases: Object.freeze(cases),
     generation: GENERATION,
     now: NOW,
+    projectedAssertionInputs: uniqueAssertionsAtHead * GENERATION,
     schema: "attunegraph-agent-decision-read-workload@1",
-    totalAssertions
+    uniqueAssertionsAtHead
   });
   return Object.freeze({
     ...identity,
@@ -303,7 +365,7 @@ async function runWorkloadCase(entry) {
       throw new Error(`decision-read case ${entry.name} did not reach generation ${GENERATION.toString()}`);
     }
     const samples = [];
-    const batchStartedAt = performance.now();
+    const batchWallStartedAt = performance.now();
     for (let seedIndex = 0; seedIndex < entry.seeds.length; seedIndex += 1) {
       const startedAt = performance.now();
       const result = await graph.execute({
@@ -352,10 +414,36 @@ async function runWorkloadCase(entry) {
         visitedRefs: anchor.visitedRefs
       }));
     }
-    const batchExecuteMilliseconds = performance.now() - batchStartedAt;
+    const batchWallMilliseconds = performance.now() - batchWallStartedAt;
+    const batchExecuteMilliseconds = samples.reduce(
+      (sum, sample) => sum + sample.executeMilliseconds,
+      0
+    );
+    const anchorSha256 = sha256(JSON.stringify(
+      samples.map((sample) => sample.anchorSha256)
+    ));
+    const expectedSemantics = EXPECTED_CASE_SEMANTICS[entry.name];
+    if (
+      expectedSemantics === undefined
+      || anchorSha256 !== expectedSemantics.anchorSha256
+      || snapshot.commitId !== expectedSemantics.latestHeadCommitId
+      || samples.some((sample) => [
+        "consideredAssertions",
+        "emittedAssertions",
+        "estimatedTokens",
+        "maxDepthReached",
+        "outputBytes",
+        "visitedRefs"
+      ].some((key) => sample[key] !== expectedSemantics[key]))
+    ) {
+      throw new Error(
+        `decision-read semantic contract diverged for ${entry.name}; bump the workload version`
+      );
+    }
     return Object.freeze({
-      anchorSha256: sha256(JSON.stringify(samples.map((sample) => sample.anchorSha256))),
+      anchorSha256,
       batchExecuteMilliseconds,
+      batchWallMilliseconds,
       commitId: snapshot.commitId,
       generation: snapshot.generation,
       name: entry.name,
@@ -434,6 +522,18 @@ function hostIdentity() {
   });
 }
 
+function pnpmVersion(userAgent = process.env.npm_config_user_agent) {
+  const userAgentVersion = /(?:^|\s)pnpm\/([^\s]+)/u.exec(userAgent ?? "")?.[1];
+  if (userAgentVersion !== undefined) return userAgentVersion;
+  const command = platform() === "win32"
+    ? [process.env.ComSpec ?? "cmd.exe", ["/d", "/s", "/c", "pnpm --version"]]
+    : ["pnpm", ["--version"]];
+  return execFileSync(command[0], command[1], {
+    encoding: "utf8",
+    stdio: ["ignore", "pipe", "ignore"]
+  }).trim();
+}
+
 function validateBenchmarkOptions(options) {
   if (
     options === null
@@ -466,9 +566,10 @@ function reportWorkload(workload) {
     }))),
     generation: workload.generation,
     now: workload.now,
+    projectedAssertionInputs: workload.projectedAssertionInputs,
     schema: workload.schema,
     sha256: workload.sha256,
-    totalAssertions: workload.totalAssertions
+    uniqueAssertionsAtHead: workload.uniqueAssertionsAtHead
   });
 }
 
@@ -476,11 +577,14 @@ function reportCorrectness(workload, runs) {
   const cases = workload.cases.map((entry, caseIndex) => {
     const observed = runs.map((run) => run.cases[caseIndex]);
     const first = observed[0];
+    const expectedSemantics = EXPECTED_CASE_SEMANTICS[entry.name];
     const anchorsMatch = observed.every((item) =>
       item.anchorSha256 === first.anchorSha256
       && item.commitId === first.commitId
       && item.generation === GENERATION
-    );
+    )
+      && first.anchorSha256 === expectedSemantics.anchorSha256
+      && first.commitId === expectedSemantics.latestHeadCommitId;
     return Object.freeze({
       anchorSha256: first.anchorSha256,
       anchorsMatch,
@@ -519,6 +623,10 @@ function reportMetrics(workload, runs, independentRuns) {
       return Object.freeze({
         batchExecuteMilliseconds: summarizeDistribution(
           observed.map((item) => item.batchExecuteMilliseconds),
+          independentRuns
+        ),
+        batchWallMilliseconds: summarizeDistribution(
+          observed.map((item) => item.batchWallMilliseconds),
           independentRuns
         ),
         consideredAssertions: summarizeDistribution(
@@ -599,7 +707,7 @@ export async function runAgentDecisionReadBenchmark(options, runtime = {}) {
     schema: "attunegraph-agent-decision-read-benchmark@1",
     workload: reportWorkload(workload)
   });
-  return validateAgentDecisionReadReport(report);
+  return validateAgentDecisionReadReportSchema(report);
 }
 
 function invalidReport(label) {
@@ -659,7 +767,7 @@ function validateDistribution(value, label, independentRuns) {
   return distribution;
 }
 
-export function validateAgentDecisionReadReport(value) {
+export function validateAgentDecisionReadReportSchema(value) {
   const report = exactRecord(value, "root", [
     "claimEligible",
     "configuration",
@@ -690,7 +798,10 @@ export function validateAgentDecisionReadReport(value) {
     "warmups",
     "workload"
   ]);
-  exactStringArray(configuration.argv, "configuration.argv");
+  const configurationArgv = exactStringArray(
+    configuration.argv,
+    "configuration.argv"
+  );
   if (
     configuration.decisionSemantics !== "independent-single-seed-execute-batch"
     || configuration.monotonicClock !== "performance.now"
@@ -703,6 +814,21 @@ export function validateAgentDecisionReadReport(value) {
   exactInteger(configuration.warmups, "configuration.warmups");
   if (configuration.repetitions > 10 || configuration.warmups > 5) {
     invalidReport("configuration bounds");
+  }
+  if (configurationArgv.length > 0) {
+    let parsedArguments;
+    try {
+      parsedArguments = parseAgentDecisionReadArguments(configurationArgv);
+    } catch {
+      invalidReport("configuration.argv");
+    }
+    if (
+      parsedArguments.workload !== configuration.workload
+      || parsedArguments.warmups !== configuration.warmups
+      || parsedArguments.repetitions !== configuration.repetitions
+    ) {
+      invalidReport("configuration.argv");
+    }
   }
   const tailEligibility = exactRecord(
     configuration.tailEligibility,
@@ -752,9 +878,10 @@ export function validateAgentDecisionReadReport(value) {
     "cases",
     "generation",
     "now",
+    "projectedAssertionInputs",
     "schema",
     "sha256",
-    "totalAssertions"
+    "uniqueAssertionsAtHead"
   ]);
   if (JSON.stringify(workload) !== JSON.stringify(expectedWorkload)) {
     invalidReport("workload");
@@ -785,6 +912,7 @@ export function validateAgentDecisionReadReport(value) {
       "observedTruncationReasons"
     ]);
     const workloadCase = workload.cases[index];
+    const expectedSemantics = EXPECTED_CASE_SEMANTICS[entry.name];
     if (
       entry.name !== workloadCase.name
       || entry.expectedSourceFreshness !== workloadCase.expected.sourceFreshness
@@ -792,9 +920,9 @@ export function validateAgentDecisionReadReport(value) {
       || entry.generation !== workload.generation
       || entry.anchorsMatch !== true
       || entry.executions !== workloadCase.seedCount * configuration.repetitions
-      || !/^sha256:[a-f0-9]{64}$/u.test(entry.anchorSha256)
-      || !/^attunegraph-commit:attunegraph-observation:[a-f0-9]{64}$/u
-        .test(entry.latestHeadCommitId)
+      || expectedSemantics === undefined
+      || entry.anchorSha256 !== expectedSemantics.anchorSha256
+      || entry.latestHeadCommitId !== expectedSemantics.latestHeadCommitId
       || JSON.stringify(exactStringArray(
         entry.observedSourceFreshness,
         `correctness.cases[${index}].observedSourceFreshness`
@@ -825,6 +953,7 @@ export function validateAgentDecisionReadReport(value) {
   for (let index = 0; index < metrics.cases.length; index += 1) {
     const entry = exactRecord(metrics.cases[index], `metrics.cases[${index}]`, [
       "batchExecuteMilliseconds",
+      "batchWallMilliseconds",
       "consideredAssertions",
       "emittedAssertions",
       "estimatedTokens",
@@ -840,6 +969,7 @@ export function validateAgentDecisionReadReport(value) {
     }
     for (const key of [
       "batchExecuteMilliseconds",
+      "batchWallMilliseconds",
       "consideredAssertions",
       "emittedAssertions",
       "estimatedTokens",
@@ -855,13 +985,56 @@ export function validateAgentDecisionReadReport(value) {
         configuration.repetitions
       );
     }
+    const expectedSeedSamples = workload.cases[index].seedCount
+      * configuration.repetitions;
     if (
       entry.batchExecuteMilliseconds.sampleCount !== configuration.repetitions
+      || entry.batchWallMilliseconds.sampleCount !== configuration.repetitions
       || entry.preparationMilliseconds.sampleCount !== configuration.repetitions
-      || entry.executeMilliseconds.sampleCount
-        !== workload.cases[index].seedCount * configuration.repetitions
+      || [
+        "consideredAssertions",
+        "emittedAssertions",
+        "estimatedTokens",
+        "executeMilliseconds",
+        "maxDepthReached",
+        "outputBytes",
+        "visitedRefs"
+      ].some((key) => entry[key].sampleCount !== expectedSeedSamples)
     ) {
       invalidReport(`metrics.cases[${index}].sampleCount`);
+    }
+    const expectedSemantics = EXPECTED_CASE_SEMANTICS[entry.name];
+    for (const key of [
+      "consideredAssertions",
+      "emittedAssertions",
+      "estimatedTokens",
+      "maxDepthReached",
+      "outputBytes",
+      "visitedRefs"
+    ]) {
+      if (entry[key].samples.some((sample) => sample !== expectedSemantics[key])) {
+        invalidReport(`metrics.cases[${index}].${key}`);
+      }
+    }
+    const expectedBatchExecute = Array.from(
+      { length: configuration.repetitions },
+      (_, repetition) => entry.executeMilliseconds.samples
+        .slice(
+          repetition * workload.cases[index].seedCount,
+          (repetition + 1) * workload.cases[index].seedCount
+        )
+        .reduce((sum, sample) => sum + sample, 0)
+    );
+    if (
+      JSON.stringify(entry.batchExecuteMilliseconds.samples)
+        !== JSON.stringify(expectedBatchExecute)
+    ) {
+      invalidReport(`metrics.cases[${index}].batchExecuteMilliseconds`);
+    }
+    if (entry.batchWallMilliseconds.samples.some(
+      (sample, repetition) => sample < expectedBatchExecute[repetition]
+    )) {
+      invalidReport(`metrics.cases[${index}].batchWallMilliseconds`);
     }
   }
 
@@ -870,6 +1043,54 @@ export function validateAgentDecisionReadReport(value) {
     || new Date(report.observedAt).toISOString() !== report.observedAt
   ) {
     invalidReport("observedAt");
+  }
+  return value;
+}
+
+export function verifyAgentDecisionReadReportAuthority(value, expected) {
+  const report = validateAgentDecisionReadReportSchema(value);
+  const authority = exactRecord(expected, "authority", [
+    "configuration",
+    "host",
+    "repository"
+  ]);
+  const configuration = exactRecord(authority.configuration, "authority.configuration", [
+    "argv",
+    "repetitions",
+    "warmups",
+    "workload"
+  ]);
+  exactStringArray(configuration.argv, "authority.configuration.argv");
+  const host = exactRecord(authority.host, "authority.host", [
+    "arch",
+    "cpuCount",
+    "cpuModel",
+    "node",
+    "os",
+    "pnpm",
+    "totalMemoryBytes"
+  ]);
+  const repository = exactRecord(authority.repository, "authority.repository", [
+    "clean",
+    "commit",
+    "lockfileSha256",
+    "tree"
+  ]);
+  if (JSON.stringify(report.repository) !== JSON.stringify(repository)) {
+    invalidReport("repository authority");
+  }
+  if (JSON.stringify(report.host) !== JSON.stringify(host)) {
+    invalidReport("host authority");
+  }
+  if (
+    JSON.stringify({
+      argv: report.configuration.argv,
+      repetitions: report.configuration.repetitions,
+      warmups: report.configuration.warmups,
+      workload: report.configuration.workload
+    }) !== JSON.stringify(configuration)
+  ) {
+    invalidReport("configuration authority");
   }
   return value;
 }
@@ -964,7 +1185,24 @@ async function main() {
   if (options.outputPath !== undefined) {
     await validateOutputPath(options.outputPath);
   }
-  const report = await runAgentDecisionReadBenchmark(options, { argv });
+  const repository = repositoryIdentity();
+  const host = hostIdentity();
+  const report = await runAgentDecisionReadBenchmark(options, {
+    argv,
+    host,
+    repository
+  });
+  const endRepository = repositoryIdentity();
+  verifyAgentDecisionReadReportAuthority(report, {
+    configuration: {
+      argv,
+      repetitions: options.repetitions,
+      warmups: options.warmups,
+      workload: options.workload
+    },
+    host,
+    repository: endRepository
+  });
   const document = `${JSON.stringify(report, null, 2)}\n`;
   if (options.outputPath === undefined) {
     process.stdout.write(document);

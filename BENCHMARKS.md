@@ -171,8 +171,12 @@ pnpm benchmark:agent-decision-read -- \
 
 The workload creates a fresh isolated in-memory Store for every warmup and
 measured repetition, projects each case through generation 8 with
-`projectAgainstHead`, then times only the latest-head `execute` calls.
-Preparation latency is reported separately. Six cases cover this exact matrix:
+`projectAgainstHead`, then measures the latest-head `execute` calls.
+`executeMilliseconds` wraps only each Engine call and
+`batchExecuteMilliseconds` is the sum of those per-seed durations.
+`batchWallMilliseconds` covers the whole seed loop, including correctness
+checks, hashing, serialization, and sample allocation. Preparation latency is
+reported separately. Six cases cover this exact matrix:
 
 | Case | Scenario | Independent executes | Expected outcome |
 | --- | --- | ---: | --- |
@@ -185,12 +189,38 @@ Preparation latency is reported separately. Six cases cover this exact matrix:
 
 The 1/4/32 values are batches of independent single-seed Engine `execute`
 calls. They are not one multi-seed query and do not claim the separate data-
-store query seed ceiling. The report retains per-seed and whole-batch latency,
-considered/visited/emitted assertions, estimated tokens, maximum depth, output
-bytes, status, freshness, truncation reasons, deterministic semantic hashes,
-and exact generation/latest-commit invariants. Repository commit/tree/clean
-state, lockfile hash, host, Node, pnpm, arguments, and workload hash bind the
-measurement configuration.
+store query seed ceiling. The latest generation contains 154 unique assertion
+IDs across the six case heads. Preparation submits those case assertion sets
+for all eight generations, so the report separately records 1,232 projected
+assertion inputs; 154 must not be read as the total preparation work. The
+report retains per-seed Engine latency, summed execute duration, whole-loop
+wall time, considered/visited/emitted assertions, estimated tokens, maximum
+depth, output bytes, status, freshness, truncation reasons, deterministic
+semantic hashes, and exact generation/latest-commit invariants. Repository
+commit/tree/clean state, lockfile hash, host, Node, pnpm, arguments, and
+workload hash bind the measurement configuration. Non-empty CLI arguments are
+parsed again by the strict validator and must agree with the workload, warmup,
+and repetition fields. An empty argument list denotes a programmatic run whose
+validated options remain authoritative.
+
+The `agent-decision-read@1` schema pins every case's semantic hash, latest-head
+commit ID, and non-timing counter/output-byte samples. A deliberate Engine
+semantic change therefore requires a new workload version rather than silently
+rewriting the meaning of `@1`. `validateAgentDecisionReadReportSchema` checks
+that fixed semantic contract and report self-consistency. It does not claim
+that self-reported provenance is externally authoritative.
+`verifyAgentDecisionReadReportAuthority` additionally requires caller-supplied
+expected repository, host, and CLI configuration values. The CLI captures
+the initial repository identity and host, uses them to construct the report,
+then recaptures the repository identity after measurement. It requires exact
+initial/end commit, tree, clean state, and lockfile equality through the
+authority verifier before emitting evidence.
+
+The decision-read script is included in the npm tarball and its module boundary
+is import-smoked from an installed package. Authoritative benchmark execution
+is supported only from a clean source checkout because revision provenance
+reads that checkout's Git commit/tree/status and lockfile. Importability must
+not be read as support for producing authoritative evidence from `node_modules`.
 
 The CLI allows at most 10 independent fresh-Store repetitions. Consequently
 p95 and p99 are `null`: the schema requires at least 20 and 100 independent
@@ -198,7 +228,10 @@ repetitions respectively. Thirty-two within-batch seed executions cannot
 unlock tail eligibility. Per-seed p50 and raw distributions are workload
 measurements only, not latency SLOs, production tails, or cross-machine claims.
 Invalid, duplicate, unbounded, relative-output, in-repository, symlink-parent,
-and overwrite configurations fail before evidence is written.
+and overwrite configurations fail before evidence is written. On POSIX, a new
+report is created with mode `0600`. Windows still uses exclusive creation and
+refuses overwrite, but Node mode bits do not establish Windows ACLs; the host's
+ACL policy governs access there.
 
 ## Portable decoder framing hygiene evidence (2026-08-01)
 
