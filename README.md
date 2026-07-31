@@ -366,6 +366,14 @@ shared-GitHub policy's structural integrity and self-reported resource checks
 pass; that exit is not a latency, resource, or regression qualification. See
 [BENCHMARKS.md](BENCHMARKS.md#offline-performance-regression-verifier).
 
+Canonical-envelope admission performs one unsigned encode and digest, then
+freezes and recursively verifies the detached output before re-encoding the
+complete signed envelope byte-for-byte. Exact full-envelope equality plus the
+exact frozen content ID proves the unsigned body is unchanged without repeating
+its encode and SHA-256 pass. The bounded one-host checkpoint and its explicit
+claim limits are recorded in
+[BENCHMARKS.md](BENCHMARKS.md#post-freeze-canonical-verification-checkpoint-2026-08-01).
+
 Fixture generation is deterministic. Regeneration must reproduce the checked-in
 inputs, `.atgx` artifacts, manifest hashes, byte counts, record identities, and
 state identities exactly.
