@@ -23,6 +23,12 @@ weight only when every check passes. The integrity threshold is 90 plus passing 
 semantic safety, and persistence/portability. It is reported separately from eligibility.
 `local-unattested` evidence always returns `eligible: false`.
 
+`pnpm verify:working-graph-golden` is the checked-in corpus verifier substrate for
+`working-graph-golden-corpus` and `abstention`. Its one stdout report is not two readiness
+artifacts and cannot be reused or relabeled. Those registry entries remain unavailable until a
+fixed adapter emits one strict, distinct output envelope per check. The corpus result is never
+organic usefulness evidence.
+
 ## Evidence v2
 
 `attunegraph-readiness-evidence@2` contains the clean exact AttuneGraph and Muse commit/tree

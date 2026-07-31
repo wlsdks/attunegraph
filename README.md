@@ -31,6 +31,8 @@ This is a standalone, publishable package boundary. It has:
 - a provider-neutral engine and store capability;
 - an in-memory semantic oracle and a worker-isolated SQLite adapter;
 - a canonical NDJSON portable format with checked-in golden fixtures;
+- a checked-in Working Graph retrieval corpus covering exact roots,
+  bitemporal cutoffs, budget partials, freshness, and abstention;
 - a revision-bound, measurement-only 10K/100K/1M scale harness.
 
 The package is not yet published to a registry and does not provide a hosted
@@ -142,8 +144,27 @@ observation whose `observedAt` precedes the active head. This prevents a delayed
 older source read from replacing newer truth; equal-instant distinct writes
 retain the existing expected-snapshot CAS semantics.
 
+The Engine exposes two intentionally distinct write expectations. `project`
+keeps caller-held optimistic concurrency: after the first generation, a
+distinct observation must carry the exact `expectedSnapshot`. Agents that mean
+"apply this observation to whichever committed head exists when this operation
+starts" may instead call `projectAgainstHead`. That method validates the input
+before Store I/O, performs one complete validated head read on the uncontended
+path, and uses that exact internally read snapshot for one compare-and-swap. It
+does not retry the write, weaken delayed-observation rejection, or provide
+last-write-wins. A CAS miss performs one additional validated read solely to
+distinguish an identical concurrent winner from a conflict: a different winner
+returns `SNAPSHOT_CONFLICT`, while an exact winner or replay converges on the
+same snapshot.
+
 The process-local in-memory adapter is intended for tests and experiments. It
 does not provide durable storage.
+
+The deterministic retrieval contract can be replayed independently with
+`pnpm verify:working-graph-golden`. It requires exact ordered assertion IDs,
+terminal status, truncation reasons, and source freshness for every checked-in
+query. Its precision/recall report measures this declared corpus only; it is
+not a claim about open-world semantic relevance or personal usefulness.
 
 ## Durable local store
 
@@ -162,6 +183,10 @@ const attuneGraph = await openLocalAttuneGraph({
 const current = await attuneGraph.head();
 // A distinct projection supplies `current` as expectedSnapshot; an identical
 // observation is replay-safe and returns the same generation.
+
+// When the caller explicitly wants the latest committed head at operation
+// start, avoid a separate head round trip without weakening atomic CAS.
+await attuneGraph.projectAgainstHead(nextProjection);
 await attuneGraph.close();
 ```
 
@@ -257,6 +282,7 @@ pnpm verify:portable-fixtures
 pnpm verify:local
 pnpm benchmark:scale -- --scale=10000 --profile=core --warmups=0 --repetitions=1
 pnpm benchmark:scale -- --scale=10000 --profile=local-session --warmups=0 --repetitions=1
+pnpm benchmark:scale -- --scale=10000 --profile=local-session-update-comparison --warmups=0 --repetitions=1
 pnpm readiness:capture -- \
   --name=inspect \
   --output-directory=/absolute/path/readiness-evidence \

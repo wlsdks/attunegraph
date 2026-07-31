@@ -12,6 +12,7 @@ import type {
   AttuneGraph,
   AttuneGraphExecuteCommand,
   AttuneGraphOperatorResult,
+  AttuneGraphProjectAgainstHeadCommand,
   AttuneGraphProjectCommand,
   AttuneGraphScope,
   AttuneGraphSnapshot,
@@ -284,6 +285,37 @@ function normalizeProject(command: AttuneGraphProjectCommand, expectedScope: Att
   return Object.freeze({ expectedSnapshot, observation });
 }
 
+function normalizeProjectAgainstHead(
+  command: AttuneGraphProjectAgainstHeadCommand,
+  expectedScope: AttuneGraphScope
+): NormalizedObservation {
+  const input = record(
+    command,
+    "projectAgainstHead command",
+    ["operator", "observation"],
+    ["operator", "observation"]
+  );
+  if (input.operator !== "canonical-projection@1" && input.operator !== "canonical-projection@2") {
+    attuneGraphError("UNSUPPORTED_OPERATOR", "projectAgainstHead supports canonical-projection@1 and canonical-projection@2");
+  }
+  const observation = normalizeObservation(
+    input.observation,
+    expectedScope,
+    input.operator === "canonical-projection@2" ? 2 : 1
+  );
+  if (
+    observation.canonicalProjection.length > MAX_STORED_PROJECTION_TEXT
+    || Buffer.byteLength(observation.canonicalProjection, "utf8")
+      > MAX_STORED_PROJECTION_BYTES
+  ) {
+    attuneGraphError(
+      "INVALID_INPUT",
+      "source observation exceeds the stored projection text budget"
+    );
+  }
+  return observation;
+}
+
 function safeRef(value: unknown): GraphRef {
   const input = record(value, "working graph seed", ["id", "kind"], ["id", "kind"]);
   const validKinds = ["thread", "artifact", "evidence", "delivery", "outcome", "policy", "decision", "action"];
@@ -486,6 +518,103 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
       throw new AttuneGraphError("STORE_FAILURE", "store read failed", { cause });
     }
   };
+  const projectObservation = async (
+    observation: NormalizedObservation,
+    expectation:
+      | { readonly mode: "against-head" }
+      | { readonly mode: "exact"; readonly snapshot: AttuneGraphSnapshot | undefined }
+  ): Promise<AttuneGraphSnapshot> => {
+    const current = await read();
+    if (current?.observationId === observation.observationId) {
+      if (
+        current.canonicalProjection !== observation.canonicalProjection
+        || current.projectionFingerprint !== observation.observationId
+      ) {
+        attuneGraphError(
+          "CORRUPT_STORE",
+          "stored replay does not match the requested canonical projection"
+        );
+      }
+      return freezeSnapshot(current.snapshot);
+    }
+    if (
+      current
+      && Date.parse(observation.observedAt) < Date.parse(current.observedAt)
+    ) {
+      attuneGraphError(
+        "SNAPSHOT_CONFLICT",
+        "source observation must not precede the current projection"
+      );
+    }
+    if (
+      expectation.mode === "exact"
+      && expectation.snapshot
+      && !sameSnapshot(current?.snapshot, expectation.snapshot)
+    ) {
+      attuneGraphError("SNAPSHOT_CONFLICT", "expected snapshot is stale");
+    }
+    if (
+      expectation.mode === "exact"
+      && !expectation.snapshot
+      && current
+    ) {
+      attuneGraphError(
+        "SNAPSHOT_CONFLICT",
+        "expectedSnapshot is required after the first projection"
+      );
+    }
+    const expectedSnapshot = expectation.mode === "against-head"
+      ? current?.snapshot
+      : expectation.snapshot;
+    const nextSnapshot = Object.freeze({
+      schemaVersion: 1 as const,
+      scope: Object.freeze({ ...openedScope }),
+      generation: (current?.snapshot.generation ?? 0) + 1,
+      commitId: `attunegraph-commit:${observation.observationId}`
+    });
+    const proposed: AttuneGraphStoredProjection = Object.freeze({
+      schemaVersion: 1,
+      snapshot: nextSnapshot,
+      observationId: observation.observationId,
+      canonicalProjection: observation.canonicalProjection,
+      projectionFingerprint: observation.observationId,
+      observedAt: observation.observedAt,
+      sourceFreshness: Object.freeze({ ...observation.sourceFreshness }),
+      assertions: Object.freeze([...observation.assertions])
+    });
+    let committed: unknown;
+    try {
+      committed = await backend.compareAndSwap(
+        openedScope,
+        expectedSnapshot,
+        proposed
+      );
+    } catch (cause) {
+      throw new AttuneGraphError(
+        "STORE_FAILURE",
+        "store compare-and-swap failed",
+        { cause }
+      );
+    }
+    if (committed !== true && committed !== false) {
+      attuneGraphError(
+        "CORRUPT_STORE",
+        "store compare-and-swap returned a non-boolean result"
+      );
+    }
+    if (!committed) {
+      const winner = await read();
+      if (
+        winner?.observationId === observation.observationId
+        && winner.canonicalProjection === observation.canonicalProjection
+        && winner.projectionFingerprint === observation.observationId
+      ) {
+        return freezeSnapshot(winner.snapshot);
+      }
+      attuneGraphError("SNAPSHOT_CONFLICT", "projection compare-and-swap failed");
+    }
+    return freezeSnapshot(nextSnapshot);
+  };
   return Object.freeze({
     head(): Promise<AttuneGraphSnapshot | undefined> {
       return begin(async () => {
@@ -498,40 +627,18 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
     project(command: AttuneGraphProjectCommand): Promise<AttuneGraphSnapshot> {
       return begin(async () => {
         const normalized = normalizeProject(command, openedScope);
-        const current = await read();
-        if (current?.observationId === normalized.observation.observationId) {
-          if (current.canonicalProjection !== normalized.observation.canonicalProjection || current.projectionFingerprint !== normalized.observation.observationId) attuneGraphError("CORRUPT_STORE", "stored replay does not match the requested canonical projection");
-          return freezeSnapshot(current.snapshot);
-        }
-        if (
-          current
-          && Date.parse(normalized.observation.observedAt)
-            < Date.parse(current.observedAt)
-        ) {
-          attuneGraphError(
-            "SNAPSHOT_CONFLICT",
-            "source observation must not precede the current projection"
-          );
-        }
-        if (normalized.expectedSnapshot && !sameSnapshot(current?.snapshot, normalized.expectedSnapshot)) attuneGraphError("SNAPSHOT_CONFLICT", "expected snapshot is stale");
-        if (!normalized.expectedSnapshot && current) attuneGraphError("SNAPSHOT_CONFLICT", "expectedSnapshot is required after the first projection");
-        const nextSnapshot = Object.freeze({ schemaVersion: 1 as const, scope: Object.freeze({ ...openedScope }), generation: (current?.snapshot.generation ?? 0) + 1, commitId: `attunegraph-commit:${normalized.observation.observationId}` });
-        const proposed: AttuneGraphStoredProjection = Object.freeze({ schemaVersion: 1, snapshot: nextSnapshot, observationId: normalized.observation.observationId, canonicalProjection: normalized.observation.canonicalProjection, projectionFingerprint: normalized.observation.observationId, observedAt: normalized.observation.observedAt, sourceFreshness: Object.freeze({ ...normalized.observation.sourceFreshness }), assertions: Object.freeze([...normalized.observation.assertions]) });
-        let committed: unknown;
-        try { committed = await backend.compareAndSwap(openedScope, normalized.expectedSnapshot, proposed); } catch (cause) { throw new AttuneGraphError("STORE_FAILURE", "store compare-and-swap failed", { cause }); }
-        if (committed !== true && committed !== false) attuneGraphError("CORRUPT_STORE", "store compare-and-swap returned a non-boolean result");
-        if (!committed) {
-          const winner = await read();
-          if (
-            winner?.observationId === normalized.observation.observationId
-            && winner.canonicalProjection === normalized.observation.canonicalProjection
-            && winner.projectionFingerprint === normalized.observation.observationId
-          ) {
-            return freezeSnapshot(winner.snapshot);
-          }
-          attuneGraphError("SNAPSHOT_CONFLICT", "projection compare-and-swap failed");
-        }
-        return freezeSnapshot(nextSnapshot);
+        return projectObservation(normalized.observation, {
+          mode: "exact",
+          snapshot: normalized.expectedSnapshot
+        });
+      });
+    },
+    projectAgainstHead(
+      command: AttuneGraphProjectAgainstHeadCommand
+    ): Promise<AttuneGraphSnapshot> {
+      return begin(async () => {
+        const observation = normalizeProjectAgainstHead(command, openedScope);
+        return projectObservation(observation, { mode: "against-head" });
       });
     },
     execute(command: AttuneGraphExecuteCommand): Promise<AttuneGraphOperatorResult> {

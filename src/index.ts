@@ -17,6 +17,7 @@ export type {
   AttuneGraph,
   AttuneGraphExecuteCommand,
   AttuneGraphOperatorResult,
+  AttuneGraphProjectAgainstHeadCommand,
   AttuneGraphProjectCommand,
   AttuneGraphScope,
   AttuneGraphSnapshot,
