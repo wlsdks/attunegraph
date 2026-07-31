@@ -208,6 +208,74 @@ function dataValue(record: DataRecord, key: string): unknown {
   return record.descriptors[key]?.value;
 }
 
+function rejectNestedProxy(
+  value: unknown,
+  label: string,
+  seen = new WeakSet<object>()
+): void {
+  if (typeof value !== "object" || value === null) return;
+  if (nodeTypes.isProxy(value)) {
+    adapterError("INVALID_EXTRACTION", `${label} must not contain proxies`);
+  }
+  if (seen.has(value)) return;
+  seen.add(value);
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  for (const [key, descriptor] of Object.entries(descriptors)) {
+    if ("value" in descriptor) {
+      rejectNestedProxy(descriptor.value, `${label}.${key}`, seen);
+    }
+  }
+  for (const symbol of Object.getOwnPropertySymbols(value)) {
+    const descriptor = Object.getOwnPropertyDescriptor(value, symbol);
+    if (descriptor && "value" in descriptor) {
+      rejectNestedProxy(descriptor.value, `${label}.[symbol]`, seen);
+    }
+  }
+}
+
+function copyAssertion(assertion: GraphAssertion): GraphAssertion {
+  return {
+    derivation: { ...assertion.derivation },
+    epistemicClass: assertion.epistemicClass,
+    id: assertion.id,
+    object: { ...assertion.object },
+    predicate: assertion.predicate,
+    recordedAt: assertion.recordedAt,
+    schemaVersion: 1,
+    sourceRefs: assertion.sourceRefs.map((sourceRef) => ({ ...sourceRef })),
+    subject: { ...assertion.subject },
+    ...(assertion.supersededAt
+      ? { supersededAt: assertion.supersededAt }
+      : {}),
+    ...(assertion.validFrom ? { validFrom: assertion.validFrom } : {}),
+    ...(assertion.validTo ? { validTo: assertion.validTo } : {})
+  };
+}
+
+function freezeAssertion(assertion: GraphAssertion): GraphAssertion {
+  const copy = copyAssertion(assertion);
+  Object.freeze(copy.derivation);
+  Object.freeze(copy.object);
+  for (const sourceRef of copy.sourceRefs) Object.freeze(sourceRef);
+  Object.freeze(copy.sourceRefs);
+  Object.freeze(copy.subject);
+  return Object.freeze(copy);
+}
+
+function copyObservation(
+  observation: AttuneGraphSourceObservationV2
+): AttuneGraphSourceObservationV2 {
+  return {
+    assertions: observation.assertions.map(copyAssertion),
+    observationKey: observation.observationKey,
+    observedAt: observation.observedAt,
+    schemaVersion: 2,
+    scope: { ...observation.scope },
+    sourceFreshness: { ...observation.sourceFreshness },
+    threadRoot: { ...observation.threadRoot }
+  };
+}
+
 function safeText(
   value: unknown,
   label: string,
@@ -544,23 +612,11 @@ function normalizeExtraction(
       "source adapter extraction exceeds its declared assertion limit"
     );
   }
+  rejectNestedProxy(assertions, "source adapter extraction.assertions");
   try {
-    return normalizeGraphAssertionBatch(assertions).map((assertion) => ({
-      derivation: { ...assertion.derivation },
-      epistemicClass: assertion.epistemicClass,
-      id: assertion.id,
-      object: { ...assertion.object },
-      predicate: assertion.predicate,
-      recordedAt: assertion.recordedAt,
-      schemaVersion: 1,
-      sourceRefs: assertion.sourceRefs.map((sourceRef) => ({ ...sourceRef })),
-      subject: { ...assertion.subject },
-      ...(assertion.supersededAt
-        ? { supersededAt: assertion.supersededAt }
-        : {}),
-      ...(assertion.validFrom ? { validFrom: assertion.validFrom } : {}),
-      ...(assertion.validTo ? { validTo: assertion.validTo } : {})
-    }));
+    return Object.freeze(
+      normalizeGraphAssertionBatch(assertions).map(freezeAssertion)
+    );
   } catch (cause) {
     if (cause instanceof AttuneGraphDataError) {
       adapterError(
@@ -592,7 +648,6 @@ async function extractObservation(
   try {
     extraction = await registered.extract(input.extractionInput, context);
   } catch (cause) {
-    if (cause instanceof AttuneGraphSourceAdapterError) throw cause;
     throw new AttuneGraphSourceAdapterError(
       "EXTRACTION_FAILED",
       "source adapter extraction failed",
@@ -612,15 +667,15 @@ async function extractObservation(
   if (Array.from(observationKey).length > MAX_OBSERVATION_KEY_CHARACTERS) {
     adapterError("INVALID_INPUT", "source adapter observation key exceeds its bound");
   }
-  return {
+  return Object.freeze({
     assertions,
     observationKey,
     observedAt: input.observedAt,
     schemaVersion: 2,
-    scope: { ...input.scope },
-    sourceFreshness: { ...input.sourceFreshness },
-    threadRoot: { ...input.threadRoot }
-  };
+    scope: Object.freeze({ ...input.scope }),
+    sourceFreshness: Object.freeze({ ...input.sourceFreshness }),
+    threadRoot: Object.freeze({ ...input.threadRoot })
+  });
 }
 
 export function defineAttuneGraphSourceAdapter<
@@ -691,7 +746,7 @@ export async function projectAttuneGraphSource<
   );
   const observation = await extractObservation(normalized);
   const snapshot = await projectAgainstHead({
-    observation,
+    observation: copyObservation(observation),
     operator: "canonical-projection@2"
   });
   return Object.freeze({ observation, snapshot });

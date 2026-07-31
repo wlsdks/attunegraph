@@ -216,6 +216,23 @@ describe("source observation building", () => {
     expect(JSON.stringify(observation)).not.toContain(request.input.rawText);
     expect(observation.scope).not.toBe(request.scope);
     expect(observation.threadRoot).not.toBe(request.threadRoot);
+    expect([
+      observation,
+      observation.assertions,
+      observation.assertions[0],
+      observation.assertions[0]?.derivation,
+      observation.assertions[0]?.object,
+      observation.assertions[0]?.sourceRefs,
+      observation.assertions[0]?.sourceRefs[0],
+      observation.assertions[0]?.subject,
+      observation.scope,
+      observation.sourceFreshness,
+      observation.threadRoot
+    ].every(Object.isFrozen)).toBe(true);
+    expect(() => {
+      (observation.assertions[0]?.sourceRefs[0] as { id: string }).id = "tampered";
+    }).toThrow(TypeError);
+    expect(observation.assertions[0]?.sourceRefs[0]?.id).toBe(request.input.anchor);
   });
 
   it("content-binds adapter identity, version, and source kind", async () => {
@@ -362,6 +379,69 @@ describe("source observation building", () => {
     expect(projectAgainstHead).not.toHaveBeenCalled();
   });
 
+  it.each([
+    "assertion",
+    "derivation",
+    "object",
+    "sourceRef",
+    "subject"
+  ] as const)("rejects a nested %s Proxy before invoking reflection traps", async (position) => {
+    let traps = 0;
+    const hostile = <Value extends object>(value: Value): Value => new Proxy(value, {
+      get() {
+        traps += 1;
+        throw new Error("get trap must not run");
+      },
+      getOwnPropertyDescriptor() {
+        traps += 1;
+        throw new Error("descriptor trap must not run");
+      },
+      getPrototypeOf() {
+        traps += 1;
+        throw new Error("prototype trap must not run");
+      },
+      ownKeys() {
+        traps += 1;
+        throw new Error("ownKeys trap must not run");
+      }
+    });
+    const adapter = defineAttuneGraphSourceAdapter<
+      HostMarkdownExtraction,
+      readonly ["markdown"]
+    >({
+      capabilities: {
+        maxAssertionsPerExtraction: 1,
+        sourceKinds: ["markdown"] as const,
+        supportsIncremental: false
+      },
+      extract: (hostInput, context) => {
+        const emitted = assertion(context, hostInput);
+        if (position === "assertion") return { assertions: [hostile(emitted)] };
+        return { assertions: [{
+          ...emitted,
+          derivation: position === "derivation"
+            ? hostile(emitted.derivation)
+            : emitted.derivation,
+          object: position === "object" ? hostile(emitted.object) : emitted.object,
+          sourceRefs: position === "sourceRef"
+            ? [hostile(emitted.sourceRefs[0]!)]
+            : emitted.sourceRefs,
+          subject: position === "subject" ? hostile(emitted.subject) : emitted.subject
+        }] };
+      },
+      metadata: {
+        id: `example.proxy-${position === "sourceRef" ? "source-ref" : position}`,
+        label: `Proxy ${position}`,
+        version: "1"
+      }
+    });
+
+    await expect(buildAttuneGraphSourceObservation(input(adapter))).rejects.toMatchObject({
+      code: "INVALID_EXTRACTION"
+    });
+    expect(traps).toBe(0);
+  });
+
   it("wraps adapter failures without converting graph failures", async () => {
     const extractionCause = new Error("host parser failed");
     const adapter = defineAttuneGraphSourceAdapter<
@@ -398,6 +478,36 @@ describe("source observation building", () => {
       attuneGraph: graph
     })).rejects.toBe(graphFailure);
   });
+
+  it("wraps source-adapter-shaped extractor errors as untrusted callback failures", async () => {
+    const spoofed = new AttuneGraphSourceAdapterError(
+      "INVALID_INPUT",
+      "host attempted to spoof an SDK error"
+    );
+    const adapter = defineAttuneGraphSourceAdapter<
+      HostMarkdownExtraction,
+      readonly ["markdown"]
+    >({
+      capabilities: {
+        maxAssertionsPerExtraction: 1,
+        sourceKinds: ["markdown"] as const,
+        supportsIncremental: false
+      },
+      extract: () => Promise.reject(spoofed),
+      metadata: {
+        id: "example.error-spoof",
+        label: "Error spoof",
+        version: "1"
+      }
+    });
+
+    await expect(buildAttuneGraphSourceObservation(input(adapter))).rejects.toSatisfy(
+      (cause: unknown) => cause instanceof AttuneGraphSourceAdapterError
+        && cause !== spoofed
+        && cause.code === "EXTRACTION_FAILED"
+        && cause.cause === spoofed
+    );
+  });
 });
 
 describe("source projection", () => {
@@ -430,6 +540,11 @@ describe("source projection", () => {
       expect(first.snapshot.generation).toBe(1);
       expect(second.snapshot.generation).toBe(2);
       expect(second.observation.schemaVersion).toBe(2);
+      expect(Object.isFrozen(second.observation)).toBe(true);
+      expect(Object.isFrozen(second.observation.assertions[0])).toBe(true);
+      expect(() => {
+        (second.observation.assertions[0] as { id: string }).id = "tampered";
+      }).toThrow(TypeError);
       await expect(attuneGraph.head()).resolves.toEqual(second.snapshot);
     } finally {
       await attuneGraph.close();
