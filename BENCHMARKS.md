@@ -60,7 +60,10 @@ output path is supplied. File output must be an absolute normalized path,
 outside the repository, under a non-symlink directory, and must not already
 exist; the file is created owner-only and never overwritten.
 
-The 100K and 1M runs are deliberately not part of the normal unit-test gate.
+The real 10K lifecycle qualification and the 100K and 1M runs are deliberately
+not part of the normal unit-test gate. Run the 10K proof with
+`pnpm test:benchmark-qualification`; normal cross-platform tests retain the
+deterministic parser, corpus, hashing, percentile, and fail-closed CLI checks.
 They are long evidence activities and should run independently from editing or
 unrelated verification.
 

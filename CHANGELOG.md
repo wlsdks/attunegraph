@@ -18,6 +18,9 @@ All notable changes to AttuneGraph are recorded here.
 ### Fixed
 
 - Read pnpm provenance portably on Windows and POSIX benchmark runners.
+- Isolate the real 10K lifecycle qualification from the normal cross-platform
+  suite so slower runners do not turn measurement into a flaky correctness
+  gate.
 - Reject a source observation before any Store read or compare-and-swap when
   its canonical projection cannot fit the Store envelope's single-string
   budget; previously such a write could commit and then fail its own next read

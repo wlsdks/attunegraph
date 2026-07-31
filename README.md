@@ -219,6 +219,7 @@ pnpm test:focused
 pnpm test                 # cross-platform core/in-memory/portable contracts
 pnpm test:local-profile   # reviewed Linux/macOS local SQLite and Admin
 pnpm test:supported       # both profiles on a reviewed local-profile host
+pnpm test:benchmark-qualification # separate real 10K lifecycle proof
 pnpm build
 pnpm example
 pnpm pack:dry-run
@@ -229,8 +230,9 @@ pnpm benchmark:scale -- --scale=10000 --profile=core --warmups=0 --repetitions=1
 ```
 
 The benchmark's fixed connected v2 corpus, evidence schema, output safety, and
-claim boundary are documented in [BENCHMARKS.md](BENCHMARKS.md). The 100K and
-1M runs are separate long evidence activities, not normal test gates.
+claim boundary are documented in [BENCHMARKS.md](BENCHMARKS.md). The real 10K
+lifecycle proof and the 100K/1M runs are separate evidence activities, not
+normal test gates.
 
 Fixture generation is deterministic. Regeneration must reproduce the checked-in
 inputs, `.atgx` artifacts, manifest hashes, byte counts, record identities, and

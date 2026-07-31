@@ -10,7 +10,11 @@ const localProfileTests = [
 
 export default defineConfig({
   test: {
-    exclude: [...configDefaults.exclude, ...localProfileTests],
+    exclude: [
+      ...configDefaults.exclude,
+      ...localProfileTests,
+      "**/*.qualification.test.mjs"
+    ],
     testTimeout: 15_000
   }
 });
