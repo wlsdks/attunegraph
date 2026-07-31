@@ -166,6 +166,21 @@ terminal status, truncation reasons, and source freshness for every checked-in
 query. Its precision/recall report measures this declared corpus only; it is
 not a claim about open-world semantic relevance or personal usefulness.
 
+## External source adapters
+
+`@attunegraph/core/source-adapter` turns the reserved source-adapter capability
+into a typed, bounded ingestion seam for any host agent. The host owns source
+bytes, parsing, credentials, OCR, and optional model calls. Factory-defined
+adapters emit only bounded assertions with exact evidence references; the SDK
+content-binds adapter identity, version, source kind, and caller correlation,
+builds `canonical-projection@2`, and submits one `projectAgainstHead` write.
+
+The SDK does not parse or store Markdown, text, PDF, spreadsheet, Obsidian, or
+Notion content. See [`SOURCE-ADAPTERS.md`](SOURCE-ADAPTERS.md) for the public API,
+ownership boundary, and source-anchor recipes, plus
+[`examples/source-adapter-agent.mjs`](examples/source-adapter-agent.mjs) for a
+non-Muse consumer.
+
 ## Durable local store
 
 ```ts
