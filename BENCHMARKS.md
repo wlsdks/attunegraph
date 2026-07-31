@@ -350,16 +350,14 @@ or subtraction of the two side medians.
 
 | Metric | Base median [range] | Feature median [range] | Paired feature/base median | Paired feature-base median |
 | --- | ---: | ---: | ---: | ---: |
-| External process wall | 29.457 s [28.981, 29.888] | 11.334 s [11.259, 11.381] | 0.3833 (61.67% lower) | -18.167 s |
 | Preparation | 1,326.803 ms [1,279.338, 1,347.445] | 535.779 ms [534.375, 541.705] | 0.4067 (59.33% lower) | -786.077 ms |
 | Encode | 6,155.440 ms [6,077.802, 6,271.708] | 2,293.645 ms [2,273.935, 2,298.209] | 0.3727 (62.73% lower) | -3,861.222 ms |
 | Decode | 7,438.446 ms [7,228.441, 7,506.205] | 2,719.524 ms [2,681.227, 2,769.952] | 0.3690 (63.10% lower) | -4,724.436 ms |
 | Peak RSS | 390,791,168 bytes [352,731,136, 400,179,200] | 372,326,400 bytes [315,146,240, 372,916,224] | 0.9314 (6.86% lower) | -27,361,280 bytes |
 | Artifact | 10,046,693 bytes [same for all samples] | 10,046,693 bytes [same for all samples] | 1.0000 | 0 bytes |
 
-External process wall is launcher elapsed time and is not a metric embedded in
-the hashed producer reports. The other values are recomputed from the raw
-report samples. All ten reports record `repository.clean: true`, retain the
+Every value in the table is recomputed from the hash-bound producer report
+samples. All ten reports record `repository.clean: true`, retain the
 exact 10,046,693-byte artifact, and converge to 313 decoded heads and 313
 decoded projections with `summaryMatches: true`.
 
