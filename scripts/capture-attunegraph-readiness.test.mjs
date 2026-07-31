@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -80,7 +81,7 @@ describe("AttuneGraph readiness evidence capture v2", () => {
       ));
       expect(captured).toMatchObject({
         argv: [process.execPath, "-e", expect.any(String), shellToken],
-        cwd: await realpath(fixture.attunegraph),
+        cwd: realpathSync(fixture.attunegraph),
         exitCode: 0,
         schema: "attunegraph-readiness-check@2",
         signal: null,
