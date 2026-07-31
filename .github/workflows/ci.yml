@@ -23,9 +23,42 @@ jobs:
       - run: pnpm check:naming
       - run: pnpm typecheck
       - run: pnpm test:focused
-      - run: pnpm test:readiness
       - run: node examples/basic-agent.mjs
       - run: npm pack --dry-run --json
+
+  readiness-contract:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.15.0"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:readiness
+
+  readiness-attestation-contract:
+    if: github.event_name == 'push'
+    needs: readiness-contract
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Bundle the versioned readiness producer contract
+        run: tar -czf readiness-producer-contract.tgz scripts/readiness-check-contracts.mjs scripts/capture-attunegraph-readiness.mjs scripts/score-attunegraph-readiness.mjs
+      - uses: actions/attest-build-provenance@v2
+        with:
+          subject-path: readiness-producer-contract.tgz
 
   clean-room-consumer:
     runs-on: ubuntu-latest

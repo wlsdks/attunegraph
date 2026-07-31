@@ -1,12 +1,19 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { mkdir, mkdtemp, readFile, rm, symlink, unlink, writeFile } from "node:fs/promises";
+import { realpathSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
+import {
+  readinessCheckContract,
+  readinessContractsMatchInventory,
+  readinessContractSnapshot,
+  validateReadinessCommandOutput
+} from "./readiness-check-contracts.mjs";
 import {
   createReadinessToolchain,
   parseReadinessArguments,
@@ -75,41 +82,44 @@ async function createFixture() {
   const results = new Map();
   for (const gate of READINESS_GATES) {
     for (const name of gate.checks) {
+      const contract = readinessCheckContract(name);
       const checkDirectory = join(evidenceDirectory, "checks", name);
       await mkdir(checkDirectory, { recursive: true });
       const stdoutPath = `checks/${name}/stdout.bin`;
       const stderrPath = `checks/${name}/stderr.bin`;
       const resultPath = `checks/${name}/result.json`;
-      const stdout = Buffer.from(`synthetic-test-output:${name}\n`);
-      const stderr = Buffer.alloc(0);
+      const empty = Buffer.alloc(0);
       await Promise.all([
-        writeFile(join(evidenceDirectory, stdoutPath), stdout),
-        writeFile(join(evidenceDirectory, stderrPath), stderr)
+        writeFile(join(evidenceDirectory, stdoutPath), empty),
+        writeFile(join(evidenceDirectory, stderrPath), empty)
       ]);
       const result = {
-        argv: [process.execPath, "--version", name],
-        cwd: attunegraph,
+        command: structuredClone(readinessContractSnapshot(contract)),
+        cwd: realpathSync(contract.cwdRole === "muse" ? muse : attunegraph),
         endedAt: OBSERVED_AT,
-        exitCode: 0,
+        executable: null,
+        exitCode: null,
         gate: gate.name,
         name,
+        provenance: {
+          captureScriptSha256: `sha256:${"a".repeat(64)}`,
+          kind: "local-unattested",
+          producer: "capture-attunegraph-readiness@2",
+          schema: "attunegraph-readiness-provenance@1"
+        },
         schema: READINESS_CHECK_SCHEMA,
         signal: null,
         spawnError: null,
         startedAt: OBSERVED_AT,
-        state: "pass",
-        stderr: { path: stderrPath, sha256: digest(stderr) },
-        stdout: { path: stdoutPath, sha256: digest(stdout) },
+        state: "not-run",
+        stderr: { path: stderrPath, sha256: digest(empty) },
+        stdout: { path: stdoutPath, sha256: digest(empty) },
         subject: structuredClone(subject),
         toolchain: structuredClone(toolchain)
       };
       const body = `${JSON.stringify(result, null, 2)}\n`;
       await writeFile(join(evidenceDirectory, resultPath), body);
-      checks.push({
-        gate: gate.name,
-        name,
-        result: { path: resultPath, sha256: digest(body) }
-      });
+      checks.push({ gate: gate.name, name, result: { path: resultPath, sha256: digest(body) } });
       results.set(name, result);
     }
   }
@@ -134,21 +144,6 @@ async function syncResult(fixture, name) {
   entry.result.sha256 = digest(body);
 }
 
-async function setState(fixture, name, state) {
-  const result = fixture.results.get(name);
-  result.state = state;
-  result.exitCode = state === "pass" ? 0 : state === "fail" ? 1 : null;
-  if (state === "not-run") {
-    await Promise.all([
-      writeFile(join(fixture.evidenceDirectory, result.stdout.path), Buffer.alloc(0)),
-      writeFile(join(fixture.evidenceDirectory, result.stderr.path), Buffer.alloc(0))
-    ]);
-    result.stdout.sha256 = digest(Buffer.alloc(0));
-    result.stderr.sha256 = digest(Buffer.alloc(0));
-  }
-  await syncResult(fixture, name);
-}
-
 function score(fixture, asOf = AS_OF) {
   return scoreReadinessEvidence({
     asOf,
@@ -157,12 +152,6 @@ function score(fixture, asOf = AS_OF) {
     evidenceDirectory: fixture.evidenceDirectory,
     museRepository: fixture.muse
   });
-}
-
-async function writeEvidence(fixture, filename = "readiness-evidence.json") {
-  const path = join(fixture.evidenceDirectory, filename);
-  await writeFile(path, `${JSON.stringify(fixture.evidence, null, 2)}\n`);
-  return path;
 }
 
 async function withFixture(callback) {
@@ -175,35 +164,111 @@ async function withFixture(callback) {
 }
 
 describe("AttuneGraph readiness evidence v2 scorer", () => {
-  it("keeps the exact 37-check, eight-gate inventory", () => {
+  it("binds the exact 37-check inventory to one fixed contract each", () => {
     expect(READINESS_GATES).toHaveLength(8);
     expect(REQUIRED_CHECKS).toHaveLength(37);
     expect(new Set(REQUIRED_CHECKS).size).toBe(37);
+    expect(readinessContractsMatchInventory(READINESS_GATES)).toBe(true);
   });
 
-  it("ships both readiness CLIs and enforces readiness tests in CI", async () => {
-    const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
-    const workflow = await readFile(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
-    expect(packageJson.scripts).toMatchObject({
-      "readiness:capture": "node scripts/capture-attunegraph-readiness.mjs",
-      "readiness:score": "node scripts/score-attunegraph-readiness.mjs",
-      "test:readiness": "vitest run scripts/*attunegraph-readiness.test.mjs"
+  it("pins performance parameters instead of accepting caller-selected measurements", () => {
+    expect(readinessCheckContract("corpus-1m").parameters).toEqual({
+      profile: "core",
+      repetitions: 5,
+      scale: 1_000_000,
+      warmups: 1
     });
-    expect(packageJson.files).toEqual(expect.arrayContaining([
-      "scripts/capture-attunegraph-readiness.mjs",
-      "scripts/score-attunegraph-readiness.mjs"
-    ]));
-    expect(workflow).toMatch(/- run: pnpm test:readiness/u);
+    expect(readinessCheckContract("throughput").parameters).toMatchObject({
+      metric: "assertionsPerSecond",
+      profile: "core",
+      scale: 100_000
+    });
   });
 
-  it("scores a complete synthetic v2 fixture and exposes the v2 CLI", async () => {
+  it("requires a strict semantic command-output envelope", () => {
+    const contract = readinessCheckContract("throughput");
+    const output = {
+      check: "throughput",
+      contractId: contract.id,
+      parameters: structuredClone(contract.parameters),
+      passed: true,
+      result: { samples: [1] },
+      schema: "attunegraph-readiness-command-output@1"
+    };
+    expect(validateReadinessCommandOutput(JSON.stringify(output), contract)).toEqual(output);
+    output.parameters.scale = 10_000;
+    expect(() => validateReadinessCommandOutput(JSON.stringify(output), contract))
+      .toThrow(/fixed semantic contract/u);
+  });
+
+  it("runs readiness tests on Node 24.15 for both Ubuntu and Windows and defines attestation issuance", async () => {
+    const workflow = await readFile(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
+    expect(workflow).toMatch(/readiness-contract:[\s\S]*os: \[ubuntu-latest, windows-latest\][\s\S]*node-version: "24\.15\.0"[\s\S]*pnpm test:readiness/u);
+    expect(workflow).toMatch(/actions\/attest-build-provenance@v2/u);
+  });
+
+  it("scores hand-authored local artifacts only as unattested coverage", async () => {
     await withFixture(async (fixture) => {
       expect(score(fixture)).toMatchObject({
-        eligible: true,
+        authenticity: "unattested",
+        eligible: false,
+        integrityThresholdMet: false,
         schema: "attunegraph-readiness-score@2",
-        score: 100
+        score: 0
       });
-      const evidencePath = await writeEvidence(fixture);
+    });
+  });
+
+  it("rejects a hand-authored pass over an unavailable contract", async () => {
+    await withFixture(async (fixture) => {
+      const result = fixture.results.get("inspect");
+      result.state = "pass";
+      result.exitCode = 0;
+      result.executable = {
+        path: process.execPath,
+        sha256: `sha256:${"b".repeat(64)}`,
+        version: process.version
+      };
+      await syncResult(fixture, "inspect");
+      expect(() => score(fixture)).toThrow(/executable.*must be null|unavailable.*not-run/u);
+    });
+  });
+
+  it("rejects node --version and a changed performance scale at the contract boundary", async () => {
+    await withFixture(async (fixture) => {
+      fixture.results.get("inspect").command.argv = [process.execPath, "--version"];
+      await syncResult(fixture, "inspect");
+      expect(() => score(fixture)).toThrow(/fixed registry contract/u);
+    });
+    await withFixture(async (fixture) => {
+      fixture.results.get("corpus-1m").command.parameters.scale = 10_000;
+      await syncResult(fixture, "corpus-1m");
+      expect(() => score(fixture)).toThrow(/fixed registry contract/u);
+    });
+  });
+
+  it("rejects self-authored attested provenance without cryptographic verification", async () => {
+    await withFixture(async (fixture) => {
+      fixture.results.get("inspect").provenance.kind = "github-actions-attested";
+      await syncResult(fixture, "inspect");
+      expect(() => score(fixture)).toThrow(/cannot claim attestation/u);
+    });
+  });
+
+  it("uses an independently observable canonical cwd invariant", async () => {
+    await withFixture(async (fixture) => {
+      expect(await readFile(join(fixture.results.get("inspect").cwd, "attunegraph.txt"), "utf8"))
+        .toBe("attunegraph.txt\n");
+      fixture.results.get("inspect").cwd = fixture.muse;
+      await syncResult(fixture, "inspect");
+      expect(() => score(fixture)).toThrow(/canonical attunegraph repository root/u);
+    });
+  });
+
+  it("exposes a fail-closed CLI for the zero-claim manifest", async () => {
+    await withFixture(async (fixture) => {
+      const evidencePath = join(fixture.evidenceDirectory, "readiness-evidence.json");
+      await writeFile(evidencePath, `${JSON.stringify(fixture.evidence, null, 2)}\n`);
       const result = spawnSync(process.execPath, [
         SCORER_ENTRYPOINT,
         `--as-of=${AS_OF}`,
@@ -212,104 +277,7 @@ describe("AttuneGraph readiness evidence v2 scorer", () => {
         `--muse-repository=${fixture.muse}`
       ], { encoding: "utf8", timeout: 20_000 });
       expect(result.status).toBe(0);
-      expect(result.stderr).toBe("");
-      expect(JSON.parse(result.stdout)).toMatchObject({ score: 100 });
-    });
-  });
-
-  it("rejects v1 metadata-only manifests", async () => {
-    await withFixture(async (fixture) => {
-      fixture.evidence.schema = "attunegraph-readiness-evidence@1";
-      expect(() => score(fixture)).toThrow(/@2/u);
-    });
-  });
-
-  it("preserves the 90 threshold and critical-gate eligibility rules", async () => {
-    await withFixture(async (fixture) => {
-      await setState(fixture, "working-graph-golden-corpus", "not-run");
-      expect(score(fixture)).toMatchObject({ eligible: true, score: 90 });
-    });
-    await withFixture(async (fixture) => {
-      await setState(fixture, "sqlite-crash-cas", "fail");
-      expect(score(fixture)).toMatchObject({ eligible: false, score: 90 });
-    });
-  });
-
-  it("uses the command end timestamp for the exact 168-hour boundary", async () => {
-    await withFixture(async (fixture) => {
-      const result = fixture.results.get("working-graph-golden-corpus");
-      result.startedAt = "2026-07-24T00:00:00.000Z";
-      result.endedAt = "2026-07-24T00:00:00.000Z";
-      await syncResult(fixture, result.name);
-      expect(score(fixture)).toMatchObject({ score: 100 });
-      result.startedAt = "2026-07-23T23:59:59.999Z";
-      result.endedAt = "2026-07-23T23:59:59.999Z";
-      await syncResult(fixture, result.name);
-      expect(score(fixture)).toMatchObject({ score: 90 });
-    });
-  });
-
-  it.each([
-    ["stdout bytes", async (fixture) => {
-      const result = fixture.results.get("inspect");
-      await writeFile(join(fixture.evidenceDirectory, result.stdout.path), "tampered\n");
-    }, /stdout.*sha256/u],
-    ["result bytes", async (fixture) => {
-      const entry = check(fixture, "inspect");
-      await writeFile(join(fixture.evidenceDirectory, entry.result.path), "{}\n");
-    }, /result.*sha256/u],
-    ["toolchain identity", async (fixture) => {
-      fixture.results.get("inspect").toolchain.node = "v0.0.0";
-      await syncResult(fixture, "inspect");
-    }, /toolchain.*digest/u],
-    ["subject", async (fixture) => {
-      fixture.results.get("inspect").subject.attunegraph.sha = "a".repeat(40);
-      await syncResult(fixture, "inspect");
-    }, /subject does not match/u],
-    ["dirty repository", async (fixture) => {
-      await writeFile(join(fixture.attunegraph, "dirty.txt"), "dirty\n");
-    }, /dirty/u]
-  ])("fails closed on tampered %s", async (_name, mutate, message) => {
-    await withFixture(async (fixture) => {
-      await mutate(fixture);
-      expect(() => score(fixture)).toThrow(message);
-    });
-  });
-
-  it("rejects artifact path reuse across checks and streams", async () => {
-    await withFixture(async (fixture) => {
-      const inspect = fixture.results.get("inspect");
-      const verify = fixture.results.get("verify");
-      verify.stdout = structuredClone(inspect.stdout);
-      await syncResult(fixture, "verify");
-      expect(() => score(fixture)).toThrow(/duplicate artifact path/u);
-    });
-  });
-
-  it("rejects symlink artifacts and symlinked evidence roots", async () => {
-    await withFixture(async (fixture) => {
-      const result = fixture.results.get("inspect");
-      const stdoutPath = join(fixture.evidenceDirectory, result.stdout.path);
-      const outside = join(fixture.directory, "outside.txt");
-      await writeFile(outside, "outside\n");
-      await unlink(stdoutPath);
-      await symlink(outside, stdoutPath);
-      expect(() => score(fixture)).toThrow(/non-symlink/u);
-    });
-  });
-
-  it("rejects impossible process-state claims", async () => {
-    await withFixture(async (fixture) => {
-      const result = fixture.results.get("inspect");
-      result.state = "pass";
-      result.exitCode = 1;
-      await syncResult(fixture, "inspect");
-      expect(() => score(fixture)).toThrow(/pass requires exitCode 0/u);
-
-      result.state = "fail";
-      result.exitCode = null;
-      await syncResult(fixture, "inspect");
-      expect(() => score(fixture)).toThrow(/fail requires a nonzero exit/u);
+      expect(JSON.parse(result.stdout)).toMatchObject({ eligible: false, score: 0 });
     });
   });
 

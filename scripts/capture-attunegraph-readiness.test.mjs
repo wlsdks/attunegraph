@@ -1,8 +1,8 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { realpathSync } from "node:fs";
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { statSync } from "node:fs";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -36,17 +36,18 @@ async function createFixture() {
   return { attunegraph, directory, muse, output };
 }
 
-function capture(fixture, argv, overrides = {}) {
+function capture(fixture, argv = [], overrides = {}) {
   return spawnSync(process.execPath, [
     CAPTURE_ENTRYPOINT,
     `--name=${overrides.name ?? "inspect"}`,
     `--output-directory=${overrides.output ?? fixture.output}`,
     `--attunegraph-repository=${fixture.attunegraph}`,
     `--muse-repository=${fixture.muse}`,
-    `--cwd=${fixture.attunegraph}`,
+    `--cwd=${overrides.cwd ?? fixture.attunegraph}`,
+    ...(overrides.producerMode ? [`--producer-mode=${overrides.producerMode}`] : []),
     "--",
     ...argv
-  ], { encoding: "utf8", timeout: 20_000 });
+  ], { encoding: "utf8", timeout: 20_000, env: overrides.env ?? process.env });
 }
 
 async function withFixture(callback) {
@@ -59,116 +60,79 @@ async function withFixture(callback) {
 }
 
 describe("AttuneGraph readiness evidence capture v2", () => {
-  it("spawns exact argv without a shell and captures immutable process streams", async () => {
+  it("captures an unavailable fixed contract only as local-unattested not-run", async () => {
     await withFixture(async (fixture) => {
-      const shellToken = "$(touch shell-was-used);literal";
-      const result = capture(fixture, [
-        process.execPath,
-        "-e",
-        "process.stdout.write(process.argv[1]); process.stderr.write('diagnostic')",
-        shellToken
-      ]);
-      expect(result.status).toBe(0);
-      expect(result.stderr).toBe("");
-      const descriptor = JSON.parse(result.stdout);
-      expect(descriptor).toMatchObject({
-        schema: "attunegraph-readiness-capture@2",
-        check: { gate: "operability", name: "inspect" }
-      });
-      const captured = JSON.parse(await readFile(
-        join(fixture.output, descriptor.check.result.path),
-        "utf8"
-      ));
-      expect(captured).toMatchObject({
-        argv: [process.execPath, "-e", expect.any(String), shellToken],
-        cwd: realpathSync(fixture.attunegraph),
-        exitCode: 0,
-        schema: "attunegraph-readiness-check@2",
-        signal: null,
-        spawnError: null,
-        state: "pass"
-      });
-      expect(await readFile(join(fixture.output, captured.stdout.path), "utf8")).toBe(shellToken);
-      expect(await readFile(join(fixture.output, captured.stderr.path), "utf8")).toBe("diagnostic");
-      await expect(readFile(join(fixture.attunegraph, "shell-was-used"))).rejects.toMatchObject({ code: "ENOENT" });
-      expect(Date.parse(captured.endedAt)).toBeGreaterThanOrEqual(Date.parse(captured.startedAt));
-      expect(captured.toolchain.digest).toMatch(/^sha256:[a-f0-9]{64}$/u);
-      expect(captured.subject.attunegraph.sha).toBe(captured.subject.muse.attunegraphGitlink.sha);
-    });
-  });
-
-  it("captures nonzero commands as fail evidence without claiming producer failure", async () => {
-    await withFixture(async (fixture) => {
-      const result = capture(fixture, [process.execPath, "-e", "process.exit(7)"]);
+      const result = capture(fixture);
       expect(result.status).toBe(0);
       const descriptor = JSON.parse(result.stdout);
       const captured = JSON.parse(await readFile(join(fixture.output, descriptor.check.result.path), "utf8"));
-      expect(captured).toMatchObject({ exitCode: 7, state: "fail" });
+      expect(captured).toMatchObject({
+        command: {
+          availability: "unavailable",
+          cwdRole: "attunegraph",
+          id: "attunegraph-readiness-check-contract@1:inspect",
+          parameters: {}
+        },
+        executable: null,
+        exitCode: null,
+        provenance: { kind: "local-unattested" },
+        state: "not-run"
+      });
+      expect(Buffer.from(await readFile(join(fixture.output, captured.stdout.path)))).toHaveLength(0);
+      expect(Buffer.from(await readFile(join(fixture.output, captured.stderr.path)))).toHaveLength(0);
+      expect(isAbsolute(captured.cwd)).toBe(true);
+      expect(await readFile(join(captured.cwd, "attunegraph.txt"), "utf8")).toBe("attunegraph.txt\n");
+      expect(statSync(captured.cwd).isDirectory()).toBe(true);
     });
   });
 
-  it("refuses dirty subjects before spawning", async () => {
+  it.each([
+    ["node --version", [process.execPath, "--version"]],
+    ["node synthetic pass", [process.execPath, "-e", "process.exit(0)"]]
+  ])("refuses substitute argv: %s", async (_label, argv) => {
     await withFixture(async (fixture) => {
-      await writeFile(join(fixture.attunegraph, "dirty.txt"), "dirty\n");
-      const sentinel = join(fixture.directory, "spawned.txt");
-      const result = capture(fixture, [process.execPath, "-e", `require('node:fs').writeFileSync(${JSON.stringify(sentinel)}, 'yes')`]);
-      expect(result.status).toBe(1);
-      expect(result.stderr).toMatch(/repository is dirty/u);
-      await expect(readFile(sentinel)).rejects.toMatchObject({ code: "ENOENT" });
-    });
-  });
-
-  it("refuses to issue a result when a command changes a repository subject", async () => {
-    await withFixture(async (fixture) => {
-      const dirtyPath = join(fixture.attunegraph, "command-dirty.txt");
-      const result = capture(fixture, [
-        process.execPath,
-        "-e",
-        `require('node:fs').writeFileSync(${JSON.stringify(dirtyPath)}, 'dirty')`
-      ]);
+      const result = capture(fixture, argv);
       expect(result.status).toBe(1);
       expect(result.stdout).toBe("");
-      expect(result.stderr).toMatch(/repository is dirty/u);
-      await expect(readFile(join(fixture.output, "checks/inspect/result.json")))
-        .rejects.toMatchObject({ code: "ENOENT" });
+      expect(result.stderr).toMatch(/unavailable.*substitute argv/u);
     });
   });
 
-  it("refuses path reuse before a second command can spawn", async () => {
+  it("refuses /usr/bin/true when present", async () => {
+    if (process.platform === "win32") return;
     await withFixture(async (fixture) => {
-      expect(capture(fixture, [process.execPath, "--version"]).status).toBe(0);
-      const sentinel = join(fixture.directory, "second-spawn.txt");
-      const second = capture(fixture, [
-        process.execPath,
-        "-e",
-        `require('node:fs').writeFileSync(${JSON.stringify(sentinel)}, 'yes')`
-      ]);
-      expect(second.status).toBe(1);
-      expect(second.stderr).toMatch(/already exists/u);
-      await expect(readFile(sentinel)).rejects.toMatchObject({ code: "ENOENT" });
-    });
-  });
-
-  it("refuses a symlinked output root", async () => {
-    await withFixture(async (fixture) => {
-      const outside = join(fixture.directory, "outside");
-      const linked = join(fixture.directory, "linked");
-      await mkdir(outside);
-      await symlink(outside, linked);
-      const result = capture(fixture, [process.execPath, "--version"], { output: linked });
+      const result = capture(fixture, ["/usr/bin/true"]);
       expect(result.status).toBe(1);
-      expect(result.stderr).toMatch(/non-symlink/u);
+      expect(result.stderr).toMatch(/substitute argv/u);
     });
   });
 
-  it("refuses a Muse gitlink that is not the current AttuneGraph subject", async () => {
+  it("refuses a fake PATH executable before resolution or spawn", async () => {
     await withFixture(async (fixture) => {
-      await writeFile(join(fixture.attunegraph, "new.txt"), "new\n");
-      git(fixture.attunegraph, ["add", "new.txt"]);
-      git(fixture.attunegraph, ["commit", "-qm", "advance AttuneGraph"]);
-      const result = capture(fixture, [process.execPath, "--version"]);
+      const fakeBin = join(fixture.directory, "fake-bin");
+      await mkdir(fakeBin);
+      await writeFile(join(fakeBin, process.platform === "win32" ? "node.cmd" : "node"), "fake\n");
+      const result = capture(fixture, ["node", "--version"], {
+        env: { ...process.env, PATH: `${fakeBin}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}` }
+      });
       expect(result.status).toBe(1);
-      expect(result.stderr).toMatch(/gitlink does not equal/u);
+      expect(result.stderr).toMatch(/substitute argv/u);
+    });
+  });
+
+  it("refuses self-asserted GitHub attestation producer mode", async () => {
+    await withFixture(async (fixture) => {
+      const result = capture(fixture, [], { producerMode: "github-actions-attested" });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toMatch(/external cryptographic verification/u);
+    });
+  });
+
+  it("requires the contract's canonical repository role", async () => {
+    await withFixture(async (fixture) => {
+      const result = capture(fixture, [], { cwd: fixture.muse });
+      expect(result.status).toBe(1);
+      expect(result.stderr).toMatch(/canonical attunegraph repository root/u);
     });
   });
 });

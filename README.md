@@ -258,11 +258,11 @@ pnpm verify:local
 pnpm benchmark:scale -- --scale=10000 --profile=core --warmups=0 --repetitions=1
 pnpm benchmark:scale -- --scale=10000 --profile=local-session --warmups=0 --repetitions=1
 pnpm readiness:capture -- \
-  --name=verify \
+  --name=inspect \
   --output-directory=/absolute/path/readiness-evidence \
   --attunegraph-repository=/absolute/path/attunegraph \
   --muse-repository=/absolute/path/Muse \
-  --cwd=/absolute/path/attunegraph -- pnpm verify:local
+  --cwd=/absolute/path/attunegraph --
 pnpm readiness:score -- --as-of=2026-07-31T00:00:00.000Z \
   --evidence=/absolute/path/readiness-evidence.json \
   --attunegraph-repository=/absolute/path/attunegraph \
@@ -275,16 +275,18 @@ lifecycle proof and the 100K/1M runs are separate evidence activities, not
 normal test gates.
 
 The full gate inventory and artifact contract are documented in
-[READINESS.md](READINESS.md). `pnpm readiness:capture` spawns the exact argv
-after `--` without a shell and emits one immutable v2 check descriptor. Its
-result binds raw stdout and stderr, start/end timestamps, exit status, argv,
-canonical cwd, per-run toolchain identity, clean Git subjects, and the exact
-Muse gitlink. `pnpm readiness:score` accepts only
+[READINESS.md](READINESS.md). Every name has one versioned fixed contract.
+Unimplemented semantic verifiers are unavailable and capture only as `not-run`;
+caller-selected commands such as `node --version` are refused. Results bind
+the contract, canonical cwd role, raw streams, timestamps, provenance,
+toolchain identity, clean Git subjects, and the exact Muse gitlink.
+`pnpm readiness:score` accepts only
 `attunegraph-readiness-evidence@2`, validates every referenced hash and rejects
 artifact reuse, symlinks, dirty or mismatched repositories, and v1
 metadata-only evidence. Freshness is measured through exactly 168 hours from
-the captured command end. The result is an executable evidence-coverage score,
-never a product-usefulness claim.
+the captured command end. Local artifacts produce an unattested integrity
+coverage report with `eligible: false`, never an execution-authentic or
+product-usefulness claim.
 
 Fixture generation is deterministic. Regeneration must reproduce the checked-in
 inputs, `.atgx` artifacts, manifest hashes, byte counts, record identities, and

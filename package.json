@@ -23,6 +23,7 @@
     "PORTABLE-FORMAT.md",
     "LICENSE",
     "attunegraph-local-runtime-manifest.json",
+    "scripts/readiness-check-contracts.mjs",
     "scripts/capture-attunegraph-readiness.mjs",
     "scripts/score-attunegraph-readiness.mjs"
   ],

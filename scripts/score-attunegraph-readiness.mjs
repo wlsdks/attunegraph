@@ -4,6 +4,13 @@ import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import {
+  readinessCheckContract,
+  readinessContractsMatchInventory,
+  readinessContractSnapshot,
+  validateReadinessCommandOutput
+} from "./readiness-check-contracts.mjs";
+
 export const READINESS_EVIDENCE_SCHEMA = "attunegraph-readiness-evidence@2";
 export const READINESS_CHECK_SCHEMA = "attunegraph-readiness-check@2";
 export const READINESS_SCORE_SCHEMA = "attunegraph-readiness-score@2";
@@ -205,6 +212,10 @@ function sameSubject(left, right) {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
+function sameValue(left, right) {
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 function git(repository, arguments_, failure = invalid) {
   try {
     return execFileSync("git", ["-C", repository, ...arguments_], {
@@ -287,6 +298,7 @@ function assertRepositoryBinding(attunegraphPath, musePath, expected) {
   if (!sameSubject(actual.subject, expected)) {
     invalid("repositories do not match the clean exact SHA/tree/gitlink subject");
   }
+  return actual;
 }
 
 function escapesRoot(relativePath) {
@@ -358,7 +370,60 @@ function validateExecutionState(result, name) {
   }
 }
 
-function validateCheckResult(check, evidenceRoot, artifactPaths, evidenceSubject, asOfMilliseconds) {
+function validateProvenance(provenance, name) {
+  assertExactKeys(
+    provenance,
+    ["captureScriptSha256", "kind", "producer", "schema"],
+    name
+  );
+  if (provenance.schema !== "attunegraph-readiness-provenance@1") {
+    invalid(`${name}.schema is unsupported`);
+  }
+  if (provenance.kind !== "local-unattested") {
+    invalid(`${name}.kind cannot claim attestation without live cryptographic verification`);
+  }
+  if (provenance.producer !== "capture-attunegraph-readiness@2") {
+    invalid(`${name}.producer is unsupported`);
+  }
+  if (!SHA256_PATTERN.test(provenance.captureScriptSha256)) {
+    invalid(`${name}.captureScriptSha256 must be a sha256 digest`);
+  }
+}
+
+function validateCommand(command, checkName, gate, name) {
+  const contract = readinessCheckContract(checkName);
+  if (!contract || contract.gate !== gate) invalid(`${name} has no fixed check contract`);
+  assertExactKeys(
+    command,
+    ["argv", "availability", "cwdRole", "id", "output", "parameters", "unavailableReason"],
+    name
+  );
+  if (!sameValue(command, readinessContractSnapshot(contract))) {
+    invalid(`${name} does not match the fixed registry contract`);
+  }
+  return contract;
+}
+
+function validateExecutable(executable, contract, name) {
+  if (contract.availability === "unavailable") {
+    if (executable !== null) invalid(`${name} must be null for an unavailable check`);
+    return;
+  }
+  assertExactKeys(executable, ["path", "sha256", "version"], name);
+  assertNonEmptyString(executable.path, `${name}.path`);
+  assertNonEmptyString(executable.version, `${name}.version`);
+  if (!isAbsolute(executable.path)) invalid(`${name}.path must be absolute`);
+  if (!SHA256_PATTERN.test(executable.sha256)) invalid(`${name}.sha256 must be a sha256 digest`);
+}
+
+function validateCheckResult(
+  check,
+  evidenceRoot,
+  artifactPaths,
+  evidenceSubject,
+  asOfMilliseconds,
+  repositoryRoots
+) {
   const resultBytes = assertArtifact(
     check.result,
     evidenceRoot,
@@ -372,12 +437,14 @@ function validateCheckResult(check, evidenceRoot, artifactPaths, evidenceSubject
     invalid(`check ${check.name}.result must contain valid JSON`);
   }
   assertExactKeys(result, [
-    "argv",
+    "command",
     "cwd",
     "endedAt",
+    "executable",
     "exitCode",
     "gate",
     "name",
+    "provenance",
     "schema",
     "signal",
     "spawnError",
@@ -394,16 +461,25 @@ function validateCheckResult(check, evidenceRoot, artifactPaths, evidenceSubject
   if (result.name !== check.name || result.gate !== check.gate) {
     invalid(`check ${check.name}.result name/gate does not match its manifest entry`);
   }
-  if (!Array.isArray(result.argv) || result.argv.length === 0) {
-    invalid(`check ${check.name}.result argv must be a non-empty exact argument vector`);
-  }
-  result.argv.forEach((argument, index) => {
-    if (typeof argument !== "string" || argument.includes("\0") || (index === 0 && argument.length === 0)) {
-      invalid(`check ${check.name}.result argv contains an invalid argument`);
-    }
-  });
+  const contract = validateCommand(
+    result.command,
+    check.name,
+    check.gate,
+    `check ${check.name}.result command`
+  );
+  validateExecutable(result.executable, contract, `check ${check.name}.result executable`);
+  validateProvenance(result.provenance, `check ${check.name}.result provenance`);
   assertNonEmptyString(result.cwd, `check ${check.name}.result cwd`);
+  const expectedCwd = contract.cwdRole === "muse"
+    ? repositoryRoots.museRoot
+    : repositoryRoots.attunegraphRoot;
+  if (result.cwd !== expectedCwd) {
+    invalid(`check ${check.name}.result cwd does not match the canonical ${contract.cwdRole} repository root`);
+  }
   validateExecutionState(result, `check ${check.name}.result`);
+  if (contract.availability === "unavailable" && result.state !== "not-run") {
+    invalid(`check ${check.name} is unavailable and must be not-run`);
+  }
   const startedAt = parseTimestamp(result.startedAt, `check ${check.name}.result startedAt`);
   const endedAt = parseTimestamp(result.endedAt, `check ${check.name}.result endedAt`);
   if (endedAt < startedAt) invalid(`check ${check.name}.result endedAt precedes startedAt`);
@@ -415,6 +491,13 @@ function validateCheckResult(check, evidenceRoot, artifactPaths, evidenceSubject
   validateToolchain(result.toolchain, `check ${check.name}.result toolchain`);
   const stdout = assertArtifact(result.stdout, evidenceRoot, `check ${check.name}.stdout`, artifactPaths);
   const stderr = assertArtifact(result.stderr, evidenceRoot, `check ${check.name}.stderr`, artifactPaths);
+  if (contract.availability === "available" && result.state === "pass") {
+    try {
+      validateReadinessCommandOutput(stdout, contract);
+    } catch (error) {
+      invalid(`check ${check.name}.stdout ${error.message}`);
+    }
+  }
   if (result.state === "not-run" && (stdout.length !== 0 || stderr.length !== 0)) {
     invalid(`check ${check.name} not-run output artifacts must be empty`);
   }
@@ -423,7 +506,7 @@ function validateCheckResult(check, evidenceRoot, artifactPaths, evidenceSubject
   };
 }
 
-function validateEvidence(evidence, evidenceDirectory, asOfMilliseconds) {
+function validateEvidence(evidence, evidenceDirectory, asOfMilliseconds, repositoryRoots) {
   assertExactKeys(evidence, ["checks", "schema", "subject"], "evidence");
   if (evidence.schema !== READINESS_EVIDENCE_SCHEMA) {
     invalid(`schema must be ${READINESS_EVIDENCE_SCHEMA}`);
@@ -459,7 +542,8 @@ function validateEvidence(evidence, evidenceDirectory, asOfMilliseconds) {
       evidenceRoot,
       artifactPaths,
       evidence.subject,
-      asOfMilliseconds
+      asOfMilliseconds,
+      repositoryRoots
     );
     states.set(check, result.state);
   }
@@ -508,8 +592,15 @@ export function scoreReadinessEvidence({
   museRepository
 }) {
   const asOfMilliseconds = parseTimestamp(asOf, "--as-of");
-  const states = validateEvidence(evidence, evidenceDirectory, asOfMilliseconds);
-  assertRepositoryBinding(attunegraphRepository, museRepository, evidence.subject);
+  if (!readinessContractsMatchInventory(READINESS_GATES)) {
+    invalid("fixed check-contract registry does not match the readiness inventory");
+  }
+  const repositoryRoots = assertRepositoryBinding(
+    attunegraphRepository,
+    museRepository,
+    evidence.subject
+  );
+  const states = validateEvidence(evidence, evidenceDirectory, asOfMilliseconds, repositoryRoots);
   const gates = READINESS_GATES.map((gate) => {
     const checks = evidence.checks.filter((check) => check.gate === gate.name);
     const state = gateState(checks, states);
@@ -526,15 +617,17 @@ export function scoreReadinessEvidence({
   });
   const score = gates.reduce((total, gate) => total + gate.score, 0);
   const byName = new Map(gates.map((gate) => [gate.name, gate]));
-  const eligible = score >= 90
+  const integrityThresholdMet = score >= 90
     && byName.get("muse-integration").state === "pass"
     && byName.get("semantic-safety").state === "pass"
     && byName.get("persistence-portable").state === "pass";
   return Object.freeze({
     asOf,
-    eligible,
+    authenticity: "unattested",
+    eligible: false,
     gates: Object.freeze(gates),
-    note: "This score measures executable evidence coverage, never product usefulness.",
+    integrityThresholdMet,
+    note: "This is an integrity-only local coverage report. It is not execution-authentic qualification evidence.",
     schema: READINESS_SCORE_SCHEMA,
     score,
     subject: evidence.subject
