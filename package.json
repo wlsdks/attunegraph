@@ -22,6 +22,7 @@
     "READINESS.md",
     "CHANGELOG.md",
     "PORTABLE-FORMAT.md",
+    "SOURCE-ADAPTERS.md",
     "LICENSE",
     "attunegraph-local-runtime-manifest.json",
     "performance-thresholds.json",
@@ -60,6 +61,10 @@
       "types": "./dist/attunegraph-backend.d.ts",
       "import": "./dist/attunegraph-backend.js"
     },
+    "./source-adapter": {
+      "types": "./dist/source-adapter.d.ts",
+      "import": "./dist/source-adapter.js"
+    },
     "./local": {
       "types": "./dist/local.d.ts",
       "import": "./dist/local.js"
@@ -92,6 +97,7 @@
     "test:supported": "pnpm build && vitest run",
     "test:focused": "pnpm build && vitest run src/attunegraph-engine.test.ts",
     "example": "pnpm build && node examples/basic-agent.mjs",
+    "example:source-adapter": "pnpm build && node examples/source-adapter-agent.mjs",
     "pack:dry-run": "pnpm build && npm pack --dry-run --json",
     "verify:clean-room-consumer": "node scripts/verify-clean-room-consumer.mjs",
     "readiness:capture": "node scripts/capture-attunegraph-readiness.mjs",
