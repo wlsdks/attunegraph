@@ -527,6 +527,10 @@ function hostIdentity() {
   });
 }
 
+export function captureAgentDecisionReadHostIdentity() {
+  return hostIdentity();
+}
+
 function pnpmVersion(userAgent = process.env.npm_config_user_agent) {
   const userAgentVersion = /(?:^|\s)pnpm\/([^\s]+)/u.exec(userAgent ?? "")?.[1];
   if (userAgentVersion !== undefined) return userAgentVersion;

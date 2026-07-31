@@ -33,10 +33,17 @@ This is a standalone, publishable package boundary. It has:
 - a canonical NDJSON portable format with checked-in golden fixtures;
 - a checked-in Working Graph retrieval corpus covering exact roots,
   bitemporal cutoffs, budget partials, freshness, and abstention;
-- a revision-bound, measurement-only 10K/100K/1M scale harness.
+- a revision-bound, measurement-only 10K/100K/1M scale harness;
 - a bounded agent decision-read scale harness for active 16/32/48 frontier and
-  focused-resumption observations, including an explicit authority-abstention
-  sentinel; it is measurement-only evidence, never action authority.
+  focused-resumption observations, including frozen semantic/projection
+  anchors and an explicit authority-abstention sentinel; it is measurement-only
+  evidence, never action authority.
+
+Performance is treated as a public contract boundary, not a README claim.
+Harnesses time the public operations an agent invokes, retain raw samples, bind
+evidence to an unchanged clean revision and host identity, and keep unsupported
+percentiles null. The bounded scale workload is an optimization detector for
+its declared shapes; it is not a general scalability or production-SLA claim.
 
 The package is not yet published to a registry and does not provide a hosted
 service. Its API is usable locally from this repository now.

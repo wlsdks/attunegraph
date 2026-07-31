@@ -29,7 +29,6 @@
     "performance-thresholds.json",
     "scripts/benchmark-attunegraph-agent-decision-read.mjs",
     "scripts/benchmark-attunegraph-agent-decision-read-scale.mjs",
-    "scripts/benchmark-attunegraph-agent-decision-read-scale.test.mjs",
     "scripts/benchmark-attunegraph-performance.mjs",
     "scripts/qualify-attunegraph-performance.mjs",
     "scripts/verify-attunegraph-performance-regression.mjs",

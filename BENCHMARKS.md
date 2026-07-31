@@ -450,19 +450,32 @@ pnpm benchmark:agent-decision-read-scale -- \
 ```
 
 The command accepts only absolute, normalized, non-existing paths beneath a
-non-symlink external directory and creates an owner-only file. Reports retain
-raw cold/warm timings and only publish p50 at five or more independent
-repetitions; p95 and p99 are always null (maximum ten repetitions). Exact
-stored `canonical-projection@2` bytes remain at or below 15,500 bytes and use
-an opaque thread root distinct from the scope key. A compact same-store
-authority sentinel records explicit `AUTHORIZED_BY` source references, refuses
-to infer authority for a different governed action, and proves that a stale,
-expired generation-two authorization abstains after its head changes.
+non-symlink external directory. On POSIX it requests mode `0600`; on Windows,
+Node's mode is not an ACL guarantee, so the containing directory's ACL remains
+the security boundary. The evidence envelope binds the report to exact argv,
+host identity, and one unchanged clean repository commit/tree/lockfile.
+
+Reports separate public `working-graph@1` execute time from batch wall time,
+projection preparation, and the excluded warm prime. They retain raw
+cold/warm timings and only publish p50 at five or more independent repetitions;
+p95 and p99 are always null (maximum ten repetitions). Process memory
+checkpoints use bytes and are explicitly observational: they are neither
+per-operation deltas nor resource qualification. Exact stored
+`canonical-projection@2` output remains at or below 15,500 bytes and uses an
+opaque thread root distinct from the scope key. Checked-in workload,
+projection, semantic, and authority hashes force a workload-version bump on
+drift instead of learning anchors from the first repetition. A compact
+same-store authority sentinel records explicit `AUTHORIZED_BY` source
+references, refuses to infer authority for a different governed action, and
+proves that a stale, expired generation-two authorization abstains after its
+head changes and that colliding refs cannot cross scopes.
 
 Every report is permanently `measurementOnly: true`, `claimEligible: false`,
 `resourceAuthoritative: false`, and `resourceQualified: false`. The harness is
 observational performance evidence only; it does not qualify resources or
-grant an action any authority.
+grant an action any authority. Its active maximum is 48 assertions and 32
+single-seed reads; larger scale claims belong to the separate revision-bound
+10K/100K/1M harness.
 
 The separate profiled report and `.cpuprofile` have SHA-256 values
 `2c6fbac01e8a416cc2959ce1dbabf840a40c7767d315cc7a0c78560e8f642927`
