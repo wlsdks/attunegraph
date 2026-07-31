@@ -323,6 +323,67 @@ clean commit above, so this is a controlled cross-revision observation, not a
 paired exact-base attribution. Three repetitions cannot characterize p95/p99
 tails, cross-machine behavior, or production workload variance.
 
+### Fixed exact-base paired checkpoint
+
+The later exact-base checkpoint froze both sides before measurement rather
+than reading a mutable live `main` worktree. The base was clean commit
+`33538c5de1d1fbebe2a01ffe6f7deec9dcb17580`, tree
+`c8aa6879a942380cf6691ee77f8e12cedfdcceac`. The feature was clean docs commit
+`2e2ed6de24f2d0efadcfcf1a37a3e2914ec64476`, tree
+`35ed9c194c90aad8f9720347e8289ab4fd07e5d8`; its only changes after the code
+commit `d3137c71c1bbc9f9d31a461439ae51226c473b80` were `BENCHMARKS.md` and
+`CHANGELOG.md`. Both detached checkouts used the same lockfile SHA-256,
+`c696e0cdde9b5e21ee598af9101b4611b5e60e4b75b14c5f5a36e47f8a6338c4`.
+
+Five fresh-process pairs ran sequentially in the fixed order AB, BA, AB, BA,
+AB with no competing benchmark process. Every process used Node 24.15.0 and
+pnpm 10.18.0 on macOS arm64, Apple M2 Max, 12 logical CPUs, and
+68,719,476,736 bytes of memory. Every report used
+`--scale=10000 --profile=portable --concurrency=1 --warmups=1
+--repetitions=1`. The deterministic corpus SHA-256 was
+`d559ae4167c89b9b8ac782df5e493c17d4f6755dc6b0b8baebdb2a87984417e1`.
+
+The table takes the median of the five base samples and five feature samples
+for each side. The paired ratio and delta are calculated inside each adjacent
+pair first and then take the median of those five values; they are not a ratio
+or subtraction of the two side medians.
+
+| Metric | Base median [range] | Feature median [range] | Paired feature/base median | Paired feature-base median |
+| --- | ---: | ---: | ---: | ---: |
+| Preparation | 1,326.803 ms [1,279.338, 1,347.445] | 535.779 ms [534.375, 541.705] | 0.4067 (59.33% lower) | -786.077 ms |
+| Encode | 6,155.440 ms [6,077.802, 6,271.708] | 2,293.645 ms [2,273.935, 2,298.209] | 0.3727 (62.73% lower) | -3,861.222 ms |
+| Decode | 7,438.446 ms [7,228.441, 7,506.205] | 2,719.524 ms [2,681.227, 2,769.952] | 0.3690 (63.10% lower) | -4,724.436 ms |
+| Peak RSS | 390,791,168 bytes [352,731,136, 400,179,200] | 372,326,400 bytes [315,146,240, 372,916,224] | 0.9314 (6.86% lower) | -27,361,280 bytes |
+| Artifact | 10,046,693 bytes [same for all samples] | 10,046,693 bytes [same for all samples] | 1.0000 | 0 bytes |
+
+Every value in the table is recomputed from the hash-bound producer report
+samples. All ten reports record `repository.clean: true`, retain the
+exact 10,046,693-byte artifact, and converge to 313 decoded heads and 313
+decoded projections with `summaryMatches: true`.
+
+The ten report SHA-256 values are:
+
+| Pair order | Base report SHA-256 | Feature report SHA-256 |
+| --- | --- | --- |
+| AB | `8e956b6e880f15d905626d9628c9cd19de3e3a2ff34967bc5d8ccc554dd3035b` | `60d3e6a6ecae55e298b845f66d8c3e50cc35fc70930a1d277540253d64643b6f` |
+| BA | `8ecc6036bb9d920ef9be71fefc0d877e18ab73f441708297a65217adbb47ad1a` | `e68a60bd5ad7df21df730a5bd9409c21338dcd7c111e44e6d7dc308b595d31e0` |
+| AB | `87708d3d11fe55459abb8ffb898cd23540e072c0b9b57e796b90ce0f139a2452` | `b82917b6051a936b6aa62d8656085acc4bc95da453d53e496740a3e8ce17985a` |
+| BA | `f81e1aad86e6a036dce6c85f7baacb542fc991e802b495cae85ac5b68f8df702` | `d48a3b097a96029dca353db3ab2d78353c1eed3a59d8c9424992b0df78c03815` |
+| AB | `1dd92440d08f9ff346fd7c9785558d748975444f7cfa388e21c892b97faf4a9c` | `83cfae132d010adff7f87146ab2671182694ee22a6dd21d530ce94ecbb91a8b5` |
+
+An earlier attempt allowed the live base checkout to advance after the first
+pair. Its later nominal base reports therefore bound commit
+`5872b2a838eca2b719422897affdb6807e92ae46` and the feature tree rather than
+the fixed base above. Those eight files are quarantined under
+`/private/tmp/attunegraph-exact-base-attribution.GfB4ng/discarded-live-base-moved`
+and are excluded from every value and report hash in this checkpoint.
+
+Every included report remains `measurementOnly: true` and
+`claimEligible: false`. Five pairs support this one-host paired median
+observation only. They do not make p95 or p99 eligible and do not establish an
+SLA, an absolute performance qualification, a production-workload result, or
+a general macOS, arm64, Apple Silicon, or other-hardware claim.
+
 The separate profiled report and `.cpuprofile` have SHA-256 values
 `2c6fbac01e8a416cc2959ce1dbabf840a40c7767d315cc7a0c78560e8f642927`
 and `7bef59dcb65f09676ac5bc6316445807fdde0b43bcdc850edf75b46bc58b0cc2`.
