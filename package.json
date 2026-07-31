@@ -22,7 +22,9 @@
     "CHANGELOG.md",
     "PORTABLE-FORMAT.md",
     "LICENSE",
-    "attunegraph-local-runtime-manifest.json"
+    "attunegraph-local-runtime-manifest.json",
+    "scripts/capture-attunegraph-readiness.mjs",
+    "scripts/score-attunegraph-readiness.mjs"
   ],
   "keywords": [
     "ai-agent",
@@ -78,12 +80,13 @@
     "test:benchmark-qualification": "pnpm build && vitest run --config vitest.benchmark-qualification.config.ts",
     "test:cross-platform": "pnpm build && vitest run --config vitest.cross-platform.config.ts",
     "test:local-profile": "pnpm build && vitest run --config vitest.local-profile.config.ts",
-    "test:readiness": "vitest run scripts/score-attunegraph-readiness.test.mjs",
+    "test:readiness": "vitest run scripts/*attunegraph-readiness.test.mjs",
     "test:supported": "pnpm build && vitest run",
     "test:focused": "pnpm build && vitest run src/attunegraph-engine.test.ts",
     "example": "pnpm build && node examples/basic-agent.mjs",
     "pack:dry-run": "pnpm build && npm pack --dry-run --json",
     "verify:clean-room-consumer": "node scripts/verify-clean-room-consumer.mjs",
+    "readiness:capture": "node scripts/capture-attunegraph-readiness.mjs",
     "readiness:score": "node scripts/score-attunegraph-readiness.mjs",
     "fixtures:portable": "pnpm build && node scripts/generate-attunegraph-portable-fixtures.mjs",
     "verify:local": "pnpm build && node scripts/verify-attunegraph-local.mjs",

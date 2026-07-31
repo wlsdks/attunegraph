@@ -23,6 +23,7 @@ jobs:
       - run: pnpm check:naming
       - run: pnpm typecheck
       - run: pnpm test:focused
+      - run: pnpm test:readiness
       - run: node examples/basic-agent.mjs
       - run: npm pack --dry-run --json
 
