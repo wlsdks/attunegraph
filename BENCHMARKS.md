@@ -431,6 +431,67 @@ observation only. They do not make p95 or p99 eligible and do not establish an
 SLA, an absolute performance qualification, a production-workload result, or
 a general macOS, arm64, Apple Silicon, or other-hardware claim.
 
+## Agent decision-read active scale
+
+`agent-decision-read-scale@1` is a separate, in-memory public
+`working-graph@1` measurement workload. It fixes active scales at 16, 32, and
+48 for focused resumption and thread frontier reads, plus unique single-seed
+frontier batches of 1, 4, and 32. Each measured cold head is unprimed; each
+warm head is separately rebuilt and receives one excluded prime. Every
+repetition rebuilds both heads.
+
+Run it only from a clean checkout and write evidence outside the repository:
+
+```sh
+pnpm benchmark:agent-decision-read-scale -- \
+  --workload=agent-decision-read-scale@1 \
+  --warmups=1 --repetitions=5 \
+  --output=/absolute/non-repository/evidence/agent-decision-read-scale.json
+```
+
+The default cross-platform suite keeps a one-repetition smoke and every strict
+schema/adversarial check. The real five-repetition p50 eligibility exercise is
+kept in the slower qualification lane so it does not stall ordinary edit/test
+loops:
+
+```sh
+pnpm test:benchmark-qualification
+```
+
+The command accepts only absolute, normalized, non-existing paths beneath a
+non-symlink external directory. On POSIX it requests mode `0600`; on Windows,
+Node's mode is not an ACL guarantee, so the containing directory's ACL remains
+the security boundary. The evidence envelope binds the report to exact argv,
+host identity, and one unchanged clean repository commit/tree/lockfile.
+
+Reports separate public `working-graph@1` execute time from batch wall time,
+projection preparation, and the excluded warm prime. They retain raw
+cold/warm timings and only publish p50 at five or more independent repetitions;
+p95 and p99 are always null (maximum ten repetitions). Process memory
+checkpoints use bytes and are explicitly observational: they are neither
+per-operation deltas nor resource qualification. Exact stored
+`canonical-projection@2` output remains at or below 15,500 bytes and uses an
+opaque thread root distinct from the scope key. Checked-in workload,
+projection, semantic, and authority hashes force a workload-version bump on
+drift instead of learning anchors from the first repetition. A compact
+same-store authority sentinel records explicit `AUTHORIZED_BY` source
+references, refuses to infer authority for a different governed action, and
+proves that a stale, expired generation-two authorization abstains after its
+head changes and that colliding refs cannot cross scopes.
+
+Each cell labels its deterministic comparison-work proxy twice:
+`assertionVisitedPairsPerRead` describes one seed read, while
+`batchAssertionVisitedPairs` is the exact per-read value multiplied by the
+batch size. The strict validator enforces that relationship so aggregate batch
+latency cannot be compared accidentally with a single-read work count.
+
+Every report is permanently `measurementOnly: true`, `claimEligible: false`,
+`resourceAuthoritative: false`, and `resourceQualified: false`. The harness is
+observational performance evidence only; it does not qualify resources or
+grant an action any authority. Its active maximum is 48 assertions and 32
+single-seed reads; larger scale claims belong to the separate revision-bound
+10K/100K/1M harness.
+
 The separate profiled report and `.cpuprofile` have SHA-256 values
 `2c6fbac01e8a416cc2959ce1dbabf840a40c7767d315cc7a0c78560e8f642927`
 and `7bef59dcb65f09676ac5bc6316445807fdde0b43bcdc850edf75b46bc58b0cc2`.
