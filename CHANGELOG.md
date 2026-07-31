@@ -6,6 +6,10 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add a deterministic connected-v2 10K/100K/1M scale benchmark with fixed
+  shards, revision/toolchain/corpus binding, raw latency and RSS samples,
+  in-memory and local SQLite profiles, safe non-overwriting JSON output, and an
+  explicit measurement-only/no-readiness-claim boundary.
 - Add `canonical-projection@2` with an explicit `threadRoot` inside the
   content-addressed observation.
 - Reject disconnected graph debris before any Store read or compare-and-swap,
@@ -13,6 +17,10 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Fixed
 
+- Reject a source observation before any Store read or compare-and-swap when
+  its canonical projection cannot fit the Store envelope's single-string
+  budget; previously such a write could commit and then fail its own next read
+  as corrupt.
 - Invoke the pinned TypeScript compiler without platform command shims so builds work on Windows.
 - Verify cross-platform contracts on Linux, macOS, and Windows while keeping
   local SQLite and Admin verification on their reviewed Linux/macOS profiles.

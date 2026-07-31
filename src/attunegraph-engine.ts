@@ -1,6 +1,7 @@
 import { types as nodeTypes } from "node:util";
 
 import {
+  CANONICAL_IMMUTABLE_ENVELOPE_LIMITS,
   CanonicalImmutableEnvelopeError,
   canonicalizeImmutableEnvelope
 } from "./canonical-immutable-envelope.js";
@@ -25,7 +26,10 @@ const MAX_WORKING_DEPTH = 2;
 const MAX_WORKING_CONSIDERED = 128;
 const MAX_WORKING_VISITED = 64;
 const MAX_WORKING_ASSERTIONS = 64;
-const MAX_STORED_PROJECTION_TEXT = 1_048_576;
+const MAX_STORED_PROJECTION_TEXT =
+  CANONICAL_IMMUTABLE_ENVELOPE_LIMITS.maxStringCodeUnits;
+const MAX_STORED_PROJECTION_BYTES =
+  CANONICAL_IMMUTABLE_ENVELOPE_LIMITS.maxStringBytes;
 
 type DataRecord = Record<string, unknown>;
 
@@ -262,14 +266,22 @@ function normalizeProject(command: AttuneGraphProjectCommand, expectedScope: Att
   }
   const expectedSnapshot = input.expectedSnapshot === undefined ? undefined : snapshot(input.expectedSnapshot, "project command.expectedSnapshot");
   if (expectedSnapshot && !sameScope(expectedSnapshot.scope, expectedScope)) attuneGraphError("SNAPSHOT_SCOPE_MISMATCH", "expected snapshot belongs to another scope");
-  return Object.freeze({
-    expectedSnapshot,
-    observation: normalizeObservation(
-      input.observation,
-      expectedScope,
-      input.operator === "canonical-projection@2" ? 2 : 1
-    )
-  });
+  const observation = normalizeObservation(
+    input.observation,
+    expectedScope,
+    input.operator === "canonical-projection@2" ? 2 : 1
+  );
+  if (
+    observation.canonicalProjection.length > MAX_STORED_PROJECTION_TEXT
+    || Buffer.byteLength(observation.canonicalProjection, "utf8")
+      > MAX_STORED_PROJECTION_BYTES
+  ) {
+    attuneGraphError(
+      "INVALID_INPUT",
+      "source observation exceeds the stored projection text budget"
+    );
+  }
+  return Object.freeze({ expectedSnapshot, observation });
 }
 
 function safeRef(value: unknown): GraphRef {

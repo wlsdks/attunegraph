@@ -30,7 +30,8 @@ This is a standalone, publishable package boundary. It has:
 - no host-product imports;
 - a provider-neutral engine and store capability;
 - an in-memory semantic oracle and a worker-isolated SQLite adapter;
-- a canonical NDJSON portable format with checked-in golden fixtures.
+- a canonical NDJSON portable format with checked-in golden fixtures;
+- a revision-bound, measurement-only 10K/100K/1M scale harness.
 
 The package is not yet published to a registry and does not provide a hosted
 service. Its API is usable locally from this repository now.
@@ -224,7 +225,12 @@ pnpm pack:dry-run
 pnpm fixtures:portable
 pnpm verify:portable-fixtures
 pnpm verify:local
+pnpm benchmark:scale -- --scale=10000 --profile=core --warmups=0 --repetitions=1
 ```
+
+The benchmark's fixed connected v2 corpus, evidence schema, output safety, and
+claim boundary are documented in [BENCHMARKS.md](BENCHMARKS.md). The 100K and
+1M runs are separate long evidence activities, not normal test gates.
 
 Fixture generation is deterministic. Regeneration must reproduce the checked-in
 inputs, `.atgx` artifacts, manifest hashes, byte counts, record identities, and
