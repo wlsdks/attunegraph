@@ -147,11 +147,13 @@ keeps caller-held optimistic concurrency: after the first generation, a
 distinct observation must carry the exact `expectedSnapshot`. Agents that mean
 "apply this observation to whichever committed head exists when this operation
 starts" may instead call `projectAgainstHead`. That method validates the input
-before Store I/O, reads and validates the complete current projection once, and
-uses that exact internally read snapshot for one compare-and-swap. It does not
-retry, weaken delayed-observation rejection, or provide last-write-wins: a
-concurrent different winner returns `SNAPSHOT_CONFLICT`, while an exact winner
-or replay converges on the same snapshot.
+before Store I/O, performs one complete validated head read on the uncontended
+path, and uses that exact internally read snapshot for one compare-and-swap. It
+does not retry the write, weaken delayed-observation rejection, or provide
+last-write-wins. A CAS miss performs one additional validated read solely to
+distinguish an identical concurrent winner from a conflict: a different winner
+returns `SNAPSHOT_CONFLICT`, while an exact winner or replay converges on the
+same snapshot.
 
 The process-local in-memory adapter is intended for tests and experiments. It
 does not provide durable storage.
