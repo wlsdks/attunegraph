@@ -8,6 +8,7 @@ import { createAttuneGraphStore, type AttuneGraphStoredProjection } from "./attu
 import {
   normalizeAttuneGraphScope,
   normalizeStoredProjection,
+  normalizeStoredProjectionForPortableDecoder,
   openAttuneGraph
 } from "./attunegraph-engine.js";
 import { admitPortableProjection } from "./attunegraph-portable-admission.js";
@@ -126,6 +127,27 @@ it("normalizes the exact valid projection produced by the current Engine", async
   expect(Object.isFrozen(normalized)).toBe(true);
   expect(Object.isFrozen(normalized.snapshot)).toBe(true);
   expect(Object.isFrozen(normalized.assertions)).toBe(true);
+});
+
+it("returns the verified store identity with decoder-normalized canonical input", async () => {
+  const projection = await engineProjection();
+  const canonical = canonicalizeImmutableEnvelope(
+    mutableProjection(projection),
+    "external-mutable",
+    {
+      hashDomain: "attunegraph.store-projection.v1",
+      idField: "storeEnvelopeId",
+      idPrefix: "attunegraph-store:"
+    }
+  );
+
+  const admitted = normalizeStoredProjectionForPortableDecoder(
+    canonical
+  );
+
+  expect(admitted.projection).toEqual(projection);
+  expect(admitted.projectionId).toBe(canonical.contentId);
+  expectDeeplyFrozen(admitted);
 });
 
 it("re-admits one thread-rooted v2 projection through Store and portable boundaries", async () => {
