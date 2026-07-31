@@ -5,6 +5,7 @@ import type {
   AttuneGraph,
   AttuneGraphExecuteCommand,
   AttuneGraphOperatorResult,
+  AttuneGraphProjectAgainstHeadCommand,
   AttuneGraphProjectCommand,
   AttuneGraphScope,
   AttuneGraphSnapshot
@@ -175,6 +176,11 @@ async function openLocalAttuneGraphSessionWithStoreOptions(
     },
     project(command: AttuneGraphProjectCommand): Promise<AttuneGraphSnapshot> {
       return begin(() => engine.project(command));
+    },
+    projectAgainstHead(
+      command: AttuneGraphProjectAgainstHeadCommand
+    ): Promise<AttuneGraphSnapshot> {
+      return begin(() => engine.projectAgainstHead(command));
     },
     execute(command: AttuneGraphExecuteCommand): Promise<AttuneGraphOperatorResult> {
       return begin(() => engine.execute(command));

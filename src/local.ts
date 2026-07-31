@@ -4,6 +4,7 @@ import type {
   AttuneGraph,
   AttuneGraphExecuteCommand,
   AttuneGraphOperatorResult,
+  AttuneGraphProjectAgainstHeadCommand,
   AttuneGraphProjectCommand,
   AttuneGraphScope,
   AttuneGraphSnapshot
@@ -163,6 +164,11 @@ export async function openLocalAttuneGraph(options: OpenLocalAttuneGraphOptions)
     project(command: AttuneGraphProjectCommand) {
       return lifecycle === "open"
         ? engine.project(command)
+        : rejectClosed<AttuneGraphSnapshot>();
+    },
+    projectAgainstHead(command: AttuneGraphProjectAgainstHeadCommand) {
+      return lifecycle === "open"
+        ? engine.projectAgainstHead(command)
         : rejectClosed<AttuneGraphSnapshot>();
     },
     execute(command: AttuneGraphExecuteCommand) {

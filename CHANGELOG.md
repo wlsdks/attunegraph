@@ -6,6 +6,11 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add explicit `projectAgainstHead` optimistic concurrency for agents that
+  intend the latest committed head at operation start, using one validated
+  Store read and one exact CAS without weakening `project` semantics.
+- Add a paired measurement-only local-session update profile comparing caller
+  `head()` plus exact `project` against `projectAgainstHead`.
 - Add an Ubuntu Node 24.15 clean-room consumer CI proof that packs the built
   package, installs it offline outside the checkout, and exercises its public
   export boundary through a canonical-projection@2 Working Graph.

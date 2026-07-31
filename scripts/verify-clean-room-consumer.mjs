@@ -104,38 +104,53 @@ const { createInMemoryAttuneGraphStore } = await import("@attunegraph/core/testi
 const scope = { sourceId: "clean-room-consumer", threadId: "release-proof" };
 const threadRoot = { id: "thread:release-proof", kind: "thread" };
 const now = "2026-07-31T09:00:00.000Z";
+const later = "2026-07-31T09:00:01.000Z";
 const graph = await openAttuneGraph({ scope, store: createInMemoryAttuneGraphStore() });
 
 try {
-  const snapshot = await graph.project({
+  const observation = {
+    schemaVersion: 2,
+    observationKey: "clean-room-release-proof",
+    scope,
+    threadRoot,
+    observedAt: now,
+    sourceFreshness: { state: "fresh", observedAt: now },
+    assertions: [{
+      schemaVersion: 1,
+      id: "clean-room-artifact-linked-to-thread",
+      subject: { id: "artifact:clean-room", kind: "artifact" },
+      predicate: "LINKED_TO",
+      object: { ...threadRoot },
+      epistemicClass: "source-observed",
+      sourceRefs: [{ namespace: "clean-room.example", id: "release-proof" }],
+      recordedAt: now,
+      derivation: { kind: "projection", version: "clean-room@1" }
+    }]
+  };
+  const first = await graph.project({
     operator: "canonical-projection@2",
     observation: {
-      schemaVersion: 2,
-      observationKey: "clean-room-release-proof",
-      scope,
-      threadRoot,
-      observedAt: now,
-      sourceFreshness: { state: "fresh", observedAt: now },
-      assertions: [{
-        schemaVersion: 1,
-        id: "clean-room-artifact-linked-to-thread",
-        subject: { id: "artifact:clean-room", kind: "artifact" },
-        predicate: "LINKED_TO",
-        object: { ...threadRoot },
-        epistemicClass: "source-observed",
-        sourceRefs: [{ namespace: "clean-room.example", id: "release-proof" }],
-        recordedAt: now,
-        derivation: { kind: "projection", version: "clean-room@1" }
-      }]
+      ...observation
+    }
+  });
+  const snapshot = await graph.projectAgainstHead({
+    operator: "canonical-projection@2",
+    observation: {
+      ...observation,
+      observationKey: "clean-room-release-proof-update",
+      observedAt: later,
+      sourceFreshness: { state: "fresh", observedAt: later }
     }
   });
   const result = await graph.execute({
     operator: "working-graph@1",
     seed: threadRoot,
-    now,
+    now: later,
     maxEstimatedTokens: 500
   });
   assert.equal(snapshot.scope.threadId, scope.threadId);
+  assert.equal(first.generation, 1);
+  assert.equal(snapshot.generation, 2);
   assert.equal(result.status, "complete");
   assert.deepEqual(result.workingGraph.seed, threadRoot);
   assert.equal(result.workingGraph.assertions.length, 1);

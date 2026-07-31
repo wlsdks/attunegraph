@@ -74,6 +74,16 @@ export type AttuneGraphProjectCommand =
     readonly observation: AttuneGraphSourceObservationV2;
   });
 
+export type AttuneGraphProjectAgainstHeadCommand =
+  | {
+    readonly operator: "canonical-projection@1";
+    readonly observation: AttuneGraphSourceObservationV1;
+  }
+  | {
+    readonly operator: "canonical-projection@2";
+    readonly observation: AttuneGraphSourceObservationV2;
+  };
+
 export interface AttuneGraphExecuteCommand {
   readonly operator: "working-graph@1";
   readonly seed: GraphRef;
@@ -110,6 +120,14 @@ export interface AttuneGraph {
    */
   head(): Promise<AttuneGraphSnapshot | undefined>;
   project(command: AttuneGraphProjectCommand): Promise<AttuneGraphSnapshot>;
+  /**
+   * Validates the complete committed projection, then uses that internally read
+   * snapshot as one exact CAS expectation. A concurrent different winner still
+   * conflicts; this is not last-write-wins or an automatic retry policy.
+   */
+  projectAgainstHead(
+    command: AttuneGraphProjectAgainstHeadCommand
+  ): Promise<AttuneGraphSnapshot>;
   execute(command: AttuneGraphExecuteCommand): Promise<AttuneGraphOperatorResult>;
   close(): Promise<void>;
 }

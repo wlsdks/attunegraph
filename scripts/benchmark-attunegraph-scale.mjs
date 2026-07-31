@@ -16,7 +16,12 @@ import {
 } from "@attunegraph/core/testing";
 
 const SUPPORTED_SCALES = new Set([10_000, 100_000, 1_000_000]);
-const SUPPORTED_PROFILES = new Set(["core", "local", "local-session"]);
+const SUPPORTED_PROFILES = new Set([
+  "core",
+  "local",
+  "local-session",
+  "local-session-update-comparison"
+]);
 const SUPPORTED_ARGUMENTS = new Set([
   "output",
   "profile",
@@ -65,7 +70,7 @@ export function parseBenchmarkArguments(args) {
   const profile = values.get("profile");
   if (profile === undefined) throw new Error("--profile is required");
   if (!SUPPORTED_PROFILES.has(profile)) {
-    throw new Error("profile must be core or local");
+    throw new Error("profile is not supported");
   }
 
   const outputPath = values.get("output");
@@ -187,6 +192,29 @@ export function createBenchmarkShard(plan, shardIndex) {
     },
     scope,
     threadRoot
+  };
+}
+
+function createUpdateComparisonCommand(shard, lane, phase) {
+  const scope = {
+    ...shard.scope,
+    threadId: `${shard.scope.threadId}-${lane}`
+  };
+  const observedAt = phase === "seed"
+    ? BENCHMARK_OBSERVED_AT
+    : "2026-07-31T00:00:01.000Z";
+  return {
+    operator: shard.command.operator,
+    observation: {
+      ...shard.command.observation,
+      observationKey: `${shard.command.observation.observationKey}:${lane}:${phase}`,
+      scope,
+      observedAt,
+      sourceFreshness: {
+        state: "fresh",
+        observedAt
+      }
+    }
   };
 }
 
@@ -606,6 +634,183 @@ export async function runLocalSessionCorpus(plan, runtime = {}) {
   return completedRun;
 }
 
+export async function runLocalSessionUpdateComparison(plan, runtime = {}) {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "attunegraph-benchmark-")));
+  await chmod(directory, 0o700);
+  const databasePath = join(directory, "attunegraph.sqlite");
+  const samples = {
+    againstHeadProject: [],
+    close: [],
+    exactHeadThenProject: [],
+    exactProjection: [],
+    head: [],
+    open: [],
+    projection: [],
+    seedProjection: [],
+    sessionClose: [],
+    sessionOpen: [],
+    verificationHead: []
+  };
+  const rssBaselineBytes = process.memoryUsage().rss;
+  let sampledPeakRssBytes = rssBaselineBytes;
+  const lifecycleStartedAt = performance.now();
+  let session;
+  let sessionCloseAttempted = false;
+  let primaryFailure;
+  let completedRun;
+
+  try {
+    const openLocalAttuneGraphSession = runtime.openLocalAttuneGraphSession
+      ?? (await import("@attunegraph/core/local")).openLocalAttuneGraphSession;
+    let startedAt = performance.now();
+    session = await openLocalAttuneGraphSession({ databasePath });
+    samples.sessionOpen.push(performance.now() - startedAt);
+
+    for (let shardIndex = 0; shardIndex < plan.shardCount; shardIndex += 1) {
+      const shard = createBenchmarkShard(plan, shardIndex);
+      const exactScope = {
+        ...shard.scope,
+        threadId: `${shard.scope.threadId}-a`
+      };
+      const againstHeadScope = {
+        ...shard.scope,
+        threadId: `${shard.scope.threadId}-b`
+      };
+      startedAt = performance.now();
+      const [exactGraph, againstHeadGraph] = await Promise.all([
+        session.open({ scope: exactScope }),
+        session.open({ scope: againstHeadScope })
+      ]);
+      samples.open.push(performance.now() - startedAt);
+
+      try {
+        const exactSeed = createUpdateComparisonCommand(shard, "a", "seed");
+        const againstHeadSeed = createUpdateComparisonCommand(shard, "b", "seed");
+        startedAt = performance.now();
+        await Promise.all([
+          exactGraph.project(exactSeed),
+          againstHeadGraph.project(againstHeadSeed)
+        ]);
+        samples.seedProjection.push(performance.now() - startedAt);
+
+        const exactUpdateStartedAt = performance.now();
+        startedAt = performance.now();
+        const exactHead = await exactGraph.head();
+        samples.head.push(performance.now() - startedAt);
+        if (exactHead?.generation !== 1) {
+          throw new Error("update comparison exact head did not match its seed");
+        }
+        startedAt = performance.now();
+        const exactSnapshot = await exactGraph.project({
+          ...createUpdateComparisonCommand(shard, "a", "update"),
+          expectedSnapshot: exactHead
+        });
+        samples.exactProjection.push(performance.now() - startedAt);
+        samples.exactHeadThenProject.push(performance.now() - exactUpdateStartedAt);
+
+        startedAt = performance.now();
+        const againstHeadSnapshot = await againstHeadGraph.projectAgainstHead(
+          createUpdateComparisonCommand(shard, "b", "update")
+        );
+        const againstHeadElapsed = performance.now() - startedAt;
+        samples.againstHeadProject.push(againstHeadElapsed);
+        samples.projection.push(againstHeadElapsed);
+        if (
+          exactSnapshot.generation !== 2
+          || againstHeadSnapshot.generation !== 2
+        ) {
+          throw new Error("update comparison did not advance both projections");
+        }
+
+        startedAt = performance.now();
+        const verified = await againstHeadGraph.head();
+        samples.verificationHead.push(performance.now() - startedAt);
+        if (verified?.commitId !== againstHeadSnapshot.commitId) {
+          throw new Error("update comparison latest head did not match its projection");
+        }
+      } finally {
+        startedAt = performance.now();
+        await Promise.all([exactGraph.close(), againstHeadGraph.close()]);
+        samples.close.push(performance.now() - startedAt);
+      }
+      sampledPeakRssBytes = Math.max(sampledPeakRssBytes, process.memoryUsage().rss);
+    }
+
+    startedAt = performance.now();
+    sessionCloseAttempted = true;
+    await session.close();
+    samples.sessionClose.push(performance.now() - startedAt);
+
+    const againstHeadProjectionMilliseconds = samples.againstHeadProject.reduce(
+      (sum, sample) => sum + sample,
+      0
+    );
+    const exactHeadThenProjectMilliseconds = samples.exactHeadThenProject.reduce(
+      (sum, sample) => sum + sample,
+      0
+    );
+    const rssFinalBytes = process.memoryUsage().rss;
+    completedRun = {
+      assertionsPerSecond: plan.assertionCount
+        / (againstHeadProjectionMilliseconds / 1_000),
+      databaseBytes: {
+        database: await optionalFileBytes(databasePath),
+        sharedMemory: await optionalFileBytes(`${databasePath}-shm`),
+        writeAheadLog: await optionalFileBytes(`${databasePath}-wal`)
+      },
+      exactHeadThenProjectAssertionsPerSecond: plan.assertionCount
+        / (exactHeadThenProjectMilliseconds / 1_000),
+      lifecycleAssertionsPerSecond: plan.assertionCount
+        / ((performance.now() - lifecycleStartedAt) / 1_000),
+      projectionsPerSecond: plan.shardCount
+        / (againstHeadProjectionMilliseconds / 1_000),
+      rss: {
+        baselineBytes: rssBaselineBytes,
+        deltaBytes: rssFinalBytes - rssBaselineBytes,
+        finalBytes: rssFinalBytes,
+        sampledPeakBytes: sampledPeakRssBytes,
+        sampling: "phase-boundary"
+      },
+      samples,
+      speedup: exactHeadThenProjectMilliseconds / againstHeadProjectionMilliseconds,
+      statuses: { abstained: 0, complete: 0, partial: 0 }
+    };
+  } catch (cause) {
+    primaryFailure = cause;
+  }
+
+  const cleanupFailures = [];
+  if (session !== undefined && !sessionCloseAttempted) {
+    sessionCloseAttempted = true;
+    try {
+      await session.close();
+    } catch (cause) {
+      cleanupFailures.push(cause);
+    }
+  }
+  try {
+    await rm(directory, { force: true, recursive: true });
+  } catch (cause) {
+    cleanupFailures.push(cause);
+  }
+  if (primaryFailure !== undefined) {
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(
+        [primaryFailure, ...cleanupFailures],
+        "update comparison failed and cleanup did not complete"
+      );
+    }
+    throw primaryFailure;
+  }
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(
+      cleanupFailures,
+      "update comparison cleanup did not complete"
+    );
+  }
+  return completedRun;
+}
+
 function flatten(runs, key) {
   return runs.flatMap((run) => run.samples[key]);
 }
@@ -632,7 +837,9 @@ export async function runScaleBenchmark(options, runtime = {}) {
     ? runCoreCorpus
     : options.profile === "local"
       ? runLocalCorpus
-      : (corpusPlan) => runLocalSessionCorpus(corpusPlan, runtime);
+      : options.profile === "local-session"
+        ? (corpusPlan) => runLocalSessionCorpus(corpusPlan, runtime)
+        : (corpusPlan) => runLocalSessionUpdateComparison(corpusPlan, runtime);
   for (let warmup = 0; warmup < options.warmups; warmup += 1) {
     await runCorpus(plan);
   }
@@ -690,13 +897,47 @@ export async function runScaleBenchmark(options, runtime = {}) {
         sessionCloseMilliseconds: summarizeBenchmarkSamples(flatten(runs, "sessionClose")),
         sessionOpenMilliseconds: summarizeBenchmarkSamples(flatten(runs, "sessionOpen"))
       } : {}),
-      workingGraphMilliseconds: summarizeBenchmarkSamples(
-        flatten(runs, "workingGraph")
-      )
+      ...(options.profile === "local-session-update-comparison" ? {
+        againstHeadProjectMilliseconds: summarizeBenchmarkSamples(
+          flatten(runs, "againstHeadProject")
+        ),
+        databaseBytes: Object.freeze(runs.map((run) => Object.freeze(run.databaseBytes))),
+        exactHeadThenProjectAssertionsPerSecond: summarizeBenchmarkSamples(
+          runs.map((run) => run.exactHeadThenProjectAssertionsPerSecond)
+        ),
+        exactHeadThenProjectMilliseconds: summarizeBenchmarkSamples(
+          flatten(runs, "exactHeadThenProject")
+        ),
+        exactProjectionMilliseconds: summarizeBenchmarkSamples(
+          flatten(runs, "exactProjection")
+        ),
+        seedProjectionMilliseconds: summarizeBenchmarkSamples(
+          flatten(runs, "seedProjection")
+        ),
+        sessionCloseMilliseconds: summarizeBenchmarkSamples(flatten(runs, "sessionClose")),
+        sessionOpenMilliseconds: summarizeBenchmarkSamples(flatten(runs, "sessionOpen")),
+        speedup: summarizeBenchmarkSamples(runs.map((run) => run.speedup)),
+        verificationHeadMilliseconds: summarizeBenchmarkSamples(
+          flatten(runs, "verificationHead")
+        )
+      } : {
+        workingGraphMilliseconds: summarizeBenchmarkSamples(
+          flatten(runs, "workingGraph")
+        )
+      })
     }),
     operations: Object.freeze({
-      projectedAssertions: plan.assertionCount * options.repetitions,
-      projections: plan.shardCount * options.repetitions,
+      projectedAssertions: plan.assertionCount * options.repetitions
+        * (options.profile === "local-session-update-comparison" ? 4 : 1),
+      projections: plan.shardCount * options.repetitions
+        * (options.profile === "local-session-update-comparison" ? 4 : 1),
+      ...(options.profile === "local-session-update-comparison" ? {
+        comparison: Object.freeze({
+          againstHeadUpdateAssertions: plan.assertionCount * options.repetitions,
+          exactUpdateAssertions: plan.assertionCount * options.repetitions,
+          seedAssertions: plan.assertionCount * options.repetitions * 2
+        })
+      } : {}),
       workingGraphStatuses: Object.freeze(statusTotals)
     })
   });

@@ -142,6 +142,17 @@ observation whose `observedAt` precedes the active head. This prevents a delayed
 older source read from replacing newer truth; equal-instant distinct writes
 retain the existing expected-snapshot CAS semantics.
 
+The Engine exposes two intentionally distinct write expectations. `project`
+keeps caller-held optimistic concurrency: after the first generation, a
+distinct observation must carry the exact `expectedSnapshot`. Agents that mean
+"apply this observation to whichever committed head exists when this operation
+starts" may instead call `projectAgainstHead`. That method validates the input
+before Store I/O, reads and validates the complete current projection once, and
+uses that exact internally read snapshot for one compare-and-swap. It does not
+retry, weaken delayed-observation rejection, or provide last-write-wins: a
+concurrent different winner returns `SNAPSHOT_CONFLICT`, while an exact winner
+or replay converges on the same snapshot.
+
 The process-local in-memory adapter is intended for tests and experiments. It
 does not provide durable storage.
 
@@ -162,6 +173,10 @@ const attuneGraph = await openLocalAttuneGraph({
 const current = await attuneGraph.head();
 // A distinct projection supplies `current` as expectedSnapshot; an identical
 // observation is replay-safe and returns the same generation.
+
+// When the caller explicitly wants the latest committed head at operation
+// start, avoid a separate head round trip without weakening atomic CAS.
+await attuneGraph.projectAgainstHead(nextProjection);
 await attuneGraph.close();
 ```
 
@@ -257,6 +272,7 @@ pnpm verify:portable-fixtures
 pnpm verify:local
 pnpm benchmark:scale -- --scale=10000 --profile=core --warmups=0 --repetitions=1
 pnpm benchmark:scale -- --scale=10000 --profile=local-session --warmups=0 --repetitions=1
+pnpm benchmark:scale -- --scale=10000 --profile=local-session-update-comparison --warmups=0 --repetitions=1
 pnpm readiness:score -- --as-of=2026-07-31T00:00:00.000Z \
   --evidence=/absolute/path/readiness-evidence.json \
   --attunegraph-repository=/absolute/path/attunegraph \
