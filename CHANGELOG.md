@@ -73,6 +73,14 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Changed
 
+- Remove the redundant post-freeze unsigned canonical re-encode and SHA-256
+  pass while retaining deep frozen-output verification, exact content-ID
+  verification, and byte-for-byte full-envelope re-encoding. Five clean
+  rebuilt AB/BA pairs preserve every workload and semantic anchor and record
+  paired-median reductions of 8.5% to 13.9% cold and 7.8% to 14.7% warm across
+  the nine bounded `agent-decision-read-scale@1` cells. This remains
+  measurement-only evidence from one host, not an SLA or general database
+  performance claim.
 - Replace repeated full-prefix JSON serialization in Working Graph token-budget
   checks with exact incremental UTF-8 byte accounting. Exact one-through-48
   multibyte boundary tests preserve selection and diagnostics, while five

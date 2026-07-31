@@ -590,3 +590,61 @@ hottest direct frames are now canonical traversal `visit` (23.68%),
 `sortedRecordKeys` (7.38%), `boundedPath` (7.33%), and `inspectValue` (5.49%).
 That makes traversal, key sorting, and path construction the next measured
 canonicalization targets; they are deliberately outside this slice.
+
+### Post-freeze canonical verification checkpoint (2026-08-01)
+
+Canonical-envelope admission previously encoded and hashed the unsigned body,
+encoded the complete signed envelope, froze and recursively verified the
+detached result, and then repeated both encodes and the SHA-256 calculation.
+The candidate retains the initial unsigned encode and domain-separated digest,
+deep frozen-output inspection, an exact frozen content-ID check, and an exact
+byte-for-byte complete-envelope re-encode. It removes only the second unsigned
+encode and digest: if the complete signed envelope and its unique content-ID
+field are unchanged, the same envelope with that field omitted is necessarily
+unchanged as well.
+
+The base was clean commit
+`2b238d8032b602e20555992e10eb7584e4ba0f6d`, tree
+`fbd8723820fe39f9d75fa75e17c1b405148b3ee5`. The candidate source was clean
+commit `026c83c824c4d31ad5d1f5676746588d4e0bba42`, tree
+`a47808290e5fc18a9c592504c8a51a2d54017657`. Both used lockfile SHA-256
+`c696e0cdde9b5e21ee598af9101b4611b5e60e4b75b14c5f5a36e47f8a6338c4`.
+
+Five fresh-process pairs ran in AB, BA, AB, BA, AB order after rebuilding both
+checkouts. All reports used Node 22.22.0 and pnpm 10.18.0 on macOS arm64,
+Apple M2 Max, 12 logical CPUs, and 68,719,476,736 bytes of memory with
+`--workload=agent-decision-read-scale@1 --warmups=1 --repetitions=5`. The ten
+reports bind the same workload, authority sentinel, per-cell semantic,
+canonical-projection, scope-isolation, assertion-count, and work anchors.
+
+Each percentage is the median of five adjacent candidate-versus-base p50
+reductions, calculated inside each pair before taking the median.
+
+| Cell | Paired cold median reduction | Paired warm median reduction |
+| --- | ---: | ---: |
+| `focused-resumption-16` | 8.5% | 8.4% |
+| `focused-resumption-32` | 9.3% | 7.8% |
+| `focused-resumption-48` | 13.9% | 14.7% |
+| `thread-frontier-16` | 8.9% | 9.1% |
+| `thread-frontier-32` | 11.2% | 11.4% |
+| `thread-frontier-48` | 10.3% | 9.1% |
+| `thread-frontier-48-batch-1` | 9.8% | 11.2% |
+| `thread-frontier-48-batch-4` | 8.8% | 9.0% |
+| `thread-frontier-48-batch-32` | 10.7% | 9.2% |
+
+One of the five `focused-resumption-16` cold pairs regressed by 6.6%; the other
+four improved. The table reports paired medians rather than hiding that noise.
+The evidence SHA-256 values are:
+
+| Pair order | Base report SHA-256 | Candidate report SHA-256 |
+| --- | --- | --- |
+| AB | `80ee0dc037e44da1b77a7a17bc8b000072ab056a87e43162d4c9a8bd27b7957c` | `44d911c88ef7986085e25bde77be70253a61666ea732aaacee83583ae9d9ee0f` |
+| BA | `bda887ba0ce0507fdf9ecc3addadf47f9f8ca5e407784708c0d6b7c598b93441` | `7316553be52cf0ad4b149f01d7bd9e9fb6530f5faa9ff713934fd51c0163c4f5` |
+| AB | `0d2d255d3c0800fa14d146bc8c25fb47341288d0f7183e500bc99e00f472536b` | `57b1168136854fa9f205157a2b80e9a494db0c3ca9d644cf7999dbab70416c58` |
+| BA | `78ec25459d8a0523c2bd18b81feb6ddf65c67eb56e6f6696c7047db5249807e3` | `efb7752559d61cd82998e0aa6bf6f2704e0401d1c6b04753d259c6e43e728a95` |
+| AB | `3b76ecfefc9c0452e02909787f8495c0598e1ecb302bd9e2cda52a94e50de4e9` | `792e93fe7552e266dd185908fe8c7a1aad119f76150191223c30f0379edaa364` |
+
+Every report remains `measurementOnly: true` and `claimEligible: false`. This
+checkpoint supports a bounded hot-path observation on one host. It does not
+establish p95/p99 tails, a production SLA, cross-machine behavior, or a general
+graph-database performance claim.
