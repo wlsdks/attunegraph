@@ -18,6 +18,13 @@ product usefulness, personal attunement, or user delight.
 | Operability | 5 | inspect, verify, diagnose, zero hidden mutation |
 | Public adoption | 5 | API reference, migration notes, independent example |
 
+The `working-graph-golden-corpus` and `abstention` checks use
+`pnpm verify:working-graph-golden` as their fixed local verification command.
+The readiness evidence producer must capture that command separately for each
+fixed check name and write two distinct strict check artifacts; the verifier's
+single stdout report is not itself a readiness artifact and must not be reused
+or relabeled. Its result remains corpus-bound, not organic usefulness evidence.
+
 All 37 check names are fixed by `attunegraph-readiness-evidence@1`; umbrella or
 unknown names are rejected. A gate contributes its full weight only when every
 check in that gate passes. `fail`, `not-run`, or stale evidence contributes zero.

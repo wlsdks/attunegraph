@@ -24,7 +24,9 @@ jobs:
       - run: pnpm typecheck
       - run: pnpm test:focused
       - run: pnpm test:performance
-      - run: pnpm benchmark:performance -- --scale=10000 --profile=portable --warmups=0 --repetitions=1 --output=/tmp/attunegraph-performance-smoke.json
+      - run: pnpm benchmark:performance -- --scale=10000 --profile=portable --concurrency=1 --warmups=0 --repetitions=1 --output=/tmp/attunegraph-performance-smoke.json
+      - run: pnpm test:readiness
+      - run: pnpm verify:working-graph-golden
       - run: node examples/basic-agent.mjs
       - run: npm pack --dry-run --json
 
