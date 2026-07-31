@@ -15,8 +15,8 @@ export function assertNodeProfile() {
   const [major = Number.NaN, minor = Number.NaN, patch = Number.NaN] =
     process.versions.node.split(".").map(Number);
   if (!Number.isInteger(major) || !Number.isInteger(minor) || !Number.isInteger(patch)
-    || major < 24 || (major === 24 && minor < 12)) {
-    fail("UNSUPPORTED_STORE_PROFILE", "local AttuneGraph requires Node >=24.12.0");
+    || major < 24 || (major === 24 && minor < 15)) {
+    fail("UNSUPPORTED_STORE_PROFILE", "local AttuneGraph requires Node >=24.15.0");
   }
 }
 

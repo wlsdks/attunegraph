@@ -97,7 +97,6 @@ async function captureRefreshFailure(options: {
 }
 
 beforeAll(async () => {
-  await runFile("pnpm", ["build"], { cwd: packageRoot });
   ({ refreshCorpusForTest } = await import(pathToFileURL(generator).href));
 });
 

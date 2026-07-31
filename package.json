@@ -31,7 +31,7 @@
     "sqlite"
   ],
   "engines": {
-    "node": ">=24.12.0"
+    "node": ">=24.15.0"
   },
   "packageManager": "pnpm@10.18.0",
   "publishConfig": {
@@ -68,7 +68,7 @@
     }
   },
   "scripts": {
-    "build": "node scripts/clean-dist.mjs && tsc -b tsconfig.build.json --pretty false",
+    "build": "node scripts/clean-dist.mjs && tsc -p tsconfig.build.json --pretty false",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
     "test": "pnpm build && vitest run",
     "test:focused": "pnpm build && vitest run src/attunegraph-engine.test.ts",

@@ -1,7 +1,8 @@
 {
   "extends": "./tsconfig.json",
   "compilerOptions": {
-    "tsBuildInfoFile": ".cache/tsconfig.build.tsbuildinfo"
+    "composite": false,
+    "incremental": false
   },
   "exclude": [
     "dist",

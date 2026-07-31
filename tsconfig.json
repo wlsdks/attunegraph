@@ -24,7 +24,7 @@
     "sourceMap": true,
     "strict": true,
     "target": "ES2025",
-    "tsBuildInfoFile": "dist/tsconfig.tsbuildinfo",
+    "tsBuildInfoFile": ".cache/tsconfig.tsbuildinfo",
     "types": ["node"],
     "verbatimModuleSyntax": true
   },

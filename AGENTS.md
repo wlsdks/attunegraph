@@ -11,5 +11,5 @@ agent or product.
   compatibility decisions.
 - Use `pnpm test:focused` while editing. Run slow or broad verification
   separately so it does not block unrelated implementation.
-- Before merge, use Node 24.12 or newer and run `pnpm typecheck`, `pnpm test`,
+- Before merge, use Node 24.15 or newer and run `pnpm typecheck`, `pnpm test`,
   `pnpm example`, and `pnpm pack:dry-run`.

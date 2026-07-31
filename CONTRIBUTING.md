@@ -1,6 +1,6 @@
 # Contributing
 
-Use Node 24.12 or newer and pnpm 10 or newer. Install dependencies, then run
+Use Node 24.15 or newer and pnpm 10 or newer. Install dependencies, then run
 the focused test for the area you change before opening a pull request.
 
 ```sh

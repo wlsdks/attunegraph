@@ -13,7 +13,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node: ["24.12.0", "24"]
+        node: ["24.15.0", "24"]
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
@@ -25,7 +25,6 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
-      - run: pnpm build
       - run: pnpm test
-      - run: pnpm example
-      - run: pnpm pack:dry-run
+      - run: node examples/basic-agent.mjs
+      - run: npm pack --dry-run --json
