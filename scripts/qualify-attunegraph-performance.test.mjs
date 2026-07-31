@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { tmpdir } from "node:os";
+import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -80,7 +82,7 @@ function report(requirement) {
     `--concurrency=${requirement.concurrency}`,
     `--warmups=${requirement.minimumWarmups}`,
     `--repetitions=${repetitions}`,
-    `--output=/tmp/${requirement.profile}-${requirement.scale}.json`
+    `--output=${resolve(tmpdir(), `${requirement.profile}-${requirement.scale}.json`)}`
   ];
   const document = {
     claimEligible: false,
