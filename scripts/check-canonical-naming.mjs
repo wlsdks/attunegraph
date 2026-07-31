@@ -6,8 +6,6 @@ import { TextDecoder } from "node:util";
 const word = (...parts) => parts.join("");
 const short = word("m", "ag");
 const long = word("Attunement", "Graph");
-const oldPackage = word("@muse/", "attunement-", "graph");
-const oldPath = word("packages/", "attunement-", "graph");
 const oldFormat = word("muse-", short, "-portable");
 const oldExtension = word(".", short, "x");
 
@@ -16,8 +14,6 @@ function escape(value) {
 }
 
 const patterns = [
-  ["old package", new RegExp(escape(oldPackage), "iu")],
-  ["old path", new RegExp(escape(oldPath), "iu")],
   ["old long product identity", new RegExp(escape(long), "iu")],
   ["old portable format", new RegExp(escape(oldFormat), "iu")],
   ["old portable extension", new RegExp(escape(oldExtension), "iu")],

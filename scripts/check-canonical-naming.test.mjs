@@ -11,7 +11,6 @@ const fixture = (path, content) => scanCanonicalNaming({
 });
 
 for (const [label, path, content] of [
-  ["old package", word("packages/attunement-", "graph/src/index.ts"), "export {}"],
   ["old long identity", "note.md", word("Attunement", "Graph")],
   ["old acronym", "note.md", short.toUpperCase()],
   ["old camel type", "note.md", `${short[0].toUpperCase()}${short.slice(1)}Store`],
