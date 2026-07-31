@@ -9,6 +9,7 @@ import {
   verifyWorkingGraphGoldenCorpus,
   verifyWorkingGraphGoldenDocument
 } from "./verify-working-graph-golden-corpus.mjs";
+import { runWorkingGraphReadiness } from "./run-working-graph-readiness.mjs";
 
 const ENTRYPOINT = fileURLToPath(
   new URL("./verify-working-graph-golden-corpus.mjs", import.meta.url)
@@ -88,4 +89,17 @@ describe("Working Graph golden corpus", () => {
     expect(invalid.stdout).toBe("");
     expect(invalid.stderr).toMatch(/accepts no arguments/u);
   });
+
+  it.each(["working-graph-golden-corpus", "abstention"])(
+    "adapts %s into its distinct readiness envelope",
+    async (check) => {
+      await expect(runWorkingGraphReadiness(check)).resolves.toMatchObject({
+        check,
+        contractId: `attunegraph-readiness-check-contract@1:${check}`,
+        passed: true,
+        result: { corpusSha256: "sha256:904b4ef03d680c4fc4338a679699cf794a37ef95b03ea87017ad15d0e012177a" },
+        schema: "attunegraph-readiness-command-output@1"
+      });
+    }
+  );
 });

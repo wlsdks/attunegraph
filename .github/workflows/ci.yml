@@ -30,6 +30,42 @@ jobs:
       - run: node examples/basic-agent.mjs
       - run: npm pack --dry-run --json
 
+  readiness-contract:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24.15.0"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:readiness
+
+  readiness-attestation-contract:
+    if: github.event_name == 'push'
+    needs: readiness-contract
+    runs-on: ubuntu-latest
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    steps:
+      # v7.0.1 is pinned because checkout bytes are part of the provenance producer chain.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+      - name: Bundle the versioned readiness producer contract
+        run: tar -czf readiness-producer-contract.tgz scripts/readiness-check-contracts.mjs scripts/capture-attunegraph-readiness.mjs scripts/score-attunegraph-readiness.mjs
+      # v4.1.1 is pinned because this action defines the external attestation trust boundary.
+      - uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373
+        with:
+          subject-path: readiness-producer-contract.tgz
+
   clean-room-consumer:
     runs-on: ubuntu-latest
     steps:
