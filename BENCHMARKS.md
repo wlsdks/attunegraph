@@ -153,6 +153,53 @@ not performance qualification. See
 [`PERFORMANCE-QUALIFICATION.md`](PERFORMANCE-QUALIFICATION.md) for the six-report matrix and
 fail-closed qualifier contract.
 
+## Agent decision-read workload
+
+`agent-decision-read@1` measures the public `working-graph@1` execute path on
+the `in-memory-semantic-reference` profile. It is not a SQLite, custom-backend,
+or hosted-service benchmark and it does not join the performance qualification
+matrix. Every report is `measurementOnly: true` and `claimEligible: false`.
+
+Run the fixed workload with evidence outside the repository:
+
+```sh
+pnpm benchmark:agent-decision-read -- \
+  --workload=agent-decision-read@1 \
+  --warmups=1 --repetitions=3 \
+  --output=/absolute/non-repository/evidence/agent-decision-read.json
+```
+
+The workload creates a fresh isolated in-memory Store for every warmup and
+measured repetition, projects each case through generation 8 with
+`projectAgainstHead`, then times only the latest-head `execute` calls.
+Preparation latency is reported separately. Six cases cover this exact matrix:
+
+| Case | Scenario | Independent executes | Expected outcome |
+| --- | --- | ---: | --- |
+| `wide-hot-complete-1` | 32 active hot edges | 1 | complete, fresh |
+| `wide-hot-token-partial-4` | 32 active hot edges | 4 | token-budget partial, fresh |
+| `wide-hot-complete-32` | 32 active hot edges | 32 | complete, fresh |
+| `deep-cold-complete-1` | bounded cold chain | 1 | complete, fresh |
+| `deep-cold-traversal-partial-4` | four over-depth cold chains | 4 | traversal-budget partial, stale |
+| `deep-cold-valid-time-abstain-32` | expired, future, post-cutoff, and superseded edges | 32 | abstained, stale |
+
+The 1/4/32 values are batches of independent single-seed Engine `execute`
+calls. They are not one multi-seed query and do not claim the separate data-
+store query seed ceiling. The report retains per-seed and whole-batch latency,
+considered/visited/emitted assertions, estimated tokens, maximum depth, output
+bytes, status, freshness, truncation reasons, deterministic semantic hashes,
+and exact generation/latest-commit invariants. Repository commit/tree/clean
+state, lockfile hash, host, Node, pnpm, arguments, and workload hash bind the
+measurement configuration.
+
+The CLI allows at most 10 independent fresh-Store repetitions. Consequently
+p95 and p99 are `null`: the schema requires at least 20 and 100 independent
+repetitions respectively. Thirty-two within-batch seed executions cannot
+unlock tail eligibility. Per-seed p50 and raw distributions are workload
+measurements only, not latency SLOs, production tails, or cross-machine claims.
+Invalid, duplicate, unbounded, relative-output, in-repository, symlink-parent,
+and overwrite configurations fail before evidence is written.
+
 ## Portable decoder framing hygiene evidence (2026-08-01)
 
 This slice replaces per-byte `number[]` accumulation and `Uint8Array.from`

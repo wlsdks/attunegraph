@@ -298,6 +298,7 @@ pnpm verify:local
 pnpm benchmark:scale -- --scale=10000 --profile=core --warmups=0 --repetitions=1
 pnpm benchmark:scale -- --scale=10000 --profile=local-session --warmups=0 --repetitions=1
 pnpm benchmark:scale -- --scale=10000 --profile=local-session-update-comparison --warmups=0 --repetitions=1
+pnpm benchmark:agent-decision-read -- --workload=agent-decision-read@1 --warmups=0 --repetitions=1
 pnpm benchmark:performance -- --scale=10000 --profile=local-session-concurrent --concurrency=4 --warmups=1 --repetitions=2
 pnpm benchmark:performance -- --scale=10000 --profile=portable --concurrency=1 --warmups=1 --repetitions=1
 pnpm readiness:capture -- \
@@ -313,9 +314,11 @@ pnpm readiness:score -- --as-of=2026-07-31T00:00:00.000Z \
 ```
 
 The benchmark's fixed connected v2 corpus, evidence schema, output safety, and
-claim boundary are documented in [BENCHMARKS.md](BENCHMARKS.md). The real 10K
-lifecycle proof and the 100K/1M runs are separate evidence activities, not
-normal test gates.
+claim boundary are documented in [BENCHMARKS.md](BENCHMARKS.md). It also fixes
+the measurement-only in-memory agent decision-read workload; that profile is
+not a SQLite/backend claim and is not part of performance qualification. The
+real 10K lifecycle proof and the 100K/1M runs are separate evidence activities,
+not normal test gates.
 
 The full gate inventory and artifact contract are documented in
 [READINESS.md](READINESS.md). Every name has one versioned fixed contract. Two

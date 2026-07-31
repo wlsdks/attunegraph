@@ -26,6 +26,7 @@
     "LICENSE",
     "attunegraph-local-runtime-manifest.json",
     "performance-thresholds.json",
+    "scripts/benchmark-attunegraph-agent-decision-read.mjs",
     "scripts/benchmark-attunegraph-performance.mjs",
     "scripts/qualify-attunegraph-performance.mjs",
     "scripts/readiness-check-contracts.mjs",
@@ -83,6 +84,7 @@
     }
   },
   "scripts": {
+    "benchmark:agent-decision-read": "pnpm build && node scripts/benchmark-attunegraph-agent-decision-read.mjs",
     "benchmark:scale": "pnpm build && node scripts/benchmark-attunegraph-scale.mjs",
     "benchmark:performance": "pnpm build && node scripts/benchmark-attunegraph-performance.mjs",
     "build": "node scripts/build.mjs",
@@ -92,7 +94,7 @@
     "test:benchmark-qualification": "pnpm build && vitest run --config vitest.benchmark-qualification.config.ts",
     "test:cross-platform": "pnpm build && vitest run --config vitest.cross-platform.config.ts",
     "test:local-profile": "pnpm build && vitest run --config vitest.local-profile.config.ts",
-    "test:performance": "pnpm build && vitest run scripts/benchmark-attunegraph-performance.test.mjs scripts/qualify-attunegraph-performance.test.mjs",
+    "test:performance": "pnpm build && vitest run scripts/benchmark-attunegraph-agent-decision-read.test.mjs scripts/benchmark-attunegraph-performance.test.mjs scripts/qualify-attunegraph-performance.test.mjs",
     "test:readiness": "vitest run --no-file-parallelism scripts/capture-attunegraph-readiness.test.mjs scripts/score-attunegraph-readiness.test.mjs",
     "test:supported": "pnpm build && vitest run",
     "test:focused": "pnpm build && vitest run src/attunegraph-engine.test.ts",
