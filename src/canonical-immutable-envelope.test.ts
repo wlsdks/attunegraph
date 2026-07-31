@@ -1,4 +1,6 @@
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { types } from "node:util";
 
 import { describe, expect, it } from "vitest";
@@ -306,6 +308,20 @@ function profileInput(profile: CanonicalImmutableEnvelopeProfile): Record<string
 }
 
 describe("canonical immutable envelope", () => {
+  it("charges canonical UTF-8 byte length without TextEncoder allocation", async () => {
+    const source = await readFile(
+      new URL("./canonical-immutable-envelope.ts", import.meta.url),
+      "utf8"
+    );
+    expect(source).toContain('import { Buffer } from "node:buffer";');
+    expect(source).toContain("const bufferByteLength = Buffer.byteLength;");
+    expect(source).toContain(
+      'return reflectApply(bufferByteLength, Buffer, [value, "utf8"]) as number;'
+    );
+    expect(source).not.toContain("new TextEncoder");
+    expect(source).not.toContain("TextEncoder.prototype.encode");
+  });
+
   it("converges unsigned, signed, and independently frozen inputs on the pinned literal", () => {
     expect(Buffer.byteLength(UNSIGNED_JSON)).toBe(178);
     expect(Buffer.byteLength(FULL_JSON)).toBe(291);
@@ -336,6 +352,118 @@ describe("canonical immutable envelope", () => {
     (unsigned.a as unknown[])[0] = "mutated";
     expect(results[0]?.canonicalJson).toBe(FULL_JSON);
     expect((results[0]?.envelope.a as readonly unknown[])[0]).toBe("quote\"");
+  });
+
+  it("matches the Node UTF-8 oracle across generated valid UTF-16 strings", () => {
+    const values = [
+      "",
+      "\u0000",
+      "\u001f",
+      "\"",
+      "\\",
+      "\u007f",
+      "\u0080",
+      "\u07ff",
+      "\u0800",
+      "\ud7ff",
+      "\ue000",
+      "\uffff",
+      "\ud800\udc00",
+      "\udbff\udfff"
+    ];
+    let seed = 0x4f1bbcdc;
+    for (let sample = 0; sample < 256; sample += 1) {
+      let value = "";
+      for (let segment = 0; segment < 24; segment += 1) {
+        seed = (Math.imul(seed, 1_664_525) + 1_013_904_223) >>> 0;
+        switch (seed & 3) {
+          case 0:
+            value += String.fromCharCode(seed & 0x7f);
+            break;
+          case 1:
+            value += String.fromCharCode(0x80 + (seed % 0x780));
+            break;
+          case 2: {
+            const scalar = 0x800 + (seed % 0xe800);
+            value += String.fromCharCode(
+              scalar >= 0xd800 ? scalar + 0x800 : scalar
+            );
+            break;
+          }
+          default:
+            value += String.fromCodePoint(0x10000 + (seed % 0x100000));
+        }
+      }
+      values.push(value);
+    }
+
+    for (const value of values) {
+      const valueToken = JSON.stringify(value);
+      const unsignedJson = `{"value":${valueToken}}`;
+      const digest = createHash("sha256")
+        .update(SPEC.hashDomain)
+        .update("\0")
+        .update(unsignedJson)
+        .digest("hex");
+      const contentId = `${SPEC.idPrefix}${digest}`;
+      const fullJson = `{"envelopeId":${JSON.stringify(contentId)},"value":${valueToken}}`;
+      const result = canonicalizeImmutableEnvelope(
+        { value },
+        "external-mutable",
+        SPEC
+      );
+      expect(result.canonicalJson).toBe(fullJson);
+      expect(result.canonicalByteLength).toBe(Buffer.byteLength(fullJson, "utf8"));
+      expect(result.contentId).toBe(contentId);
+    }
+  });
+
+  it("preserves UTF-8 budget boundaries and lone-surrogate precedence", () => {
+    const exactTwoByte = "\u07ff".repeat(8_192);
+    const exactThreeByte = `${"\u0800".repeat(5_461)}a`;
+    const exactFourByte = "\udbff\udfff".repeat(4_096);
+    for (const value of [exactTwoByte, exactThreeByte, exactFourByte]) {
+      expect(Buffer.byteLength(value, "utf8")).toBe(
+        CANONICAL_IMMUTABLE_ENVELOPE_LIMITS.maxStringBytes
+      );
+      expect(() => canonicalizeImmutableEnvelope(
+        { value },
+        "external-mutable",
+        SPEC
+      )).not.toThrow();
+      const byteError = expectError(
+        () => canonicalizeImmutableEnvelope(
+          { value: `${value}a` },
+          "external-mutable",
+          SPEC
+        ),
+        "BUDGET_EXCEEDED"
+      );
+      expect(byteError.details.axis).toBe("string-bytes");
+    }
+
+    expectError(
+      () => canonicalizeImmutableEnvelope(
+        { value: `${"\u0800".repeat(5_462)}\ud800` },
+        "external-mutable",
+        SPEC
+      ),
+      "INVALID_INPUT",
+      "unpaired-surrogate"
+    );
+    const codeUnitError = expectError(
+      () => canonicalizeImmutableEnvelope(
+        {
+          value: `\ud800${"a".repeat(
+            CANONICAL_IMMUTABLE_ENVELOPE_LIMITS.maxStringCodeUnits
+          )}`
+        },
+        "external-mutable",
+        SPEC
+      ),
+      "BUDGET_EXCEEDED"
+    );
+    expect(codeUnitError.details.axis).toBe("string-code-units");
   });
 
   it("freezes record-valued length and round-trips adjacent special record keys", () => {
@@ -423,6 +551,7 @@ describe("canonical immutable envelope", () => {
       valueMutation(Map.prototype, "get"),
       valueMutation(Map.prototype, "has"),
       valueMutation(Map.prototype, "set"),
+      valueMutation(Buffer, "byteLength"),
       valueMutation(TextEncoder.prototype, "encode"),
       valueMutation(hashPrototype, "update"),
       valueMutation(hashPrototype, "digest"),

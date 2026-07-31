@@ -1,3 +1,4 @@
+import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import { types as nodeTypes } from "node:util";
 
@@ -123,6 +124,7 @@ const objectIsFrozen = Object.isFrozen;
 const objectIs = Object.is;
 const objectPrototype = Object.prototype;
 const arrayPrototype = Array.prototype;
+const reflectApply = Reflect.apply;
 const reflectGetOwnPropertyDescriptor = Reflect.getOwnPropertyDescriptor;
 const reflectGetPrototypeOf = Reflect.getPrototypeOf;
 const reflectIsExtensible = Reflect.isExtensible;
@@ -134,9 +136,7 @@ const stringRepeat = String.prototype.repeat;
 const stringReplaceAll = String.prototype.replaceAll;
 const stringSlice = String.prototype.slice;
 const stringStartsWith = String.prototype.startsWith;
-const textEncoder = new TextEncoder();
-const textEncode = TextEncoder.prototype.encode;
-const reflectApply = Reflect.apply;
+const bufferByteLength = Buffer.byteLength;
 const weakSetConstructor = WeakSet;
 const weakSetAdd = WeakSet.prototype.add;
 const weakSetDelete = WeakSet.prototype.delete;
@@ -152,10 +152,6 @@ const mapHas = Map.prototype.has;
 const mapSet = Map.prototype.set;
 const hashUpdate = createHash("sha256").update;
 const hashDigest = createHash("sha256").digest;
-const typedArrayPrototype = reflectGetPrototypeOf(Uint8Array.prototype);
-const typedArrayByteLength = typedArrayPrototype === null
-  ? undefined
-  : reflectGetOwnPropertyDescriptor(typedArrayPrototype, "byteLength")?.get;
 
 const isProxy = nodeTypes.isProxy;
 const brandPredicates = Object.freeze([
@@ -210,11 +206,7 @@ function fail(
 }
 
 function encodedBytes(value: string): number {
-  const encoded = reflectApply(textEncode, textEncoder, [value]);
-  if (typedArrayByteLength === undefined) {
-    contractFailure("utf8-byte-length-unavailable");
-  }
-  return reflectApply(typedArrayByteLength, encoded, []);
+  return reflectApply(bufferByteLength, Buffer, [value, "utf8"]) as number;
 }
 
 function boundedPath(parent: string, segment: string): string {
