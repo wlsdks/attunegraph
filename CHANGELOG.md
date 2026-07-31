@@ -50,6 +50,14 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Changed
 
+- Charge canonical string UTF-8 budgets through a captured Node
+  `Buffer.byteLength` primordial instead of allocating a `TextEncoder` result
+  for every charge. Exact canonical bytes, content IDs, portable hashes,
+  budgets, validation precedence, and post-import primordial-poison resistance
+  remain pinned. Three clean 10K portable measurements show a directional
+  cross-revision reduction while remaining measurement-only; traversal, key
+  sorting, and bounded path construction are now the profiled canonicalization
+  bottlenecks.
 - Replace portable decoder per-byte array framing with a bounded chunk-aware LF
   scanner and reusable byte buffer while retaining caller-chunk detachment,
   wire bytes, budgets, failure precedence, sink reentry, and abort semantics.

@@ -199,3 +199,53 @@ It remained inside the baseline's observed range and shows no material
 improvement. The single RSS sample is not a population claim. The next measured
 optimization target is canonicalization and UTF-8 charging reuse, not further
 scanner tuning.
+
+## Canonical byte-length allocation evidence (2026-08-01)
+
+This slice preserves canonical validation, serialization, hashing, freezing,
+post-verification, portable decoding, and admission. It changes only canonical
+string byte-budget charging: a module-initialization capture of Node
+`Buffer.byteLength` is invoked through the captured `Reflect.apply`, replacing
+the allocating `TextEncoder.encode(value).byteLength` charge. Generated UTF-16,
+boundary, lone-surrogate precedence, exact portable identity, budget, and
+primordial-poisoning tests pin the unchanged contract.
+
+Three sequential fresh-process post-change reports were captured from clean
+commit `d3137c71c1bbc9f9d31a461439ae51226c473b80` with no competing benchmark
+process. Each used Node 24.15.0 on the same Apple M2 Max arm64 host described
+above and `--scale=10000 --profile=portable --concurrency=1 --warmups=1
+--repetitions=1`. The reports are under
+`/private/tmp/attunegraph-canonical-byte-length-post.J4OcMJ` and have SHA-256
+values `6e1d3251e10196c5417a07757e2e0963407f56a6b0e8b9d58e344b7dcb45f137`,
+`f3432b4813fbb882af1df21b3eb809a8f80adf7a4f760442416117ef7ea74c4e`,
+and `20e600dab50c73e73b07251ecd4af7593e0d2d4485f2011456c805a816d7ec88`.
+
+The n=3 post-change results were:
+
+| Metric | Minimum | p50 | Maximum | Documented baseline p50 | Observed p50 reduction |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| Preparation | 551.404 ms | 552.686 ms | 571.989 ms | 1,367.788 ms | 59.6% |
+| Encode | 2,353.889 ms | 2,356.128 ms | 2,357.096 ms | 6,214.140 ms | 62.1% |
+| Decode | 2,776.374 ms | 2,785.210 ms | 2,792.046 ms | 7,501.015 ms | 62.9% |
+| Peak RSS | 306,200,576 bytes | 328,761,344 bytes | 372,162,560 bytes | 394,133,504 bytes | 16.6% |
+
+Every sample retained the exact 10,046,693-byte artifact and converged to 313
+heads and 313 projections with `summaryMatches: true`. Every report remains
+`measurementOnly: true` and `claimEligible: false`. The baseline is clean main
+`623d6cfe246af957d22c8a36e25765f936198723`, while the post reports are the
+clean commit above, so this is a controlled cross-revision observation, not a
+paired exact-base attribution. Three repetitions cannot characterize p95/p99
+tails, cross-machine behavior, or production workload variance.
+
+The separate profiled report and `.cpuprofile` have SHA-256 values
+`2c6fbac01e8a416cc2959ce1dbabf840a40c7767d315cc7a0c78560e8f642927`
+and `7bef59dcb65f09676ac5bc6316445807fdde0b43bcdc850edf75b46bc58b0cc2`.
+Using the same ancestor-inclusive analysis as the decoder evidence,
+canonical-envelope descendants occupied 84.07% of the 11,911.042 ms profile,
+down from 92.8% in the documented baseline profile. The new byte-length path
+had 1.02% direct self time and 13.56% ancestor-inclusive time; no frame named
+`TextEncoder` appeared, and garbage collection had 1.02% self time. The hottest
+direct frames are now canonical traversal `visit` (23.68%),
+`sortedRecordKeys` (7.38%), `boundedPath` (7.33%), and `inspectValue` (5.49%).
+That makes traversal, key sorting, and path construction the next measured
+canonicalization targets; they are deliberately outside this slice.
