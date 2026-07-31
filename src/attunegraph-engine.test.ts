@@ -127,6 +127,219 @@ it("rejects delayed source observations before they can replace newer truth", as
   await expect(attuneGraph.head()).resolves.toEqual(second);
 });
 
+it("projects against the internally read committed head without weakening exact-snapshot projection", async () => {
+  const attuneGraph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createInMemoryAttuneGraphStore()
+  });
+  const first = await attuneGraph.project(command("first"));
+
+  await expect(attuneGraph.project(
+    command("exact-snapshot-still-required", {
+      observedAt: "2026-07-30T00:00:01.000Z"
+    })
+  )).rejects.toMatchObject({ code: "SNAPSHOT_CONFLICT" });
+
+  const second = await attuneGraph.projectAgainstHead(
+    command("against-head", { observedAt: "2026-07-30T00:00:01.000Z" })
+  );
+  expect(second).toMatchObject({ generation: 2 });
+  expect(second).not.toEqual(first);
+  await expect(attuneGraph.head()).resolves.toEqual(second);
+});
+
+it("rejects an expected snapshot on projectAgainstHead before Store I/O", async () => {
+  let reads = 0;
+  let swaps = 0;
+  const attuneGraph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore({
+      async read() {
+        reads += 1;
+        return undefined;
+      },
+      async compareAndSwap() {
+        swaps += 1;
+        return true;
+      }
+    })
+  });
+
+  await expect(attuneGraph.projectAgainstHead({
+    ...command("must-not-smuggle-an-expectation"),
+    expectedSnapshot: {
+      schemaVersion: 1,
+      scope: SCOPE,
+      generation: 1,
+      commitId: "attunegraph-commit:forbidden"
+    }
+  } as never)).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  expect({ reads, swaps }).toEqual({ reads: 0, swaps: 0 });
+});
+
+it("uses one validated Store read as the exact projectAgainstHead CAS expectation", async () => {
+  const backing = new InMemoryAttuneGraphStoreBackend();
+  const seed = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(backing)
+  });
+  await seed.project(command("seed"));
+  let reads = 0;
+  let swaps = 0;
+  const attuneGraph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore({
+      async read(scope) {
+        reads += 1;
+        return backing.read(scope);
+      },
+      async compareAndSwap(scope, expected, proposed) {
+        swaps += 1;
+        return backing.compareAndSwap(scope, expected, proposed);
+      }
+    })
+  });
+
+  await expect(attuneGraph.projectAgainstHead(command("one-read", {
+    observedAt: "2026-07-30T00:00:01.000Z"
+  }))).resolves.toMatchObject({ generation: 2 });
+  expect({ reads, swaps }).toEqual({ reads: 1, swaps: 1 });
+});
+
+it("rejects a concurrent different projectAgainstHead winner", async () => {
+  const backing = new InMemoryAttuneGraphStoreBackend();
+  const seed = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(backing)
+  });
+  await seed.project(command("seed"));
+  const barrier = deferred();
+  let reads = 0;
+  const store = createAttuneGraphStore({
+    async read(scope) {
+      reads += 1;
+      if (reads <= 2) {
+        if (reads === 2) barrier.resolve();
+        await barrier.promise;
+      }
+      return backing.read(scope);
+    },
+    compareAndSwap: backing.compareAndSwap.bind(backing)
+  });
+  const left = await openAttuneGraph({ scope: SCOPE, store });
+  const right = await openAttuneGraph({ scope: SCOPE, store });
+
+  const results = await Promise.allSettled([
+    left.projectAgainstHead(command("winner-a", {
+      observedAt: "2026-07-30T00:00:01.000Z"
+    })),
+    right.projectAgainstHead(command("winner-b", {
+      observedAt: "2026-07-30T00:00:01.000Z"
+    }))
+  ]);
+  expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+  const rejected = results.find((result) => result.status === "rejected");
+  expect(rejected).toMatchObject({
+    status: "rejected",
+    reason: { code: "SNAPSHOT_CONFLICT" }
+  });
+  expect(reads).toBe(3);
+});
+
+it("validates the complete current projection before projectAgainstHead CAS", async () => {
+  const backing = new InMemoryAttuneGraphStoreBackend();
+  const seed = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(backing)
+  });
+  await seed.project(command("seed"));
+  let swaps = 0;
+  const attuneGraph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore({
+      async read(scope) {
+        const stored = await backing.read(scope);
+        return stored === undefined
+          ? undefined
+          : { ...stored, canonicalProjection: JSON.stringify({ schemaVersion: 1 }) };
+      },
+      async compareAndSwap() {
+        swaps += 1;
+        return true;
+      }
+    })
+  });
+
+  await expect(attuneGraph.projectAgainstHead(command("must-not-overwrite-corruption", {
+    observedAt: "2026-07-30T00:00:01.000Z"
+  }))).rejects.toMatchObject({ code: "CORRUPT_STORE" });
+  expect(swaps).toBe(0);
+});
+
+it("rejects a delayed projectAgainstHead observation without replacing the current head", async () => {
+  const attuneGraph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createInMemoryAttuneGraphStore()
+  });
+  const current = await attuneGraph.project(command("current", {
+    observedAt: "2026-07-30T00:00:02.000Z"
+  }));
+
+  await expect(attuneGraph.projectAgainstHead(command("delayed", {
+    observedAt: "2026-07-30T00:00:01.000Z"
+  }))).rejects.toMatchObject({ code: "SNAPSHOT_CONFLICT" });
+  await expect(attuneGraph.head()).resolves.toEqual(current);
+});
+
+it("converges exact projectAgainstHead replay without another CAS", async () => {
+  const backing = new InMemoryAttuneGraphStoreBackend();
+  let swaps = 0;
+  const attuneGraph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore({
+      read: backing.read.bind(backing),
+      async compareAndSwap(scope, expected, proposed) {
+        swaps += 1;
+        return backing.compareAndSwap(scope, expected, proposed);
+      }
+    })
+  });
+  const projected = command("replay");
+
+  const first = await attuneGraph.projectAgainstHead(projected);
+  const replay = await attuneGraph.projectAgainstHead(projected);
+  expect(replay).toEqual(first);
+  expect(swaps).toBe(1);
+});
+
+it("converges concurrent identical projectAgainstHead contenders on the exact winner", async () => {
+  const backing = new InMemoryAttuneGraphStoreBackend();
+  const barrier = deferred();
+  let reads = 0;
+  const store = createAttuneGraphStore({
+    async read(scope) {
+      reads += 1;
+      if (reads <= 2) {
+        if (reads === 2) barrier.resolve();
+        await barrier.promise;
+      }
+      return backing.read(scope);
+    },
+    compareAndSwap: backing.compareAndSwap.bind(backing)
+  });
+  const left = await openAttuneGraph({ scope: SCOPE, store });
+  const right = await openAttuneGraph({ scope: SCOPE, store });
+  const same = command("concurrent-replay");
+
+  const [leftSnapshot, rightSnapshot] = await Promise.all([
+    left.projectAgainstHead(same),
+    right.projectAgainstHead(same)
+  ]);
+  expect(leftSnapshot).toEqual(rightSnapshot);
+  expect(leftSnapshot).toMatchObject({ generation: 1 });
+  expect(reads).toBe(3);
+});
+
 it("reports separate freshness and deterministic partial Working Graph truncation", async () => {
   const attuneGraph = await openAttuneGraph({ scope: SCOPE, store: createInMemoryAttuneGraphStore() });
   await attuneGraph.project(command("stale", { freshness: "stale", assertions: [assertion("one"), assertion("two")] }));
@@ -401,12 +614,13 @@ it("rejects proxies and accessors without invoking them", async () => {
   await expect(attuneGraph.project(accessor as never)).rejects.toMatchObject({ code: "INVALID_INPUT" });
 });
 
-it("close is idempotent and permanently closes head, project, and execute", async () => {
+it("close is idempotent and permanently closes every Engine operation", async () => {
   const attuneGraph = await openAttuneGraph({ scope: SCOPE, store: createInMemoryAttuneGraphStore() });
   await attuneGraph.close();
   await attuneGraph.close();
   await expect(attuneGraph.head()).rejects.toMatchObject({ code: "CLOSED" });
   await expect(attuneGraph.project(command("after-close"))).rejects.toMatchObject({ code: "CLOSED" } satisfies Pick<AttuneGraphError, "code">);
+  await expect(attuneGraph.projectAgainstHead(command("against-head-after-close"))).rejects.toMatchObject({ code: "CLOSED" });
   await expect(attuneGraph.execute({ operator: "working-graph@1", seed: { id: SCOPE.threadId, kind: "thread" }, now: NOW, maxEstimatedTokens: 10 })).rejects.toMatchObject({ code: "CLOSED" });
 });
 

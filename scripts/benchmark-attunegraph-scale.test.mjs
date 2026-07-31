@@ -13,6 +13,7 @@ import {
   parseBenchmarkArguments,
   pnpmVersion,
   runLocalSessionCorpus,
+  runLocalSessionUpdateComparison,
   summarizeBenchmarkSamples
 } from "./benchmark-attunegraph-scale.mjs";
 import { openAttuneGraph } from "@attunegraph/core";
@@ -42,6 +43,14 @@ describe("AttuneGraph scale benchmark CLI", () => {
       "--scale=10000",
       "--profile=local-session"
     ])).toMatchObject({ profile: "local-session", scale: 10_000 });
+
+    expect(parseBenchmarkArguments([
+      "--scale=10000",
+      "--profile=local-session-update-comparison"
+    ])).toMatchObject({
+      profile: "local-session-update-comparison",
+      scale: 10_000
+    });
 
     expect(() => parseBenchmarkArguments(["--scale=9999", "--profile=core"]))
       .toThrow(/scale/u);
@@ -192,5 +201,53 @@ describe("AttuneGraph scale benchmark CLI", () => {
       expect(cause).toBeInstanceOf(AggregateError);
       expect(cause.errors).toEqual([corpusFailure, cleanupFailure]);
     }
+  });
+
+  it("compares exact head-plus-project with one projectAgainstHead operation", async () => {
+    let exactProjects = 0;
+    let againstHeadProjects = 0;
+    const result = await runLocalSessionUpdateComparison(
+      createBenchmarkCorpusPlan(10_000),
+      {
+        openLocalAttuneGraphSession: async () => ({
+          open: async ({ scope }) => {
+            let snapshot;
+            return {
+              close: async () => undefined,
+              execute: async () => { throw new Error("comparison does not execute"); },
+              head: async () => snapshot,
+              project: async (projectCommand) => {
+                exactProjects += 1;
+                snapshot = {
+                  schemaVersion: 1,
+                  scope,
+                  generation: (snapshot?.generation ?? 0) + 1,
+                  commitId: `exact:${projectCommand.observation.observationKey}`
+                };
+                return snapshot;
+              },
+              projectAgainstHead: async (projectCommand) => {
+                againstHeadProjects += 1;
+                snapshot = {
+                  schemaVersion: 1,
+                  scope,
+                  generation: (snapshot?.generation ?? 0) + 1,
+                  commitId: `against:${projectCommand.observation.observationKey}`
+                };
+                return snapshot;
+              }
+            };
+          },
+          close: async () => undefined
+        })
+      }
+    );
+
+    expect(result.samples.exactHeadThenProject).toHaveLength(313);
+    expect(result.samples.againstHeadProject).toHaveLength(313);
+    expect(result.samples.head).toHaveLength(313);
+    expect(result.samples.verificationHead).toHaveLength(313);
+    expect(exactProjects).toBe(313 * 3);
+    expect(againstHeadProjects).toBe(313);
   });
 });

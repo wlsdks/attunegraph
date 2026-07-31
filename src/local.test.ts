@@ -144,6 +144,7 @@ it("persists and reopens byte-identical Engine snapshots and results", async () 
   await reopened.close();
   await expect(reopened.head()).rejects.toMatchObject({ code: "CLOSED" });
   await expect(reopened.project(input)).rejects.toMatchObject({ code: "CLOSED" });
+  await expect(reopened.projectAgainstHead(input)).rejects.toMatchObject({ code: "CLOSED" });
   await expect(reopened.execute(execute())).rejects.toMatchObject({ code: "CLOSED" });
 });
 
@@ -178,6 +179,22 @@ it("opens independent scope-bound handles through one local session", async () =
   await session.close();
   expect(workerStarts).toBe(1);
   expect(terminalSettlements).toBe(1);
+});
+
+it("persists projectAgainstHead through the public local session handle", async () => {
+  const databasePath = await temporaryDatabase();
+  const session = await openLocalAttuneGraphSession({ databasePath });
+  const graph = await session.open({ scope: SCOPE });
+  await graph.project(command("against-head-seed"));
+
+  const updated = await graph.projectAgainstHead(command("against-head-update"));
+  expect(updated).toMatchObject({ generation: 2 });
+  await graph.close();
+  await session.close();
+
+  const reopened = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  await expect(reopened.head()).resolves.toEqual(updated);
+  await reopened.close();
 });
 
 it("preserves CAS semantics across concurrent session handles", async () => {

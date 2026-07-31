@@ -71,6 +71,27 @@ pnpm benchmark:scale -- --scale=10000 --profile=local-session \
   --output=/absolute/non-repository/evidence/local-session-10k.json
 ```
 
+Compare a normal update that performs a caller `head()` followed by exact
+`project({ expectedSnapshot })` with the additive one-operation
+`projectAgainstHead` contract:
+
+```sh
+pnpm benchmark:scale -- --scale=10000 \
+  --profile=local-session-update-comparison \
+  --warmups=1 --repetitions=5 \
+  --output=/absolute/non-repository/evidence/local-session-update-10k.json
+```
+
+The comparison creates two equivalent scope variants for every shard, seeds
+both at generation 1, then measures an exact head-plus-project update on one
+and a `projectAgainstHead` update on the other. A separate post-update head
+read verifies the latter but is excluded from its operation latency. Reports
+retain raw exact-project, caller-head, combined exact-update,
+`projectAgainstHead`, seed, and verification-head samples. `speedup` is the
+per-repetition ratio of total exact head-plus-project time to total
+`projectAgainstHead` time. It remains measurement-only and is never a claim
+about all workloads.
+
 `local` remains the cold lifecycle measurement: it starts and stops a Worker
 around each writer and reader. `local-session` starts one explicit session,
 opens one scope-bound handle for each shard, and stops that single Worker only
@@ -105,6 +126,9 @@ unrelated verification.
   profile.
 - SQLite session-open/session-close latency and database/WAL/shared-memory
   bytes for the local-session profile.
+- Paired exact head-plus-project and `projectAgainstHead` update latency,
+  throughput, seed/verification costs, and speedup for the update-comparison
+  profile.
 
 Every report currently sets `measurementOnly: true` and `claimEligible: false`,
 including a clean run. This is intentional: one size/profile is not the full
