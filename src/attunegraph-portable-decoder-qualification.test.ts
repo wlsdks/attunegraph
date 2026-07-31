@@ -250,9 +250,7 @@ const completeChunkFamilies: readonly {
   { name: "irregular", chunks: irregular }
 ];
 
-const failureChunkFamilies = completeChunkFamilies.filter(
-  ({ name }) => name === "one" || name === "bytewise" || name === "irregular"
-);
+const failureChunkFamilies = completeChunkFamilies;
 
 async function decodeSuccess(
   bytes: Uint8Array,
@@ -882,6 +880,12 @@ function smokeRetentionAudit(source: string): readonly string[] {
 }
 
 describe("AttuneGraph portable decoder qualification", () => {
+  it("uses every complete chunk family for failure equivalence", () => {
+    expect(failureChunkFamilies.map(({ name }) => name)).toEqual(
+      completeChunkFamilies.map(({ name }) => name)
+    );
+  });
+
   it("keeps checked fixtures and production round-trips exact across every chunk family", async () => {
     for (const fixture of fixtures) {
       const baseline = await decodeSuccess(fixture.bytes, oneChunk);
@@ -937,7 +941,7 @@ describe("AttuneGraph portable decoder qualification", () => {
     }
   }, 120_000);
 
-  it("pins exact post-engagement failures across one, bytewise, and irregular chunks", async () => {
+  it("pins exact post-engagement failures across every chunk family", async () => {
     const two = fixtures.find(
       (fixture) => fixture.name === "one-scope-two-generations"
     )!;

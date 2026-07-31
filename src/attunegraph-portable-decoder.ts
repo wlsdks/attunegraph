@@ -39,6 +39,7 @@ const reflectGetPrototypeOf = Reflect.getPrototypeOf;
 const reflectOwnKeys = Reflect.ownKeys;
 const uint8ArrayIndexOf = Uint8Array.prototype.indexOf;
 const uint8ArraySet = Uint8Array.prototype.set;
+const uint8ArraySlice = Uint8Array.prototype.slice;
 const uint8ArraySubarray = Uint8Array.prototype.subarray;
 
 export type AttuneGraphPortableDecoderErrorCode =
@@ -224,7 +225,7 @@ function detachedChunk(value: unknown): Uint8Array {
     );
   }
   try {
-    return reflectApply(Uint8Array.prototype.slice, value, []) as Uint8Array;
+    return reflectApply(uint8ArraySlice, value, []) as Uint8Array;
   } catch {
     decoderError("INVALID_INPUT", "portable decoder chunk must not be detached");
   }

@@ -470,7 +470,7 @@ describe("package-private AttuneGraph portable decoder", () => {
         abort() {}
       };
       const decoder = createAttuneGraphPortableDecoder(sink);
-      for (const method of ["indexOf", "set", "subarray"]) {
+      for (const method of ["indexOf", "set", "slice", "subarray"]) {
         Object.defineProperty(Uint8Array.prototype, method, {
           configurable: true,
           value() { throw new Error("poisoned Uint8Array." + method); },

@@ -159,7 +159,8 @@ This slice replaces per-byte `number[]` accumulation and `Uint8Array.from`
 materialization with a bounded chunk-aware LF scanner and reusable segment
 buffer. The caller chunk is still detached at `write` entry; removing that
 whole-chunk copy would weaken caller-mutation safety. Captured `Uint8Array`
-primordials keep the scanner independent of later prototype mutation.
+`indexOf`, `set`, `slice`, and `subarray` primordials keep the scanner
+independent of later prototype mutation.
 
 The valid baseline is main
 `623d6cfe246af957d22c8a36e25765f936198723` on Node 24.15.0, Apple M2 Max
