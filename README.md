@@ -275,6 +275,8 @@ pnpm verify:local
 pnpm benchmark:scale -- --scale=10000 --profile=core --warmups=0 --repetitions=1
 pnpm benchmark:scale -- --scale=10000 --profile=local-session --warmups=0 --repetitions=1
 pnpm benchmark:scale -- --scale=10000 --profile=local-session-update-comparison --warmups=0 --repetitions=1
+pnpm benchmark:performance -- --scale=10000 --profile=local-session-concurrent --concurrency=4 --warmups=1 --repetitions=2
+pnpm benchmark:performance -- --scale=10000 --profile=portable --concurrency=1 --warmups=1 --repetitions=1
 pnpm readiness:score -- --as-of=2026-07-31T00:00:00.000Z \
   --evidence=/absolute/path/readiness-evidence.json \
   --attunegraph-repository=/absolute/path/attunegraph \
@@ -296,6 +298,11 @@ Every artifact is strict `attunegraph-readiness-check@1` JSON bound to its exact
 check record, and evidence is fresh through exactly 168 hours relative to
 `--as-of`. It is a fail-closed evidence-coverage score, never a
 product-usefulness claim.
+
+Performance measurement and qualification remain separate. Every performance report is
+measurement-only. The checked-in policy requires clean 10K, 100K, and 1M reports for concurrent
+local-session ingestion and portable encode/decode before `performance:qualify` can return true.
+See [`PERFORMANCE-QUALIFICATION.md`](PERFORMANCE-QUALIFICATION.md).
 
 Fixture generation is deterministic. Regeneration must reproduce the checked-in
 inputs, `.atgx` artifacts, manifest hashes, byte counts, record identities, and

@@ -128,3 +128,17 @@ including a clean run. This is intentional: one size/profile is not the full
 90/100 qualification, and a dirty run is additionally revision-ineligible.
 Partial and abstained Working Graph results remain explicit counts rather than
 being silently treated as successful retrieval.
+
+## External-project performance qualification profiles
+
+`benchmark:performance` adds two reports without changing the measurement-only scale reports
+above. `local-session-concurrent` uses a bounded pool and an alternating AB/BA same-run sequential
+baseline, separate SQLite databases, exact reopen verification, and cold/warm session-open
+measurements. `portable` times the production encoder, contiguous `.atgx` materialization, and
+production decoder separately while verifying exact terminal convergence.
+
+Process peak RSS comes from `process.resourceUsage().maxRSS` normalized to bytes and is combined
+with phase-boundary RSS. The checked-in policy uses absolute ceilings only for that resource
+measurement. Throughput gates use the pairwise p50; latency, open, and decode-ratio gates use p95.
+See [`PERFORMANCE-QUALIFICATION.md`](PERFORMANCE-QUALIFICATION.md) for the six-report matrix and
+fail-closed qualifier contract.

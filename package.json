@@ -18,11 +18,15 @@
     "dist",
     "README.md",
     "BENCHMARKS.md",
+    "PERFORMANCE-QUALIFICATION.md",
     "READINESS.md",
     "CHANGELOG.md",
     "PORTABLE-FORMAT.md",
     "LICENSE",
-    "attunegraph-local-runtime-manifest.json"
+    "attunegraph-local-runtime-manifest.json",
+    "performance-thresholds.json",
+    "scripts/benchmark-attunegraph-performance.mjs",
+    "scripts/qualify-attunegraph-performance.mjs"
   ],
   "keywords": [
     "ai-agent",
@@ -71,6 +75,7 @@
   },
   "scripts": {
     "benchmark:scale": "pnpm build && node scripts/benchmark-attunegraph-scale.mjs",
+    "benchmark:performance": "pnpm build && node scripts/benchmark-attunegraph-performance.mjs",
     "build": "node scripts/build.mjs",
     "check:naming": "node scripts/check-canonical-naming.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
@@ -78,6 +83,7 @@
     "test:benchmark-qualification": "pnpm build && vitest run --config vitest.benchmark-qualification.config.ts",
     "test:cross-platform": "pnpm build && vitest run --config vitest.cross-platform.config.ts",
     "test:local-profile": "pnpm build && vitest run --config vitest.local-profile.config.ts",
+    "test:performance": "pnpm build && vitest run scripts/benchmark-attunegraph-performance.test.mjs scripts/qualify-attunegraph-performance.test.mjs",
     "test:readiness": "vitest run scripts/score-attunegraph-readiness.test.mjs",
     "test:supported": "pnpm build && vitest run",
     "test:focused": "pnpm build && vitest run src/attunegraph-engine.test.ts",
@@ -85,6 +91,7 @@
     "pack:dry-run": "pnpm build && npm pack --dry-run --json",
     "verify:clean-room-consumer": "node scripts/verify-clean-room-consumer.mjs",
     "readiness:score": "node scripts/score-attunegraph-readiness.mjs",
+    "performance:qualify": "node scripts/qualify-attunegraph-performance.mjs",
     "fixtures:portable": "pnpm build && node scripts/generate-attunegraph-portable-fixtures.mjs",
     "verify:local": "pnpm build && node scripts/verify-attunegraph-local.mjs",
     "verify:portable-fixtures": "node scripts/verify-attunegraph-portable-fixtures.mjs"
