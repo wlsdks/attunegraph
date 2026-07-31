@@ -50,6 +50,15 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Changed
 
+- Measure bounded error paths, ASCII contract fields, and canonical JSON
+  fragment/body-envelope limits through a captured Node `Buffer.byteLength`
+  primordial instead of allocating a `TextEncoder` result at those call sites.
+  Input-string UTF-16 validation and aggregate UTF-8 charging remain unchanged,
+  while exact canonical bytes, content IDs, portable hashes, budgets, validation
+  precedence, and post-import primordial-poison resistance stay pinned. Three
+  clean 10K portable measurements show a directional cross-revision reduction
+  while remaining measurement-only; traversal, key sorting, and bounded path
+  construction are now the profiled canonicalization bottlenecks.
 - Replace portable decoder per-byte array framing with a bounded chunk-aware LF
   scanner and reusable byte buffer while retaining caller-chunk detachment,
   wire bytes, budgets, failure precedence, sink reentry, and abort semantics.
