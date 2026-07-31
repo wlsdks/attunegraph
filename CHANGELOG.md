@@ -73,6 +73,13 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Changed
 
+- Replace repeated full-prefix JSON serialization in Working Graph token-budget
+  checks with exact incremental UTF-8 byte accounting. Exact one-through-48
+  multibyte boundary tests preserve selection and diagnostics, while five
+  rebuilt AB/BA pairs show no focused-read speed claim and a 7.3% to 14.5%
+  cold paired-median reduction for the declared frontier-32/48 and frontier-48
+  batch cells. Evidence remains measurement-only and records built-artifact
+  binding as a harness-v2 requirement.
 - Measure bounded error paths, ASCII contract fields, and canonical JSON
   fragment/body-envelope limits through a captured Node `Buffer.byteLength`
   primordial instead of allocating a `TextEncoder` result at those call sites.
