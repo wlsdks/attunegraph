@@ -7,10 +7,14 @@ import {
   renameSync,
   rmSync
 } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const require = createRequire(import.meta.url);
+const compilerRoot = dirname(require.resolve("@typescript/native/package.json"));
+const compilerEntrypoint = join(compilerRoot, "bin", "tsc");
 
 /**
  * Build into a same-filesystem staging directory and publish only a complete
@@ -63,11 +67,10 @@ export function publishBuild({
   }
 }
 
-function runCompiler(stagingRoot) {
-  const command = process.platform === "win32" ? "tsc.cmd" : "tsc";
-  const result = spawnSync(
-    command,
-    [
+export function compilerInvocation(stagingRoot) {
+  return {
+    args: [
+      compilerEntrypoint,
       "-p",
       "tsconfig.build.json",
       "--pretty",
@@ -75,6 +78,15 @@ function runCompiler(stagingRoot) {
       "--outDir",
       stagingRoot
     ],
+    command: process.execPath
+  };
+}
+
+function runCompiler(stagingRoot) {
+  const invocation = compilerInvocation(stagingRoot);
+  const result = spawnSync(
+    invocation.command,
+    invocation.args,
     {
       cwd: packageRoot,
       stdio: "inherit"

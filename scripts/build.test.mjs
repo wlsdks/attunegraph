@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { expect, test } from "vitest";
 
-import { publishBuild } from "./build.mjs";
+import { compilerInvocation, publishBuild } from "./build.mjs";
 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), "attunegraph-build-"));
@@ -47,4 +47,20 @@ test("a successful compiler atomically replaces dist and removes staging data", 
   } finally {
     rmSync(context.root, { force: true, recursive: true });
   }
+});
+
+test("the compiler invocation bypasses platform command shims", () => {
+  const stagingRoot = join(tmpdir(), "attunegraph-stage");
+  const invocation = compilerInvocation(stagingRoot);
+
+  expect(invocation.command).toBe(process.execPath);
+  expect(invocation.args[0]?.replaceAll("\\", "/")).toMatch(/\/bin\/tsc$/u);
+  expect(invocation.args.slice(1)).toEqual([
+    "-p",
+    "tsconfig.build.json",
+    "--pretty",
+    "false",
+    "--outDir",
+    stagingRoot
+  ]);
 });

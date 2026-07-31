@@ -27,10 +27,11 @@ jobs:
       - run: npm pack --dry-run --json
 
   verify:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
         node: ["24.15.0", "24"]
     steps:
       - uses: actions/checkout@v4

@@ -2,6 +2,13 @@
 
 All notable changes to AttuneGraph are recorded here.
 
+## [Unreleased]
+
+### Fixed
+
+- Invoke the pinned TypeScript compiler without platform command shims so builds work on Windows.
+- Verify the full Node 24 floor and current-major suite on Linux, macOS, and Windows.
+
 ## [0.1.0] - 2026-07-31
 
 ### Added

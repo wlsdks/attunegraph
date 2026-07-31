@@ -2,6 +2,7 @@ node_modules/
 dist/
 .artifacts/
 .cache/
+.codegraph/
 .attunegraph-dist-backup-*
 .attunegraph-dist-stage-*
 coverage/
