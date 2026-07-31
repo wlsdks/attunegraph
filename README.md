@@ -34,6 +34,9 @@ This is a standalone, publishable package boundary. It has:
 - a checked-in Working Graph retrieval corpus covering exact roots,
   bitemporal cutoffs, budget partials, freshness, and abstention;
 - a revision-bound, measurement-only 10K/100K/1M scale harness.
+- a bounded agent decision-read scale harness for active 16/32/48 frontier and
+  focused-resumption observations, including an explicit authority-abstention
+  sentinel; it is measurement-only evidence, never action authority.
 
 The package is not yet published to a registry and does not provide a hosted
 service. Its API is usable locally from this repository now.

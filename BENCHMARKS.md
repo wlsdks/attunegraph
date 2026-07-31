@@ -431,6 +431,39 @@ observation only. They do not make p95 or p99 eligible and do not establish an
 SLA, an absolute performance qualification, a production-workload result, or
 a general macOS, arm64, Apple Silicon, or other-hardware claim.
 
+## Agent decision-read active scale
+
+`agent-decision-read-scale@1` is a separate, in-memory public
+`working-graph@1` measurement workload. It fixes active scales at 16, 32, and
+48 for focused resumption and thread frontier reads, plus unique single-seed
+frontier batches of 1, 4, and 32. Each measured cold head is unprimed; each
+warm head is separately rebuilt and receives one excluded prime. Every
+repetition rebuilds both heads.
+
+Run it only from a clean checkout and write evidence outside the repository:
+
+```sh
+pnpm benchmark:agent-decision-read-scale -- \
+  --workload=agent-decision-read-scale@1 \
+  --warmups=1 --repetitions=5 \
+  --output=/absolute/non-repository/evidence/agent-decision-read-scale.json
+```
+
+The command accepts only absolute, normalized, non-existing paths beneath a
+non-symlink external directory and creates an owner-only file. Reports retain
+raw cold/warm timings and only publish p50 at five or more independent
+repetitions; p95 and p99 are always null (maximum ten repetitions). Exact
+stored `canonical-projection@2` bytes remain at or below 15,500 bytes and use
+an opaque thread root distinct from the scope key. A compact same-store
+authority sentinel records explicit `AUTHORIZED_BY` source references, refuses
+to infer authority for a different governed action, and proves that a stale,
+expired generation-two authorization abstains after its head changes.
+
+Every report is permanently `measurementOnly: true`, `claimEligible: false`,
+`resourceAuthoritative: false`, and `resourceQualified: false`. The harness is
+observational performance evidence only; it does not qualify resources or
+grant an action any authority.
+
 The separate profiled report and `.cpuprofile` have SHA-256 values
 `2c6fbac01e8a416cc2959ce1dbabf840a40c7767d315cc7a0c78560e8f642927`
 and `7bef59dcb65f09676ac5bc6316445807fdde0b43bcdc850edf75b46bc58b0cc2`.

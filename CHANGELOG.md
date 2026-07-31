@@ -6,6 +6,10 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add `agent-decision-read-scale@1`, a strict measurement-only active-scale
+  Working Graph harness with cold/warm rebuilt heads, raw timings, stored-v2
+  byte anchors, bounded p50-only reporting, and an explicit temporal
+  authorization-abstention sentinel.
 - Add the dependency-free `attunegraph-performance-regression@1` offline
   verifier and CLI. It strictly binds a five-pair AB/BA manifest to exact
   base/candidate evidence bytes, distinct immutable revision/package
