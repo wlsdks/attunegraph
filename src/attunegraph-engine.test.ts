@@ -1,3 +1,5 @@
+import { Buffer } from "node:buffer";
+
 import { expect, it } from "vitest";
 
 import { AttuneGraphError, openAttuneGraph } from "./index.js";
@@ -349,6 +351,64 @@ it("reports separate freshness and deterministic partial Working Graph truncatio
   expect(result.workingGraph.diagnostics.truncationReasons).toContain("token-budget");
   expect(Object.isFrozen(result)).toBe(true);
   expect(Object.isFrozen(result.workingGraph.assertions)).toBe(true);
+});
+
+it("keeps exact UTF-8 token cutoffs for every admitted Working Graph assertion prefix", async () => {
+  const seed = { id: SCOPE.threadId, kind: "thread" as const };
+  const assertions = Array.from({ length: 48 }, (_, index): GraphAssertion => {
+    const suffix = index.toString().padStart(2, "0");
+    return {
+      schemaVersion: 1,
+      id: `t${suffix}`,
+      subject: { id: "x", kind: "artifact" },
+      predicate: "LINKED_TO",
+      object: { id: SCOPE.threadId, kind: "thread" },
+      epistemicClass: "source-observed",
+      sourceRefs: [{ id: `s${suffix}証`, namespace: "n" }],
+      recordedAt: NOW,
+      derivation: { kind: "projection", version: "v" }
+    };
+  });
+  const attuneGraph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createInMemoryAttuneGraphStore()
+  });
+  await attuneGraph.project(command("token-prefixes", { assertions }));
+  const full = await attuneGraph.execute({
+    operator: "working-graph@1",
+    seed,
+    now: NOW,
+    maxEstimatedTokens: 32_768
+  });
+  const ordered = full.workingGraph.assertions;
+  expect(ordered).toHaveLength(48);
+
+  const exactTokens = (prefix: readonly GraphAssertion[]) => Math.ceil(
+    Buffer.byteLength(JSON.stringify({ assertions: prefix, seed }), "utf8") / 4
+  );
+  for (let length = 1; length <= ordered.length; length += 1) {
+    const atBoundary = await attuneGraph.execute({
+      operator: "working-graph@1",
+      seed,
+      now: NOW,
+      maxEstimatedTokens: exactTokens(ordered.slice(0, length))
+    });
+    const belowBoundary = await attuneGraph.execute({
+      operator: "working-graph@1",
+      seed,
+      now: NOW,
+      maxEstimatedTokens: exactTokens(ordered.slice(0, length)) - 1
+    });
+    expect(atBoundary.workingGraph.assertions).toHaveLength(length);
+    expect(atBoundary.workingGraph.diagnostics.estimatedTokens).toBe(
+      exactTokens(ordered.slice(0, length))
+    );
+    expect(belowBoundary.workingGraph.assertions).toHaveLength(length - 1);
+    expect(belowBoundary.workingGraph.diagnostics.estimatedTokens).toBe(
+      exactTokens(ordered.slice(0, length - 1))
+    );
+  }
+  await attuneGraph.close();
 });
 
 it("deduplicates assertions, reports a depth-boundary omission, and abstains only when empty", async () => {
