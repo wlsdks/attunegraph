@@ -2,6 +2,8 @@ node_modules/
 dist/
 .artifacts/
 .cache/
+.attunegraph-dist-backup-*
+.attunegraph-dist-stage-*
 coverage/
 .DS_Store
 *.tsbuildinfo

@@ -8,9 +8,10 @@ The package does not treat graph proximity as truth, feedback, policy,
 permission, or action authority. Authoritative data remains in its source
 system; AttuneGraph stores rebuildable relations and exact source references.
 
-AttuneGraph requires Node.js 24.15 or newer. The worker-isolated local SQLite
-adapter depends on that runtime baseline; older Node versions are unsupported
-even when a pure in-memory workload happens to run.
+The core and in-memory adapter require Node.js 22.12 or newer. The
+worker-isolated local SQLite adapter requires Node.js 24.15 or newer because
+that is the first Node 24 release carrying a reviewed WAL-reset-safe SQLite.
+Opening the local adapter on an older runtime fails closed.
 
 ## Package boundary
 
