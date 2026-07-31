@@ -202,13 +202,16 @@ scanner tuning.
 
 ## Canonical byte-length allocation evidence (2026-08-01)
 
-This slice preserves canonical validation, serialization, hashing, freezing,
-post-verification, portable decoding, and admission. It changes only canonical
-string byte-budget charging: a module-initialization capture of Node
-`Buffer.byteLength` is invoked through the captured `Reflect.apply`, replacing
-the allocating `TextEncoder.encode(value).byteLength` charge. Generated UTF-16,
-boundary, lone-surrogate precedence, exact portable identity, budget, and
-primordial-poisoning tests pin the unchanged contract.
+This slice preserves canonical input-string UTF-16 validation and aggregate
+UTF-8 charging, serialization, hashing, freezing, post-verification, portable
+decoding, and admission. It changes only the `encodedBytes` helper used for
+bounded error paths, ASCII contract-field checks, and canonical JSON
+fragment/body-envelope limit accounting: a module-initialization capture of
+Node `Buffer.byteLength` is invoked through the captured `Reflect.apply`,
+replacing the allocating `TextEncoder.encode(value).byteLength` operation at
+those call sites. Generated UTF-16, boundary, lone-surrogate precedence, exact
+portable identity, budget, and primordial-poisoning tests pin the unchanged
+contract.
 
 Three sequential fresh-process post-change reports were captured from clean
 commit `d3137c71c1bbc9f9d31a461439ae51226c473b80` with no competing benchmark
@@ -243,9 +246,11 @@ and `7bef59dcb65f09676ac5bc6316445807fdde0b43bcdc850edf75b46bc58b0cc2`.
 Using the same ancestor-inclusive analysis as the decoder evidence,
 canonical-envelope descendants occupied 84.07% of the 11,911.042 ms profile,
 down from 92.8% in the documented baseline profile. The new byte-length path
-had 1.02% direct self time and 13.56% ancestor-inclusive time; no frame named
-`TextEncoder` appeared, and garbage collection had 1.02% self time. The hottest
-direct frames are now canonical traversal `visit` (23.68%),
+had 1.02% direct `node:buffer` self time. Samples below `encodedBytes` call-tree
+roots accounted for 13.37% ancestor-inclusive time; this deliberately excludes
+unrelated `Buffer.byteLength` ancestry outside the canonical module. No frame
+named `TextEncoder` appeared, and garbage collection had 1.02% self time. The
+hottest direct frames are now canonical traversal `visit` (23.68%),
 `sortedRecordKeys` (7.38%), `boundedPath` (7.33%), and `inspectValue` (5.49%).
 That makes traversal, key sorting, and path construction the next measured
 canonicalization targets; they are deliberately outside this slice.
