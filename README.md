@@ -228,12 +228,27 @@ pnpm fixtures:portable
 pnpm verify:portable-fixtures
 pnpm verify:local
 pnpm benchmark:scale -- --scale=10000 --profile=core --warmups=0 --repetitions=1
+pnpm readiness:score -- --as-of=2026-07-31T00:00:00.000Z \
+  --evidence=/absolute/path/readiness-evidence.json \
+  --attunegraph-repository=/absolute/path/attunegraph \
+  --muse-repository=/absolute/path/Muse
 ```
 
 The benchmark's fixed connected v2 corpus, evidence schema, output safety, and
 claim boundary are documented in [BENCHMARKS.md](BENCHMARKS.md). The real 10K
 lifecycle proof and the 100K/1M runs are separate evidence activities, not
 normal test gates.
+
+The full gate inventory and artifact contract are documented in
+[READINESS.md](READINESS.md). `pnpm readiness:score` accepts only
+`attunegraph-readiness-evidence@1`. It
+requires an explicit `--as-of` timestamp and validates clean exact Git
+SHA/tree subjects, the Muse gitlink, a shared toolchain digest, required check
+names, and unique regular relative evidence artifacts with matching SHA-256.
+Every artifact is strict `attunegraph-readiness-check@1` JSON bound to its exact
+check record, and evidence is fresh through exactly 168 hours relative to
+`--as-of`. It is a fail-closed evidence-coverage score, never a
+product-usefulness claim.
 
 Fixture generation is deterministic. Regeneration must reproduce the checked-in
 inputs, `.atgx` artifacts, manifest hashes, byte counts, record identities, and

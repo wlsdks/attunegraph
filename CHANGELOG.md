@@ -9,6 +9,9 @@ All notable changes to AttuneGraph are recorded here.
 - Add an Ubuntu Node 24.15 clean-room consumer CI proof that packs the built
   package, installs it offline outside the checkout, and exercises its public
   export boundary through a canonical-projection@2 Working Graph.
+- Add a revision-bound, fail-closed readiness evidence scorer with eight fixed
+  gates, 37 check-bound artifacts, exact Muse gitlink verification, and an
+  explicit no-product-usefulness boundary.
 - Add a deterministic connected-v2 10K/100K/1M scale benchmark with fixed
   shards, revision/toolchain/corpus binding, raw latency and RSS samples,
   in-memory and local SQLite profiles, safe non-overwriting JSON output, and an
