@@ -470,6 +470,12 @@ references, refuses to infer authority for a different governed action, and
 proves that a stale, expired generation-two authorization abstains after its
 head changes and that colliding refs cannot cross scopes.
 
+Each cell labels its deterministic comparison-work proxy twice:
+`assertionVisitedPairsPerRead` describes one seed read, while
+`batchAssertionVisitedPairs` is the exact per-read value multiplied by the
+batch size. The strict validator enforces that relationship so aggregate batch
+latency cannot be compared accidentally with a single-read work count.
+
 Every report is permanently `measurementOnly: true`, `claimEligible: false`,
 `resourceAuthoritative: false`, and `resourceQualified: false`. The harness is
 observational performance evidence only; it does not qualify resources or

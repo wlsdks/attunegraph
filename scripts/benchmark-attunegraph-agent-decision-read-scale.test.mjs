@@ -66,7 +66,7 @@ describe("AttuneGraph agent decision-read scale benchmark", () => {
     expect(validateAgentDecisionReadScaleReportSchema(report)).toBe(report);
     expect(report).toMatchObject({
       claimEligible: false,
-      measurementIdentitySha256: "sha256:2eb3acf91edb289f2ceb9b5f33d6f12bfa042b0451f971d1a0d86f4d865717bc",
+      measurementIdentitySha256: "sha256:9dbc7811dbf913280669fc1971dad8443ca577d71653c4f035aa838c0cd03e8f",
       measurementOnly: true,
       memoryContract: {
         deltaQualified: false,
@@ -76,11 +76,13 @@ describe("AttuneGraph agent decision-read scale benchmark", () => {
       },
       resourceAuthoritative: false,
       resourceQualified: false,
-      workloadSha256: "sha256:0076fba7303250790efe1c890f7e02febf575b195012e27d3a6b33894f55f926"
+      workloadSha256: "sha256:e23960ac7f70c4e193ff268176f623ec4f77956a698148217d57b92ad4eea9ae"
     });
     expect(report.cells.map((cell) => cell.id)).toEqual(CELL_IDS);
     expect(report.cells.map((cell) => cell.activeAssertionCount)).toEqual([16, 32, 48, 16, 32, 48, 48, 48, 48]);
     expect(report.cells.map((cell) => cell.batchSize)).toEqual([1, 1, 1, 1, 1, 1, 1, 4, 32]);
+    expect(report.cells.map((cell) => cell.assertionVisitedPairsPerRead)).toEqual([48, 96, 144, 272, 1056, 2352, 2352, 2352, 2352]);
+    expect(report.cells.map((cell) => cell.batchAssertionVisitedPairs)).toEqual([48, 96, 144, 272, 1056, 2352, 2352, 9408, 75264]);
     for (const cell of report.cells) {
       expect(cell.canonicalProjection.outputBytes).toBeLessThanOrEqual(15_500);
       expect(cell.timing.cold.batchExecuteMilliseconds.p50).not.toBeNull();
@@ -116,6 +118,7 @@ describe("AttuneGraph agent decision-read scale benchmark", () => {
       (value) => { value.workloadSha256 = `sha256:${"f".repeat(64)}`; },
       (value) => { value.cells[1] = structuredClone(value.cells[0]); },
       (value) => { value.cells[8].batchSize = 31; },
+      (value) => { value.cells[8].batchAssertionVisitedPairs = value.cells[8].assertionVisitedPairsPerRead; },
       (value) => { value.cells[0].timing.cold.batchExecuteMilliseconds.p50 = 0; },
       (value) => { value.cells[0].timing.cold.batchExecuteMilliseconds.p95 = 1; },
       (value) => { value.cells[0].timing.raw[0].cold.positions[0] = Number.NaN; },

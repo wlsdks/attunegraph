@@ -10,7 +10,8 @@ All notable changes to AttuneGraph are recorded here.
   Working Graph harness with cold/warm rebuilt heads, raw timings, stored-v2
   byte and semantic anchors, bounded p50-only reporting, an explicit temporal
   authorization-abstention sentinel, process-observational memory checkpoints,
-  and clean revision/host/argv-bound CLI evidence.
+  explicit per-read versus aggregate batch work counts, and clean
+  revision/host/argv-bound CLI evidence.
 - Add the dependency-free `attunegraph-performance-regression@1` offline
   verifier and CLI. It strictly binds a five-pair AB/BA manifest to exact
   base/candidate evidence bytes, distinct immutable revision/package

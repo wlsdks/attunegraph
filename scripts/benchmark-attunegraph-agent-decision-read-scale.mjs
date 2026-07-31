@@ -23,7 +23,7 @@ const PACKAGE_ROOT = resolve(fileURLToPath(new URL("../", import.meta.url)));
 const SUPPORTED_ARGUMENTS = new Set(["output", "repetitions", "warmups", "workload"]);
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
 const GIT_OBJECT_ID = /^[a-f0-9]{40}$/u;
-const EXPECTED_WORKLOAD_SHA256 = "sha256:0076fba7303250790efe1c890f7e02febf575b195012e27d3a6b33894f55f926";
+const EXPECTED_WORKLOAD_SHA256 = "sha256:e23960ac7f70c4e193ff268176f623ec4f77956a698148217d57b92ad4eea9ae";
 const EXPECTED_AUTHORITY_SENTINEL_SHA256 = "sha256:f38080d0b0e4419f4b6a4c73fc14bc527b63927130bf001130f309e5dd6208e3";
 const EXPECTED_CELL_ANCHORS = frozen({
   "focused-resumption-16": "sha256:9c8aad8fc930de4ee674756f57bf5ba0d55f2f7f839203e037995d6caaae3e1f",
@@ -174,7 +174,8 @@ function focusedCell(activeCount) {
   const command = commandFor(id, scope, threadRoot, assertions);
   return frozen({
     activeAssertionCount: activeCount,
-    assertionVisitedPairs: activeCount * 3,
+    assertionVisitedPairsPerRead: activeCount * 3,
+    batchAssertionVisitedPairs: activeCount * 3,
     projectionInput: projectionInputManifest(command),
     decoyCount: 0,
     expected: frozen({
@@ -205,9 +206,11 @@ function frontierCell(activeCount, batchSize = 1, batched = false) {
     return assertion(`a:${index.toString().padStart(2, "0")}`, item, "LINKED_TO", threadRoot);
   });
   const command = commandFor(id, scope, threadRoot, frozen(active));
+  const assertionVisitedPairsPerRead = activeCount * (activeCount + 1);
   return frozen({
     activeAssertionCount: activeCount,
-    assertionVisitedPairs: activeCount * (activeCount + 1),
+    assertionVisitedPairsPerRead,
+    batchAssertionVisitedPairs: assertionVisitedPairsPerRead * batchSize,
     projectionInput: projectionInputManifest(command),
     decoyCount: 0,
     expected: frozen({
@@ -237,7 +240,8 @@ export function createAgentDecisionReadScaleWorkload() {
   const identity = frozen({
     cells: frozen(cells.map((cell) => frozen({
       activeAssertionCount: cell.activeAssertionCount,
-      assertionVisitedPairs: cell.assertionVisitedPairs,
+      assertionVisitedPairsPerRead: cell.assertionVisitedPairsPerRead,
+      batchAssertionVisitedPairs: cell.batchAssertionVisitedPairs,
       projectionInput: cell.projectionInput,
       decoyCount: cell.decoyCount,
       expected: cell.expected,
@@ -447,7 +451,8 @@ async function measureCell(cell, repetitions, signal) {
   return frozen({
     activeAssertionCount: cell.activeAssertionCount,
     anchorSha256,
-    assertionVisitedPairs: cell.assertionVisitedPairs,
+    assertionVisitedPairsPerRead: cell.assertionVisitedPairsPerRead,
+    batchAssertionVisitedPairs: cell.batchAssertionVisitedPairs,
     batchSize: cell.seeds.length,
     canonicalProjection: stable.canonicalProjection,
     decoyCount: cell.decoyCount,
@@ -745,7 +750,8 @@ function validateCell(value, expectedCell, repetitions, index) {
   const cell = exactRecord(value, [
     "activeAssertionCount",
     "anchorSha256",
-    "assertionVisitedPairs",
+    "assertionVisitedPairsPerRead",
+    "batchAssertionVisitedPairs",
     "batchSize",
     "canonicalProjection",
     "decoyCount",
@@ -762,7 +768,9 @@ function validateCell(value, expectedCell, repetitions, index) {
   const expectedSeedIds = expectedCell.seeds.map((seed) => `${seed.kind}:${seed.id}`);
   if (cell.id !== expectedCell.id || cell.kind !== expectedCell.kind || cell.repetitions !== repetitions
     || cell.activeAssertionCount !== expectedCell.activeAssertionCount || cell.inactiveAssertionCount !== expectedCell.inactiveAssertionCount
-    || cell.totalAssertionCount !== expectedCell.totalAssertionCount || cell.assertionVisitedPairs !== expectedCell.assertionVisitedPairs
+    || cell.totalAssertionCount !== expectedCell.totalAssertionCount || cell.assertionVisitedPairsPerRead !== expectedCell.assertionVisitedPairsPerRead
+    || cell.batchAssertionVisitedPairs !== expectedCell.batchAssertionVisitedPairs
+    || cell.batchAssertionVisitedPairs !== cell.assertionVisitedPairsPerRead * cell.batchSize
     || cell.batchSize !== expectedSeedIds.length || cell.decoyCount !== expectedCell.decoyCount) {
     invalid(`${name} workload contract`);
   }
