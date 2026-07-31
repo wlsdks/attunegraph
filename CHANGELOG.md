@@ -73,6 +73,14 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Changed
 
+- Reuse the decoder's already verified canonical store-envelope result during
+  semantic normalization instead of independently re-admitting the same
+  projection twice more. Wire bytes, content identities, validation outcomes,
+  corruption handling, budgets, sink abort semantics, and terminal convergence
+  remain unchanged. Five clean rebuilt AB/BA 10K portable pairs record a 29.89%
+  paired-median decode-latency reduction and a 42.64% throughput increase.
+  RSS remains too noisy to classify and is an explicit measurement gap. This is
+  bounded one-host evidence, not a tail, SLA, leak, or general database claim.
 - Build one execute-local adjacency index for each Working Graph compilation
   instead of rescanning every usable assertion for every visited ref. Exact
   ordering, temporal filtering, budgets, diagnostics, authority, provenance,
