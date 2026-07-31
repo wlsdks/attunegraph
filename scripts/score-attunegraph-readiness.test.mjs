@@ -356,8 +356,7 @@ describe("AttuneGraph readiness evidence scorer", () => {
     });
   });
 
-  it("hard-fails future time, command/toolchain mismatch, dirty sources, missing/duplicate checks, traversal, and bad hashes", async () => {
-    const mutations = [
+  it.each([
       ["future time", async (fixture) => {
         const entry = check(fixture, "inspect");
         entry.observedAt = "2026-08-01T00:00:00.000Z";
@@ -370,12 +369,10 @@ describe("AttuneGraph readiness evidence scorer", () => {
       ["duplicate check", (fixture) => { fixture.evidence.checks[1].name = fixture.evidence.checks[0].name; }, /duplicate/u],
       ["traversal", (fixture) => { check(fixture, "inspect").artifact.path = "../escape.txt"; }, /relative|traversal/u],
       ["hash", (fixture) => { check(fixture, "inspect").artifact.sha256 = sha256("wrong"); }, /does not match/u]
-    ];
-    for (const [, mutate, message] of mutations) {
-      await withFixture(async (fixture) => {
-        await mutate(fixture);
-        expect(() => score(fixture)).toThrow(message);
-      });
-    }
+  ])("hard-fails %s", async (_name, mutate, message) => {
+    await withFixture(async (fixture) => {
+      await mutate(fixture);
+      expect(() => score(fixture)).toThrow(message);
+    });
   });
 });
