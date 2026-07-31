@@ -37,6 +37,9 @@ const objectGetOwnPropertyDescriptor = Object.getOwnPropertyDescriptor;
 const reflectApply = Reflect.apply;
 const reflectGetPrototypeOf = Reflect.getPrototypeOf;
 const reflectOwnKeys = Reflect.ownKeys;
+const uint8ArrayIndexOf = Uint8Array.prototype.indexOf;
+const uint8ArraySet = Uint8Array.prototype.set;
+const uint8ArraySubarray = Uint8Array.prototype.subarray;
 
 export type AttuneGraphPortableDecoderErrorCode =
   | "INVALID_INPUT"
@@ -392,7 +395,8 @@ export function createAttuneGraphPortableDecoder(
   const budgets = decoderBudgets(qualificationLimits);
 
   let phase: DecoderPhase = "manifest";
-  let currentLine: number[] = [];
+  let currentLine = new Uint8Array(0);
+  let currentLineLength = 0;
   let artifactBytes = 0;
   let priorByteLength = 0;
   let recordCount = 0;
@@ -759,7 +763,7 @@ export function createAttuneGraphPortableDecoder(
     const record = canonicalRecord(lineBytes, recordCount === 0);
     const kind = record.kind;
     const lineWithLf = new Uint8Array(lineBytes.byteLength + 1);
-    lineWithLf.set(lineBytes);
+    reflectApply(uint8ArraySet, lineWithLf, [lineBytes]);
     lineWithLf[lineBytes.byteLength] = 0x0a;
     if (recordCount === 0) {
       if (kind !== "manifest") corrupt("portable export must begin with a manifest");
@@ -782,35 +786,86 @@ export function createAttuneGraphPortableDecoder(
   };
 
   const processChunk = async (chunk: Uint8Array): Promise<void> => {
-    for (let index = 0; index < chunk.byteLength; index += 1) {
+    let offset = 0;
+    while (offset < chunk.byteLength) {
       if (phase === "footer") {
         corrupt("portable export contains bytes after the footer");
       }
+      const lineFeedOffset = reflectApply(
+        uint8ArrayIndexOf,
+        chunk,
+        [0x0a, offset]
+      ) as number;
+      const segmentEnd = lineFeedOffset < 0
+        ? chunk.byteLength
+        : lineFeedOffset;
+      const segment = reflectApply(
+        uint8ArraySubarray,
+        chunk,
+        [offset, segmentEnd]
+      ) as Uint8Array;
+      const maxLineBytes = recordCount === 0
+        ? budgets.maxEdgeLineBytes
+        : budgets.maxPortableLineBytes;
+      const availableLineBytes = maxLineBytes - currentLineLength;
+      const availableArtifactBytes = budgets.maxArtifactBytes - artifactBytes;
+      if (segment.byteLength > Math.min(
+        availableLineBytes,
+        availableArtifactBytes
+      )) {
+        if (availableArtifactBytes <= availableLineBytes) {
+          decoderError(
+            "LIMIT_EXCEEDED",
+            "portable artifact exceeds its byte limit"
+          );
+        }
+        decoderError(
+          "LIMIT_EXCEEDED",
+          "portable record line exceeds its byte limit"
+        );
+      }
+      const nextLineLength = currentLineLength + segment.byteLength;
+      if (nextLineLength > currentLine.byteLength) {
+        let nextCapacity = Math.min(
+          maxLineBytes,
+          Math.max(1_024, currentLine.byteLength * 2, nextLineLength)
+        );
+        while (nextCapacity < nextLineLength) {
+          nextCapacity = Math.min(
+            maxLineBytes,
+            Math.max(nextCapacity * 2, nextLineLength)
+          );
+        }
+        const nextLine = new Uint8Array(nextCapacity);
+        reflectApply(uint8ArraySet, nextLine, [
+          reflectApply(
+            uint8ArraySubarray,
+            currentLine,
+            [0, currentLineLength]
+          )
+        ]);
+        currentLine = nextLine;
+      }
+      reflectApply(uint8ArraySet, currentLine, [segment, currentLineLength]);
+      currentLineLength = nextLineLength;
+      artifactBytes += segment.byteLength;
+      offset = segmentEnd;
+      if (lineFeedOffset < 0) return;
       if (artifactBytes >= budgets.maxArtifactBytes) {
         decoderError(
           "LIMIT_EXCEEDED",
           "portable artifact exceeds its byte limit"
         );
       }
-      const byte = chunk[index]!;
       artifactBytes += 1;
-      if (byte === 0x0a) {
-        const line = Uint8Array.from(currentLine);
-        await processLine(line);
-        await checkpoint();
-        currentLine = [];
-        continue;
-      }
-      const maxLineBytes = recordCount === 0
-        ? budgets.maxEdgeLineBytes
-        : budgets.maxPortableLineBytes;
-      if (currentLine.length >= maxLineBytes) {
-        decoderError(
-          "LIMIT_EXCEEDED",
-          "portable record line exceeds its byte limit"
-        );
-      }
-      currentLine.push(byte);
+      await processLine(reflectApply(
+        uint8ArraySubarray,
+        currentLine,
+        [0, currentLineLength]
+      ) as Uint8Array);
+      await checkpoint();
+      currentLineLength = 0;
+      offset += 1;
     }
   };
 
@@ -856,7 +911,7 @@ export function createAttuneGraphPortableDecoder(
     finish(): Promise<AttuneGraphPortableSummary> {
       return run(async () => {
         await checkpoint();
-        if (currentLine.length !== 0) {
+        if (currentLineLength !== 0) {
           corrupt("portable export is missing its final LF");
         }
         if (report === undefined || phase !== "footer") {

@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { spawnSync } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { TextEncoder } from "node:util";
@@ -453,6 +454,44 @@ describe("package-private AttuneGraph portable decoder", () => {
     expect(originalSeal).toHaveBeenCalledOnce();
   });
 
+  it("does not consult mutable Uint8Array framing methods after module initialization", () => {
+    const fixture = fixtures[0]!;
+    const program = `
+      import { Buffer } from "node:buffer";
+      const { createAttuneGraphPortableDecoder } = await import(
+        "./dist/attunegraph-portable-decoder.js"
+      );
+      const bytes = Buffer.from(${JSON.stringify(Buffer.from(fixture.bytes).toString("base64"))}, "base64");
+      const sink = {
+        appendProjection() {},
+        sealProjections() {},
+        assertHead() {},
+        finish() {},
+        abort() {}
+      };
+      const decoder = createAttuneGraphPortableDecoder(sink);
+      for (const method of ["indexOf", "set", "subarray"]) {
+        Object.defineProperty(Uint8Array.prototype, method, {
+          configurable: true,
+          value() { throw new Error("poisoned Uint8Array." + method); },
+          writable: true
+        });
+      }
+      await decoder.write(bytes);
+      await decoder.finish();
+    `;
+    const result = spawnSync(
+      process.execPath,
+      ["--input-type=module", "--eval", program],
+      {
+        cwd: join(dirname(fileURLToPath(import.meta.url)), ".."),
+        encoding: "utf8",
+        timeout: 10_000
+      }
+    );
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   it("rejects hostile sinks/chunks without observation and uses INVALID_STATE after success", async () => {
     let getterCalls = 0;
     const accessorSink =
@@ -741,6 +780,21 @@ describe("package-private AttuneGraph portable decoder", () => {
       );
     }
   );
+
+  it("keeps artifact exhaustion authoritative when line and artifact limits cross together", async () => {
+    const { failure } = await decodeFailure(
+      fixtures[0]!.bytes,
+      "LIMIT_EXCEEDED",
+      {
+        ...PRODUCTION_BUDGETS,
+        maxArtifactBytes: 32,
+        maxEdgeLineBytes: 32
+      }
+    );
+    expect(failure).toMatchObject({
+      message: "portable artifact exceeds its byte limit"
+    });
+  });
 
   it.each([
     ["appendProjection", "sync", "one-scope-two-generations"],

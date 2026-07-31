@@ -48,6 +48,14 @@ All notable changes to AttuneGraph are recorded here.
 - Reject disconnected graph debris before any Store read or compare-and-swap,
   while retaining byte-compatible v1 Store and `.atgx` re-admission.
 
+### Changed
+
+- Replace portable decoder per-byte array framing with a bounded chunk-aware LF
+  scanner and reusable byte buffer while retaining caller-chunk detachment,
+  wire bytes, budgets, failure precedence, sink reentry, and abort semantics.
+  CPU evidence classifies this as allocation/streaming hygiene with no material
+  speed claim; canonicalization remains the measured bottleneck.
+
 ### Fixed
 
 - Close performance-evidence forgery paths with exact nested schemas, corpus-bound correctness
