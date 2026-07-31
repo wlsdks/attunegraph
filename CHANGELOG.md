@@ -9,6 +9,11 @@ All notable changes to AttuneGraph are recorded here.
 - Add an Ubuntu Node 24.15 clean-room consumer CI proof that packs the built
   package, installs it offline outside the checkout, and exercises its public
   export boundary through a canonical-projection@2 Working Graph.
+- Add explicit database-scoped `openLocalAttuneGraphSession` handles that share
+  one caller-owned SQLite Worker across scopes while retaining cold
+  `openLocalAttuneGraph` semantics and no global pool.
+- Add a separate measurement-only `local-session` scale benchmark profile for
+  the fixed 313-shard 10K workload.
 - Add a deterministic connected-v2 10K/100K/1M scale benchmark with fixed
   shards, revision/toolchain/corpus binding, raw latency and RSS samples,
   in-memory and local SQLite profiles, safe non-overwriting JSON output, and an

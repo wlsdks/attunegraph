@@ -8,11 +8,16 @@
     "attunegraph-local-worker.mjs"
   ],
   "publicLocalRuntimeExports": [
-    "openLocalAttuneGraph"
+    "openLocalAttuneGraph",
+    "openLocalAttuneGraphSession"
   ],
   "publicLocalTypeExports": [
+    "LocalAttuneGraphSession",
+    "OpenLocalAttuneGraphHandleOptions",
     "OpenLocalAttuneGraphOptions",
-    "openLocalAttuneGraph"
+    "OpenLocalAttuneGraphSessionOptions",
+    "openLocalAttuneGraph",
+    "openLocalAttuneGraphSession"
   ],
   "sqliteExecutionModule": "attunegraph-local-sqlite.mjs",
   "workerEntryModule": "attunegraph-local-worker.mjs"

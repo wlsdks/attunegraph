@@ -276,7 +276,10 @@ describe("production AttuneGraph portable fixture integration", () => {
       "AttuneGraphAdminReadonlyError",
       "openAttuneGraphAdminReadonlyApplication"
     ]);
-    expect(Object.keys(local)).toEqual(["openLocalAttuneGraph"]);
+    expect(Object.keys(local).sort()).toEqual([
+      "openLocalAttuneGraph",
+      "openLocalAttuneGraphSession"
+    ]);
     expect(Object.keys(backend)).toEqual(["createAttuneGraphStore"]);
     expect(Object.keys(testing).sort()).toEqual([
       "InMemoryAttuneGraphStoreBackend", "createInMemoryAttuneGraphStore",
