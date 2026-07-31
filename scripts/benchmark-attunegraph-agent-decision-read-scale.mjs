@@ -879,7 +879,12 @@ export function validateAgentDecisionReadScaleReportSchema(value) {
 
 async function validateOutputPath(outputPath) {
   const parent = dirname(outputPath);
-  if (await realpath(parent) !== parent || (!relative(PACKAGE_ROOT, outputPath).startsWith("..") && relative(PACKAGE_ROOT, outputPath) !== "")) throw new Error("agent decision-read scale output must be outside the repository under a non-symlink directory");
+  const fromRepository = relative(PACKAGE_ROOT, outputPath);
+  if (await realpath(parent) !== parent
+    || fromRepository === ""
+    || (!fromRepository.startsWith("..") && !isAbsolute(fromRepository))) {
+    throw new Error("agent decision-read scale output must be outside the repository under a non-symlink directory");
+  }
   try { await lstat(outputPath); throw new Error("agent decision-read scale output already exists"); } catch (cause) { if (cause?.code !== "ENOENT") throw cause; }
 }
 
