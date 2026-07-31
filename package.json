@@ -87,7 +87,7 @@
     "test:benchmark-qualification": "pnpm build && vitest run --config vitest.benchmark-qualification.config.ts",
     "test:cross-platform": "pnpm build && vitest run --config vitest.cross-platform.config.ts",
     "test:local-profile": "pnpm build && vitest run --config vitest.local-profile.config.ts",
-    "test:readiness": "vitest run scripts/capture-attunegraph-readiness.test.mjs scripts/score-attunegraph-readiness.test.mjs",
+    "test:readiness": "vitest run --no-file-parallelism scripts/capture-attunegraph-readiness.test.mjs scripts/score-attunegraph-readiness.test.mjs",
     "test:supported": "pnpm build && vitest run",
     "test:focused": "pnpm build && vitest run src/attunegraph-engine.test.ts",
     "example": "pnpm build && node examples/basic-agent.mjs",

@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
   readinessCheckContract,
@@ -27,6 +27,8 @@ const AS_OF = "2026-07-31T00:00:00.000Z";
 const OBSERVED_AT = "2026-07-30T00:00:00.000Z";
 const SCORER_ENTRYPOINT = fileURLToPath(new URL("./score-attunegraph-readiness.mjs", import.meta.url));
 const REQUIRED_CHECKS = READINESS_GATES.flatMap((gate) => gate.checks).sort();
+
+let repositoryFixture;
 
 function git(repository, arguments_) {
   return execFileSync("git", ["-C", repository, ...arguments_], { encoding: "utf8" }).trim();
@@ -53,12 +55,11 @@ function digest(value) {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
-async function createFixture() {
+async function createRepositoryFixture() {
   const directory = await mkdtemp(join(tmpdir(), "attunegraph-readiness-v2-"));
   const attunegraph = join(directory, "attunegraph");
   const muse = join(directory, "muse");
-  const evidenceDirectory = join(directory, "evidence");
-  await Promise.all([mkdir(attunegraph), mkdir(muse), mkdir(evidenceDirectory)]);
+  await Promise.all([mkdir(attunegraph), mkdir(muse)]);
   await initializeRepository(attunegraph, "attunegraph.txt");
   await initializeRepository(muse, "muse.txt");
   const attunegraphSubject = repositorySubject(attunegraph);
@@ -78,24 +79,31 @@ async function createFixture() {
     packageManager: "pnpm/10.18.0",
     platform: "fixture-platform"
   });
+  return { attunegraph, directory, muse, subject, toolchain };
+}
+
+async function createFixture() {
+  const directory = await mkdtemp(join(repositoryFixture.directory, "case-"));
+  const evidenceDirectory = join(directory, "evidence");
+  await mkdir(evidenceDirectory);
   const checks = [];
   const results = new Map();
+  const writes = [];
   for (const gate of READINESS_GATES) {
     for (const name of gate.checks) {
       const contract = readinessCheckContract(name);
       const checkDirectory = join(evidenceDirectory, "checks", name);
-      await mkdir(checkDirectory, { recursive: true });
       const stdoutPath = `checks/${name}/stdout.bin`;
       const stderrPath = `checks/${name}/stderr.bin`;
       const resultPath = `checks/${name}/result.json`;
       const empty = Buffer.alloc(0);
-      await Promise.all([
-        writeFile(join(evidenceDirectory, stdoutPath), empty),
-        writeFile(join(evidenceDirectory, stderrPath), empty)
-      ]);
       const result = {
         command: structuredClone(readinessContractSnapshot(contract)),
-        cwd: realpathSync(contract.cwdRole === "muse" ? muse : attunegraph),
+        cwd: realpathSync(
+          contract.cwdRole === "muse"
+            ? repositoryFixture.muse
+            : repositoryFixture.attunegraph
+        ),
         endedAt: OBSERVED_AT,
         executable: null,
         exitCode: null,
@@ -114,21 +122,33 @@ async function createFixture() {
         state: "not-run",
         stderr: { path: stderrPath, sha256: digest(empty) },
         stdout: { path: stdoutPath, sha256: digest(empty) },
-        subject: structuredClone(subject),
-        toolchain: structuredClone(toolchain)
+        subject: structuredClone(repositoryFixture.subject),
+        toolchain: structuredClone(repositoryFixture.toolchain)
       };
       const body = `${JSON.stringify(result, null, 2)}\n`;
-      await writeFile(join(evidenceDirectory, resultPath), body);
+      writes.push((async () => {
+        await mkdir(checkDirectory, { recursive: true });
+        await Promise.all([
+          writeFile(join(evidenceDirectory, stdoutPath), empty),
+          writeFile(join(evidenceDirectory, stderrPath), empty),
+          writeFile(join(evidenceDirectory, resultPath), body)
+        ]);
+      })());
       checks.push({ gate: gate.name, name, result: { path: resultPath, sha256: digest(body) } });
       results.set(name, result);
     }
   }
+  await Promise.all(writes);
   return {
-    attunegraph,
+    attunegraph: repositoryFixture.attunegraph,
     directory,
-    evidence: { checks, schema: READINESS_EVIDENCE_SCHEMA, subject },
+    evidence: {
+      checks,
+      schema: READINESS_EVIDENCE_SCHEMA,
+      subject: repositoryFixture.subject
+    },
     evidenceDirectory,
-    muse,
+    muse: repositoryFixture.muse,
     results
   };
 }
@@ -156,12 +176,18 @@ function score(fixture, asOf = AS_OF) {
 
 async function withFixture(callback) {
   const fixture = await createFixture();
-  try {
-    await callback(fixture);
-  } finally {
-    await rm(fixture.directory, { force: true, recursive: true });
-  }
+  await callback(fixture);
 }
+
+beforeAll(async () => {
+  repositoryFixture = await createRepositoryFixture();
+});
+
+afterAll(async () => {
+  if (repositoryFixture) {
+    await rm(repositoryFixture.directory, { force: true, recursive: true });
+  }
+});
 
 describe("AttuneGraph readiness evidence v2 scorer", () => {
   it("binds the exact 37-check inventory to one fixed contract each", () => {
@@ -205,7 +231,7 @@ describe("AttuneGraph readiness evidence v2 scorer", () => {
     const packageJson = JSON.parse(await readFile(new URL("../package.json", import.meta.url), "utf8"));
     const workflow = await readFile(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
     expect(packageJson.scripts["test:readiness"]).toBe(
-      "vitest run scripts/capture-attunegraph-readiness.test.mjs scripts/score-attunegraph-readiness.test.mjs"
+      "vitest run --no-file-parallelism scripts/capture-attunegraph-readiness.test.mjs scripts/score-attunegraph-readiness.test.mjs"
     );
     expect(workflow).toMatch(/readiness-contract:[\s\S]*os: \[ubuntu-latest, windows-latest\][\s\S]*node-version: "24\.15\.0"[\s\S]*pnpm test:readiness/u);
     expect(workflow).toMatch(/readiness-attestation-contract:[\s\S]*actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1/u);
@@ -244,8 +270,10 @@ describe("AttuneGraph readiness evidence v2 scorer", () => {
       fixture.results.get("inspect").command.argv = [process.execPath, "--version"];
       await syncResult(fixture, "inspect");
       expect(() => score(fixture)).toThrow(/fixed registry contract/u);
-    });
-    await withFixture(async (fixture) => {
+      fixture.results.get("inspect").command = structuredClone(
+        readinessContractSnapshot(readinessCheckContract("inspect"))
+      );
+      await syncResult(fixture, "inspect");
       fixture.results.get("corpus-1m").command.parameters.scale = 10_000;
       await syncResult(fixture, "corpus-1m");
       expect(() => score(fixture)).toThrow(/fixed registry contract/u);
