@@ -11,7 +11,10 @@ import {
   normalizeStoredProjectionForPortableDecoder,
   openAttuneGraph
 } from "./attunegraph-engine.js";
-import { admitPortableProjection } from "./attunegraph-portable-admission.js";
+import {
+  admitPortableProjection,
+  admitPortableProjectionForDecoder
+} from "./attunegraph-portable-admission.js";
 import type { GraphAssertion } from "./types.js";
 
 const SCOPE = { sourceId: "source-a", threadId: "thread-a" };
@@ -148,6 +151,39 @@ it("returns the verified store identity with decoder-normalized canonical input"
   expect(admitted.projection).toEqual(projection);
   expect(admitted.projectionId).toBe(canonical.contentId);
   expectDeeplyFrozen(admitted);
+});
+
+it("rejects a decoder projection whose normalization changes its store identity", async () => {
+  const projection = mutableProjection(await engineProjection());
+  const originalAssertion = (projection.assertions as readonly unknown[])[0];
+  projection.assertions = [
+    JSON.parse(JSON.stringify(originalAssertion)),
+    JSON.parse(JSON.stringify(originalAssertion))
+  ];
+  const record = canonicalizeImmutableEnvelope(
+    {
+      kind: "projection",
+      projection,
+      projectionId: `attunegraph-store:${"0".repeat(64)}`,
+      schemaVersion: 1,
+      sequence: 1
+    },
+    "external-mutable",
+    {
+      hashDomain: "attunegraph.portable-record.v1",
+      idField: "recordId",
+      idPrefix: "attunegraph-portable-record:"
+    }
+  );
+  const frozenUnsignedProjection = Object.getOwnPropertyDescriptor(
+    record.envelope,
+    "projection"
+  )?.value;
+
+  expectAttuneGraphError(
+    () => admitPortableProjectionForDecoder(frozenUnsignedProjection),
+    "CORRUPT_STORE"
+  );
 });
 
 it("re-admits one thread-rooted v2 projection through Store and portable boundaries", async () => {

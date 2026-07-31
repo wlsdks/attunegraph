@@ -29,6 +29,11 @@ const RECORD_SPEC = Object.freeze({
   idField: "recordId",
   idPrefix: "attunegraph-portable-record:"
 } as const);
+const STORE_SPEC = Object.freeze({
+  hashDomain: "attunegraph.store-projection.v1",
+  idField: "storeEnvelopeId",
+  idPrefix: "attunegraph-store:"
+} as const);
 const STATE_HASH_DOMAIN = "attunegraph.portable-state.v1\0";
 const PRODUCTION_BUDGETS: AttuneGraphPortableEncoderBudgetsForInternalUse = Object.freeze({
   maxProjections: 1_000_000,
@@ -726,6 +731,38 @@ describe("package-private AttuneGraph portable decoder", () => {
     const exportHex = footerStart + "attunegraph-portable-record:".length;
     badExportId[exportHex] = badExportId[exportHex] === 0x30 ? 0x31 : 0x30;
     await decodeFailure(badExportId, "CORRUPT_PORTABLE_EXPORT");
+  });
+
+  it("aborts once when normalization would change an engaged projection identity", async () => {
+    const one = fixtures[1]!;
+    const oneRecords = records(one.bytes);
+    const forgedRecord = JSON.parse(
+      JSON.stringify(oneRecords[2])
+    ) as Record<string, unknown>;
+    const forgedProjection = forgedRecord.projection as Record<string, unknown>;
+    const firstAssertion = (forgedProjection.assertions as readonly unknown[])[0];
+    forgedProjection.assertions = [
+      JSON.parse(JSON.stringify(firstAssertion)),
+      JSON.parse(JSON.stringify(firstAssertion))
+    ];
+    forgedRecord.projectionId = canonicalizeImmutableEnvelope(
+      forgedProjection,
+      "external-mutable",
+      STORE_SPEC
+    ).contentId;
+    const observed = validationSink();
+    const decoder = createAttuneGraphPortableDecoder(observed.value);
+    const failure = await rejected(() => decoder.write(
+      prefixWithRecord(one.bytes, 2, forgedRecord)
+    ));
+
+    expect(failure).toMatchObject({
+      code: "CORRUPT_PORTABLE_EXPORT",
+      message: "portable projection failed exact Engine admission"
+    });
+    expect(await rejected(() => decoder.finish())).toBe(failure);
+    expect(observed.events).toEqual(["projection:1", "abort"]);
+    expect(observed.aborts).toEqual([failure]);
   });
 
   it("makes equivalent corrupt chunkings fail at the same committed sink trace", async () => {
