@@ -16,7 +16,7 @@ import {
 } from "@attunegraph/core/testing";
 
 const SUPPORTED_SCALES = new Set([10_000, 100_000, 1_000_000]);
-const SUPPORTED_PROFILES = new Set(["core", "local"]);
+const SUPPORTED_PROFILES = new Set(["core", "local", "local-session"]);
 const SUPPORTED_ARGUMENTS = new Set([
   "output",
   "profile",
@@ -478,6 +478,134 @@ async function runLocalCorpus(plan) {
   }
 }
 
+export async function runLocalSessionCorpus(plan, runtime = {}) {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "attunegraph-benchmark-")));
+  await chmod(directory, 0o700);
+  const databasePath = join(directory, "attunegraph.sqlite");
+  const samples = {
+    close: [],
+    head: [],
+    open: [],
+    projection: [],
+    sessionClose: [],
+    sessionOpen: [],
+    workingGraph: []
+  };
+  const statuses = { abstained: 0, complete: 0, partial: 0 };
+  const rssBaselineBytes = process.memoryUsage().rss;
+  let sampledPeakRssBytes = rssBaselineBytes;
+  const lifecycleStartedAt = performance.now();
+  let session;
+  let sessionCloseAttempted = false;
+  let primaryFailed = false;
+  let primaryFailure;
+  let completedRun;
+
+  try {
+    const openLocalAttuneGraphSession = runtime.openLocalAttuneGraphSession
+      ?? (await import("@attunegraph/core/local")).openLocalAttuneGraphSession;
+    let startedAt = performance.now();
+    session = await openLocalAttuneGraphSession({ databasePath });
+    samples.sessionOpen.push(performance.now() - startedAt);
+
+    for (let shardIndex = 0; shardIndex < plan.shardCount; shardIndex += 1) {
+      const shard = createBenchmarkShard(plan, shardIndex);
+      startedAt = performance.now();
+      const graph = await session.open({ scope: shard.scope });
+      samples.open.push(performance.now() - startedAt);
+
+      startedAt = performance.now();
+      const snapshot = await graph.project(shard.command);
+      samples.projection.push(performance.now() - startedAt);
+
+      startedAt = performance.now();
+      const head = await graph.head();
+      samples.head.push(performance.now() - startedAt);
+      if (head?.commitId !== snapshot.commitId || head.generation !== 1) {
+        throw new Error("local-session benchmark head did not match the projected shard");
+      }
+
+      startedAt = performance.now();
+      const result = await graph.execute({
+        operator: "working-graph@1",
+        seed: shard.threadRoot,
+        now: shard.command.observation.observedAt,
+        maxEstimatedTokens: 32_768
+      });
+      samples.workingGraph.push(performance.now() - startedAt);
+      statuses[result.status] += 1;
+
+      startedAt = performance.now();
+      await graph.close();
+      samples.close.push(performance.now() - startedAt);
+      sampledPeakRssBytes = Math.max(sampledPeakRssBytes, process.memoryUsage().rss);
+    }
+
+    startedAt = performance.now();
+    sessionCloseAttempted = true;
+    await session.close();
+    samples.sessionClose.push(performance.now() - startedAt);
+
+    const lifecycleElapsedMilliseconds = performance.now() - lifecycleStartedAt;
+    const pureProjectionMilliseconds = samples.projection.reduce(
+      (sum, sample) => sum + sample,
+      0
+    );
+    const rssFinalBytes = process.memoryUsage().rss;
+    completedRun = {
+      assertionsPerSecond: plan.assertionCount / (pureProjectionMilliseconds / 1_000),
+      databaseBytes: {
+        database: await optionalFileBytes(databasePath),
+        sharedMemory: await optionalFileBytes(`${databasePath}-shm`),
+        writeAheadLog: await optionalFileBytes(`${databasePath}-wal`)
+      },
+      lifecycleAssertionsPerSecond: plan.assertionCount / (lifecycleElapsedMilliseconds / 1_000),
+      projectionsPerSecond: plan.shardCount / (pureProjectionMilliseconds / 1_000),
+      rss: {
+        baselineBytes: rssBaselineBytes,
+        deltaBytes: rssFinalBytes - rssBaselineBytes,
+        finalBytes: rssFinalBytes,
+        sampledPeakBytes: sampledPeakRssBytes,
+        sampling: "phase-boundary"
+      },
+      samples,
+      statuses
+    };
+  } catch (cause) {
+    primaryFailed = true;
+    primaryFailure = cause;
+  }
+
+  const cleanupFailures = [];
+  if (session !== undefined && !sessionCloseAttempted) {
+    sessionCloseAttempted = true;
+    try {
+      await session.close();
+    } catch (cause) {
+      cleanupFailures.push(cause);
+    }
+  }
+  try {
+    await rm(directory, { force: true, recursive: true });
+  } catch (cause) {
+    cleanupFailures.push(cause);
+  }
+
+  if (primaryFailed) {
+    if (cleanupFailures.length > 0) {
+      throw new AggregateError(
+        [primaryFailure, ...cleanupFailures],
+        "local-session benchmark failed and cleanup did not complete"
+      );
+    }
+    throw primaryFailure;
+  }
+  if (cleanupFailures.length > 0) {
+    throw new AggregateError(cleanupFailures, "local-session benchmark cleanup did not complete");
+  }
+  return completedRun;
+}
+
 function flatten(runs, key) {
   return runs.flatMap((run) => run.samples[key]);
 }
@@ -500,7 +628,11 @@ export async function runScaleBenchmark(options, runtime = {}) {
   const corpus = inspectBenchmarkCorpus(plan);
   const corpusGenerationMilliseconds = performance.now() - corpusStartedAt;
 
-  const runCorpus = options.profile === "core" ? runCoreCorpus : runLocalCorpus;
+  const runCorpus = options.profile === "core"
+    ? runCoreCorpus
+    : options.profile === "local"
+      ? runLocalCorpus
+      : (corpusPlan) => runLocalSessionCorpus(corpusPlan, runtime);
   for (let warmup = 0; warmup < options.warmups; warmup += 1) {
     await runCorpus(plan);
   }
@@ -552,6 +684,11 @@ export async function runScaleBenchmark(options, runtime = {}) {
       ...(options.profile === "local" ? {
         databaseBytes: Object.freeze(runs.map((run) => Object.freeze(run.databaseBytes))),
         reopenMilliseconds: summarizeBenchmarkSamples(flatten(runs, "reopen"))
+      } : {}),
+      ...(options.profile === "local-session" ? {
+        databaseBytes: Object.freeze(runs.map((run) => Object.freeze(run.databaseBytes))),
+        sessionCloseMilliseconds: summarizeBenchmarkSamples(flatten(runs, "sessionClose")),
+        sessionOpenMilliseconds: summarizeBenchmarkSamples(flatten(runs, "sessionOpen"))
       } : {}),
       workingGraphMilliseconds: summarizeBenchmarkSamples(
         flatten(runs, "workingGraph")

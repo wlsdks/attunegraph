@@ -21,7 +21,8 @@ import { createInMemoryAttuneGraphStore } from "./attunegraph-in-memory-store.js
 import { createAttuneGraphStore } from "./attunegraph-backend.js";
 import type { AttuneGraphProjectCommand, AttuneGraphScope } from "./attunegraph-contracts.js";
 import { openAttuneGraph } from "./attunegraph-engine.js";
-import { openLocalAttuneGraph } from "./local.js";
+import { openLocalAttuneGraph, openLocalAttuneGraphSession } from "./local.js";
+import { openLocalAttuneGraphSessionForTesting } from "./local-session-internal.js";
 import { openSqliteAttuneGraphStore } from "./attunegraph-sqlite-store.js";
 import { runAttuneGraphStoreConformance } from "./attunegraph-testing.js";
 
@@ -144,6 +145,187 @@ it("persists and reopens byte-identical Engine snapshots and results", async () 
   await expect(reopened.head()).rejects.toMatchObject({ code: "CLOSED" });
   await expect(reopened.project(input)).rejects.toMatchObject({ code: "CLOSED" });
   await expect(reopened.execute(execute())).rejects.toMatchObject({ code: "CLOSED" });
+});
+
+it("opens independent scope-bound handles through one local session", async () => {
+  const databasePath = await temporaryDatabase();
+  let workerStarts = 0;
+  let terminalSettlements = 0;
+  const alternateScope: AttuneGraphScope = {
+    sourceId: "local-source",
+    threadId: "local-thread-alternate"
+  };
+  const session = await openLocalAttuneGraphSessionForTesting({
+    databasePath,
+    testHooks: {
+      workerStarted: () => { workerStarts += 1; },
+      workerTerminalSettled: () => { terminalSettlements += 1; }
+    }
+  });
+  const [first, second] = await Promise.all([
+    session.open({ scope: SCOPE }),
+    session.open({ scope: alternateScope })
+  ]);
+
+  const [firstSnapshot, secondSnapshot] = await Promise.all([
+    first.project(command("session-first")),
+    second.project(command("session-second", alternateScope))
+  ]);
+
+  expect(firstSnapshot.scope).toEqual(SCOPE);
+  expect(secondSnapshot.scope).toEqual(alternateScope);
+  await Promise.all([first.close(), second.close()]);
+  await session.close();
+  expect(workerStarts).toBe(1);
+  expect(terminalSettlements).toBe(1);
+});
+
+it("preserves CAS semantics across concurrent session handles", async () => {
+  const databasePath = await temporaryDatabase();
+  const alternateScope: AttuneGraphScope = {
+    sourceId: "local-source",
+    threadId: "local-thread-alternate"
+  };
+  const session = await openLocalAttuneGraphSession({ databasePath });
+  const [left, right, alternate] = await Promise.all([
+    session.open({ scope: SCOPE }),
+    session.open({ scope: SCOPE }),
+    session.open({ scope: alternateScope })
+  ]);
+
+  const [leftRace, rightRace, alternateRace] = await Promise.allSettled([
+    left.project(command("session-race-left")),
+    right.project(command("session-race-right")),
+    alternate.project(command("session-race-alternate", alternateScope))
+  ]);
+  const sameScope = [leftRace, rightRace];
+  expect(sameScope.filter((result) => result.status === "fulfilled")).toHaveLength(1);
+  expect(sameScope.filter(
+    (result) => result.status === "rejected"
+      && (result.reason as { code?: unknown }).code === "SNAPSHOT_CONFLICT"
+  )).toHaveLength(1);
+
+  expect(alternateRace).toMatchObject({ status: "fulfilled", value: { generation: 1 } });
+  await Promise.all([left.close(), right.close(), alternate.close()]);
+  await session.close();
+});
+
+it("keeps other handles alive after a handle closes, then closes the whole session", async () => {
+  const databasePath = await temporaryDatabase();
+  const alternateScope: AttuneGraphScope = {
+    sourceId: "local-source",
+    threadId: "local-thread-alternate"
+  };
+  const session = await openLocalAttuneGraphSession({ databasePath });
+  const [first, second] = await Promise.all([
+    session.open({ scope: SCOPE }),
+    session.open({ scope: alternateScope })
+  ]);
+  await first.close();
+  await expect(first.head()).rejects.toMatchObject({ code: "CLOSED" });
+  await expect(second.project(command("still-open", alternateScope))).resolves.toMatchObject({
+    generation: 1
+  });
+
+  await session.close();
+  await expect(second.head()).rejects.toMatchObject({ code: "CLOSED" });
+  await second.close();
+});
+
+it("rejects new session handles as soon as session close begins", async () => {
+  const session = await openLocalAttuneGraphSession({
+    databasePath: await temporaryDatabase()
+  });
+  const closing = session.close();
+  await expect(session.open({ scope: SCOPE })).rejects.toMatchObject({ code: "CLOSED" });
+  await closing;
+});
+
+it("drains handle work accepted before session close begins", async () => {
+  const session = await openLocalAttuneGraphSessionForTesting({
+    databasePath: await temporaryDatabase(),
+    testResponseDelayMs: 25
+  });
+  const graph = await session.open({ scope: SCOPE });
+  const accepted = graph.project(command("session-drain"));
+  const closing = session.close();
+  await expect(session.open({ scope: SCOPE })).rejects.toMatchObject({ code: "CLOSED" });
+  await expect(accepted).resolves.toMatchObject({ generation: 1 });
+  await closing;
+  await graph.close();
+});
+
+it("admits session-handle projection before an immediate handle close", async () => {
+  const databasePath = await temporaryDatabase();
+  const session = await openLocalAttuneGraphSession({ databasePath });
+  const graph = await session.open({ scope: SCOPE });
+
+  const projection = graph.project(command("session-handle-immediate-close"));
+  const closing = graph.close();
+  const snapshot = await projection;
+  await closing;
+  expect(snapshot.generation).toBe(1);
+  await session.close();
+
+  const reopened = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  await expect(reopened.head()).resolves.toEqual(snapshot);
+  await reopened.close();
+});
+
+it("retains cold openLocalAttuneGraph projection-before-close ordering", async () => {
+  const databasePath = await temporaryDatabase();
+  const graph = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+
+  const projection = graph.project(command("cold-immediate-close"));
+  const closing = graph.close();
+  const snapshot = await projection;
+  await closing;
+  expect(snapshot.generation).toBe(1);
+
+  const reopened = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  await expect(reopened.head()).resolves.toEqual(snapshot);
+  await reopened.close();
+});
+
+it("pins one terminal worker failure across every session handle", async () => {
+  const databasePath = await temporaryDatabase();
+  const alternateScope: AttuneGraphScope = {
+    sourceId: "local-source",
+    threadId: "local-thread-alternate"
+  };
+  const session = await openLocalAttuneGraphSessionForTesting({
+    databasePath,
+    testFault: "hang-read",
+    testTimeoutMs: 50
+  });
+  const [first, second] = await Promise.all([
+    session.open({ scope: SCOPE }),
+    session.open({ scope: alternateScope })
+  ]);
+
+  const failed = await Promise.allSettled([first.head(), second.head()]);
+  expect(failed.every((result) =>
+    result.status === "rejected" && (result.reason as { code?: unknown }).code === "STORE_FAILURE"
+  )).toBe(true);
+  await expect(first.head()).rejects.toMatchObject({ code: "STORE_FAILURE" });
+  await expect(second.head()).rejects.toMatchObject({ code: "STORE_FAILURE" });
+  await expect(session.close()).rejects.toMatchObject({ code: "STORE_FAILURE" });
+  await Promise.all([first.close(), second.close()]);
+});
+
+it("cold reopens the exact session generation and Working Graph after session close", async () => {
+  const databasePath = await temporaryDatabase();
+  const session = await openLocalAttuneGraphSession({ databasePath });
+  const writer = await session.open({ scope: SCOPE });
+  const snapshot = await writer.project(command("session-cold-reopen"));
+  const result = await writer.execute(execute());
+  await writer.close();
+  await session.close();
+
+  const reopened = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  expect(JSON.stringify(await reopened.head())).toBe(JSON.stringify(snapshot));
+  expect(JSON.stringify(await reopened.execute(execute()))).toBe(JSON.stringify(result));
+  await reopened.close();
 });
 
 function inspectDatabaseWithoutMutation(databasePath: string): {

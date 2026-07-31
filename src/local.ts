@@ -1,6 +1,5 @@
 import { types as nodeTypes } from "node:util";
 
-import { createAttuneGraphStore } from "./attunegraph-backend.js";
 import type {
   AttuneGraph,
   AttuneGraphExecuteCommand,
@@ -9,13 +8,38 @@ import type {
   AttuneGraphScope,
   AttuneGraphSnapshot
 } from "./attunegraph-contracts.js";
-import { openAttuneGraph } from "./attunegraph-engine.js";
 import { AttuneGraphError } from "./attunegraph-error.js";
-import { openSqliteAttuneGraphStore } from "./attunegraph-sqlite-store.js";
+import {
+  openLocalAttuneGraphSession as openLocalAttuneGraphSessionInternal
+} from "./local-session-internal.js";
+
+export interface OpenLocalAttuneGraphSessionOptions {
+  readonly databasePath: string;
+}
+
+export interface OpenLocalAttuneGraphHandleOptions {
+  readonly scope: AttuneGraphScope;
+}
+
+export interface LocalAttuneGraphSession {
+  open(options: OpenLocalAttuneGraphHandleOptions): Promise<AttuneGraph>;
+  close(): Promise<void>;
+}
 
 export interface OpenLocalAttuneGraphOptions {
   readonly databasePath: string;
   readonly scope: AttuneGraphScope;
+}
+
+/**
+ * Opens one durable SQLite worker for a caller-owned database session. Each
+ * opened Engine handle remains bound to its declared scope; closing a handle
+ * never closes the session or its other handles.
+ */
+export function openLocalAttuneGraphSession(
+  options: OpenLocalAttuneGraphSessionOptions
+): Promise<LocalAttuneGraphSession> {
+  return openLocalAttuneGraphSessionInternal(options);
 }
 
 type DataRecord = Record<string, unknown>;
@@ -115,17 +139,12 @@ function normalizeOptions(value: unknown): OpenLocalAttuneGraphOptions {
  */
 export async function openLocalAttuneGraph(options: OpenLocalAttuneGraphOptions): Promise<AttuneGraph> {
   const normalized = normalizeOptions(options);
-  const resource = await openSqliteAttuneGraphStore({
-    databasePath: normalized.databasePath
-  });
+  const session = await openLocalAttuneGraphSession({ databasePath: normalized.databasePath });
   let engine: AttuneGraph;
   try {
-    engine = await openAttuneGraph({
-      scope: normalized.scope,
-      store: createAttuneGraphStore(resource.backend)
-    });
+    engine = await session.open({ scope: normalized.scope });
   } catch (cause) {
-    await resource.close().catch(() => undefined);
+    await session.close().catch(() => undefined);
     throw cause;
   }
 
@@ -156,7 +175,7 @@ export async function openLocalAttuneGraph(options: OpenLocalAttuneGraphOptions)
       lifecycle = "closing";
       const engineClose = engine.close();
       closePromise = engineClose
-        .then(() => resource.close())
+        .then(() => session.close())
         .finally(() => {
           lifecycle = "closed";
         });

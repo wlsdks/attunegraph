@@ -34,6 +34,12 @@ export interface SqliteAttuneGraphTestInspection {
   readonly maxGeneration: number;
 }
 
+/** Internal deterministic lifecycle instrumentation; never exported from ./local. */
+export interface SqliteAttuneGraphTestHooks {
+  workerStarted?(): void;
+  workerTerminalSettled?(): void;
+}
+
 interface PendingRequest {
   readonly resolve: (value: unknown) => void;
   readonly reject: (cause: AttuneGraphError) => void;
@@ -51,6 +57,8 @@ export interface OpenSqliteAttuneGraphStoreOptions {
   readonly testTimeoutMs?: number;
   /** Internal late-response fixture; never exported from the public local subpath. */
   readonly testResponseDelayMs?: number;
+  /** Internal lifecycle fixture; never exported from the public local subpath. */
+  readonly testHooks?: SqliteAttuneGraphTestHooks;
 }
 
 export interface OpenedSqliteAttuneGraphStore {
@@ -113,7 +121,8 @@ export async function openSqliteAttuneGraphStore(
       "testFault",
       "testFixtureMode",
       "testTimeoutMs",
-      "testResponseDelayMs"
+      "testResponseDelayMs",
+      "testHooks"
     ],
     ["databasePath"]
   );
@@ -179,6 +188,23 @@ export async function openSqliteAttuneGraphStore(
       "SQLite AttuneGraph test response delay is available only under the test runtime"
     );
   }
+  if (input.testHooks !== undefined) {
+    if (process.env.NODE_ENV !== "test") {
+      throw new AttuneGraphError("INVALID_INPUT", "SQLite AttuneGraph test hooks are available only under the test runtime");
+    }
+    const hooks = plainRecord(
+      input.testHooks,
+      "SQLite AttuneGraph test hooks",
+      ["workerStarted", "workerTerminalSettled"],
+      []
+    );
+    if (
+      (hooks.workerStarted !== undefined && typeof hooks.workerStarted !== "function")
+      || (hooks.workerTerminalSettled !== undefined && typeof hooks.workerTerminalSettled !== "function")
+    ) {
+      throw new AttuneGraphError("INVALID_INPUT", "SQLite AttuneGraph test hooks are invalid");
+    }
+  }
   const requestTimeoutMs = (input.testTimeoutMs as number | undefined)
     ?? REQUEST_TIMEOUT_MS;
   const closeTimeoutMs = (input.testTimeoutMs as number | undefined)
@@ -196,6 +222,14 @@ export async function openSqliteAttuneGraphStore(
           testFixtureMode: input.testFixtureMode === true
         }
   });
+  const testHooks = input.testHooks as SqliteAttuneGraphTestHooks | undefined;
+  testHooks?.workerStarted?.();
+  let terminalSettlementObserved = false;
+  const observeTerminalSettlement = (): void => {
+    if (terminalSettlementObserved) return;
+    terminalSettlementObserved = true;
+    testHooks?.workerTerminalSettled?.();
+  };
   const pending = new Map<number, PendingRequest>();
   let nextRequestId = 1;
   let lifecycle: "opening" | "open" | "closing" | "closed" | "failed" = "opening";
@@ -291,8 +325,23 @@ export async function openSqliteAttuneGraphStore(
     }
   };
 
+  const isPendingCloseResponse = (message: unknown): boolean => {
+    try {
+      const header = plainRecord(
+        message,
+        "worker response header",
+        ["protocolVersion", "id", "ok", "result", "error"],
+        ["protocolVersion", "id", "ok"]
+      );
+      return Number.isSafeInteger(header.id)
+        && pending.get(header.id as number)?.type === "close";
+    } catch {
+      return false;
+    }
+  };
+
   worker.on("message", (message) => {
-    if (input.testResponseDelayMs === undefined) {
+    if (input.testResponseDelayMs === undefined || isPendingCloseResponse(message)) {
       onMessage(message);
       return;
     }
@@ -309,6 +358,7 @@ export async function openSqliteAttuneGraphStore(
   });
   worker.on("exit", (code) => {
     observedExit = true;
+    observeTerminalSettlement();
     exitResolve?.();
     if (!closeAcknowledged) {
       failStop(storeFailure(`local AttuneGraph worker exited unexpectedly with code ${code}`));

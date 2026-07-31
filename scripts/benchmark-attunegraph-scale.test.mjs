@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { access, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { describe, expect, it } from "vitest";
@@ -12,6 +12,7 @@ import {
   inspectBenchmarkCorpus,
   parseBenchmarkArguments,
   pnpmVersion,
+  runLocalSessionCorpus,
   summarizeBenchmarkSamples
 } from "./benchmark-attunegraph-scale.mjs";
 import { openAttuneGraph } from "@attunegraph/core";
@@ -36,6 +37,11 @@ describe("AttuneGraph scale benchmark CLI", () => {
       scale: 10_000,
       warmups: 0
     });
+
+    expect(parseBenchmarkArguments([
+      "--scale=10000",
+      "--profile=local-session"
+    ])).toMatchObject({ profile: "local-session", scale: 10_000 });
 
     expect(() => parseBenchmarkArguments(["--scale=9999", "--profile=core"]))
       .toThrow(/scale/u);
@@ -140,6 +146,51 @@ describe("AttuneGraph scale benchmark CLI", () => {
       await expect(access(outputPath)).rejects.toMatchObject({ code: "ENOENT" });
     } finally {
       await rm(directory, { force: true, recursive: true });
+    }
+  });
+
+  it("closes the local session before removing its directory when the corpus fails", async () => {
+    const plan = createBenchmarkCorpusPlan(10_000);
+    let databasePath;
+    let closeCalls = 0;
+    let directoryExistedDuringClose = false;
+    const corpusFailure = new Error("injected local-session corpus failure");
+
+    await expect(runLocalSessionCorpus(plan, {
+      openLocalAttuneGraphSession: async (options) => {
+        databasePath = options.databasePath;
+        return {
+          open: async () => { throw corpusFailure; },
+          close: async () => {
+            closeCalls += 1;
+            await access(dirname(databasePath));
+            directoryExistedDuringClose = true;
+          }
+        };
+      }
+    })).rejects.toBe(corpusFailure);
+
+    expect(closeCalls).toBe(1);
+    expect(directoryExistedDuringClose).toBe(true);
+    expect(databasePath).toBeTypeOf("string");
+    await expect(access(dirname(databasePath))).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("reports both corpus and session-cleanup failures", async () => {
+    const corpusFailure = new Error("injected corpus failure");
+    const cleanupFailure = new Error("injected session cleanup failure");
+
+    try {
+      await runLocalSessionCorpus(createBenchmarkCorpusPlan(10_000), {
+        openLocalAttuneGraphSession: async () => ({
+          open: async () => { throw corpusFailure; },
+          close: async () => { throw cleanupFailure; }
+        })
+      });
+      throw new Error("injected benchmark unexpectedly succeeded");
+    } catch (cause) {
+      expect(cause).toBeInstanceOf(AggregateError);
+      expect(cause.errors).toEqual([corpusFailure, cleanupFailure]);
     }
   });
 });

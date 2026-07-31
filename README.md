@@ -165,6 +165,34 @@ const current = await attuneGraph.head();
 await attuneGraph.close();
 ```
 
+For many scopes in one caller-owned database lifecycle, open one explicit
+session. It owns exactly one SQLite worker; every Engine handle remains bound
+to the scope supplied to `session.open`. Closing a handle leaves the session
+and other handles available. Closing the session rejects new work, drains
+accepted work, checkpoints, and terminates that worker.
+
+```ts
+import { openLocalAttuneGraphSession } from "@attunegraph/core/local";
+
+const session = await openLocalAttuneGraphSession({
+  databasePath: "/absolute/local/path/attunegraph.sqlite"
+});
+const notes = await session.open({
+  scope: { sourceId: "notes", threadId: "trip-planning" }
+});
+const tasks = await session.open({
+  scope: { sourceId: "tasks", threadId: "trip-planning" }
+});
+
+await notes.close(); // tasks and session remain usable
+await tasks.close();
+await session.close();
+```
+
+`openLocalAttuneGraph` remains the cold, one-handle lifecycle API. It is built
+on the same private session path but creates and closes a worker per handle;
+it does not participate in a transparent process-global pool.
+
 The local adapter keeps SQLite, SQL, worker lifecycle, and physical schema
 private. It validates the runtime, filesystem, ownership, file mode, exact
 physical identity, schema, and safety pragmas before serving data. Unsupported,
@@ -228,6 +256,7 @@ pnpm fixtures:portable
 pnpm verify:portable-fixtures
 pnpm verify:local
 pnpm benchmark:scale -- --scale=10000 --profile=core --warmups=0 --repetitions=1
+pnpm benchmark:scale -- --scale=10000 --profile=local-session --warmups=0 --repetitions=1
 ```
 
 The benchmark's fixed connected v2 corpus, evidence schema, output safety, and

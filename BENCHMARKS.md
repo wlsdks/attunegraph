@@ -55,6 +55,20 @@ pnpm benchmark:scale -- --scale=10000 --profile=local \
   --output=/absolute/non-repository/evidence/local-10k.json
 ```
 
+Measure the separate single-worker, multi-scope session profile with the same
+313-shard 10K corpus:
+
+```sh
+pnpm benchmark:scale -- --scale=10000 --profile=local-session \
+  --warmups=1 --repetitions=5 \
+  --output=/absolute/non-repository/evidence/local-session-10k.json
+```
+
+`local` remains the cold lifecycle measurement: it starts and stops a Worker
+around each writer and reader. `local-session` starts one explicit session,
+opens one scope-bound handle for each shard, and stops that single Worker only
+after all 313 handles have closed. Neither profile is relabeled as the other.
+
 `--scale` and `--profile` are required. Output is JSON on stdout unless an
 output path is supplied. File output must be an absolute normalized path,
 outside the repository, under a non-symlink directory, and must not already
@@ -82,6 +96,8 @@ unrelated verification.
   counts;
 - SQLite reopen latency and database/WAL/shared-memory bytes for the local
   profile.
+- SQLite session-open/session-close latency and database/WAL/shared-memory
+  bytes for the local-session profile.
 
 Every report currently sets `measurementOnly: true` and `claimEligible: false`,
 including a clean run. This is intentional: one size/profile is not the full
