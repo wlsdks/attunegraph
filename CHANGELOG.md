@@ -6,6 +6,11 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add a zero-dependency `@attunegraph/core/source-adapter` SDK for typed,
+  factory-defined external adapters. It validates bounded metadata,
+  capabilities, host extraction results, exact evidence references, and v2
+  projection inputs before Store I/O, then uses `projectAgainstHead` without
+  parsing or retaining authoritative source bytes.
 - Add explicit `projectAgainstHead` optimistic concurrency for agents that
   intend the latest committed head at operation start, using one initial
   validated Store read and one exact CAS without weakening `project` semantics;
