@@ -223,6 +223,7 @@ pnpm test:benchmark-qualification # separate real 10K lifecycle proof
 pnpm build
 pnpm example
 pnpm pack:dry-run
+pnpm verify:clean-room-consumer
 pnpm fixtures:portable
 pnpm verify:portable-fixtures
 pnpm verify:local
@@ -241,6 +242,10 @@ state identities exactly.
 `pnpm test:local-profile` intentionally fails closed on unsupported hosts; CI
 runs it only on reviewed Linux and macOS profiles. No platform test is silently
 skipped.
+
+Ubuntu Node 24.15 CI runs `pnpm verify:clean-room-consumer`, which packs the
+built package into an owner-private temporary directory and installs that
+tarball offline into a fresh consumer before exercising the public API.
 
 Passing these checks proves the package contracts. It does not prove that an
 agent has learned a person, improved its timing, or produced a real-world

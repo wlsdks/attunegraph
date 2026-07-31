@@ -81,6 +81,7 @@
     "test:focused": "pnpm build && vitest run src/attunegraph-engine.test.ts",
     "example": "pnpm build && node examples/basic-agent.mjs",
     "pack:dry-run": "pnpm build && npm pack --dry-run --json",
+    "verify:clean-room-consumer": "node scripts/verify-clean-room-consumer.mjs",
     "fixtures:portable": "pnpm build && node scripts/generate-attunegraph-portable-fixtures.mjs",
     "verify:local": "pnpm build && node scripts/verify-attunegraph-local.mjs",
     "verify:portable-fixtures": "node scripts/verify-attunegraph-portable-fixtures.mjs"
