@@ -438,14 +438,34 @@ function compareAssertions(left: GraphAssertion, right: GraphAssertion): number 
   return left.predicate.localeCompare(right.predicate) || left.id.localeCompare(right.id);
 }
 
-function estimateTokens(value: unknown): number {
-  return Math.ceil(Buffer.byteLength(JSON.stringify(value), "utf8") / 4);
+const WORKING_GRAPH_ASSERTIONS_PREFIX_BYTES = Buffer.byteLength("{\"assertions\":[", "utf8");
+const WORKING_GRAPH_SEED_PREFIX_BYTES = Buffer.byteLength("],\"seed\":", "utf8");
+
+function jsonBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value), "utf8");
+}
+
+function estimateWorkingGraphTokens(
+  assertionBytes: number,
+  assertionCount: number,
+  seedBytes: number
+): number {
+  const commaBytes = Math.max(0, assertionCount - 1);
+  const bytes = WORKING_GRAPH_ASSERTIONS_PREFIX_BYTES
+    + assertionBytes
+    + commaBytes
+    + WORKING_GRAPH_SEED_PREFIX_BYTES
+    + seedBytes
+    + 1;
+  return Math.ceil(bytes / 4);
 }
 
 function compileWorkingGraph(projection: AttuneGraphStoredProjection, command: ReturnType<typeof normalizeExecute>): AttuneGraphOperatorResult["workingGraph"] & { readonly status: AttuneGraphOperatorResult["status"] } {
   const usable = dedupeAssertions(projection.assertions, "CORRUPT_STORE")
     .filter((assertion) => ACTIVATION_PREDICATES.includes(assertion.predicate) && assertionActive(assertion, command.now))
     .sort(compareAssertions);
+  const assertionBytes = new Map(usable.map((assertion) => [assertion.id, jsonBytes(assertion)]));
+  const seedBytes = jsonBytes(command.seed);
   const queue: Array<{ ref: GraphRef; depth: number }> = [{ ref: command.seed, depth: 0 }];
   const visited = new Set<string>([graphRefKey(command.seed)]);
   const selected: GraphAssertion[] = [];
@@ -454,6 +474,7 @@ function compileWorkingGraph(projection: AttuneGraphStoredProjection, command: R
   let maxDepthReached = 0;
   let traversalTruncated = false;
   let tokenTruncated = false;
+  let selectedAssertionBytes = 0;
   while (queue.length > 0) {
     const current = queue.shift();
     if (!current) break;
@@ -468,9 +489,12 @@ function compileWorkingGraph(projection: AttuneGraphStoredProjection, command: R
       if (selectedIds.has(assertion.id)) continue;
       if (considered >= MAX_WORKING_CONSIDERED || selected.length >= MAX_WORKING_ASSERTIONS) { traversalTruncated = true; break; }
       considered += 1;
-      if (estimateTokens({ assertions: [...selected, assertion], seed: command.seed }) > command.maxEstimatedTokens) { tokenTruncated = true; continue; }
+      const candidateBytes = assertionBytes.get(assertion.id);
+      if (candidateBytes === undefined) attuneGraphError("CORRUPT_STORE", "Working Graph assertion bytes are unavailable");
+      if (estimateWorkingGraphTokens(selectedAssertionBytes + candidateBytes, selected.length + 1, seedBytes) > command.maxEstimatedTokens) { tokenTruncated = true; continue; }
       selected.push(assertion);
       selectedIds.add(assertion.id);
+      selectedAssertionBytes += candidateBytes;
       for (const ref of [assertion.subject, assertion.object]) {
         const key = graphRefKey(ref);
         if (!visited.has(key)) {
@@ -483,7 +507,7 @@ function compileWorkingGraph(projection: AttuneGraphStoredProjection, command: R
   }
   const refs = [...new Map([command.seed, ...selected.flatMap((assertion) => [assertion.subject, assertion.object])].map((ref) => [graphRefKey(ref), Object.freeze({ ...ref })])).values()].sort((left, right) => graphRefKey(left).localeCompare(graphRefKey(right)));
   const truncationReasons = Object.freeze([...(tokenTruncated ? ["token-budget" as const] : []), ...(traversalTruncated ? ["traversal-budget" as const] : [])]);
-  const graph = Object.freeze({ assertions: Object.freeze([...selected]), refs: Object.freeze(refs), seed: Object.freeze({ ...command.seed }), diagnostics: Object.freeze({ consideredAssertions: considered, estimatedTokens: estimateTokens({ assertions: selected, seed: command.seed }), maxDepthReached, visitedRefs: visited.size, truncationReasons }) });
+  const graph = Object.freeze({ assertions: Object.freeze([...selected]), refs: Object.freeze(refs), seed: Object.freeze({ ...command.seed }), diagnostics: Object.freeze({ consideredAssertions: considered, estimatedTokens: estimateWorkingGraphTokens(selectedAssertionBytes, selected.length, seedBytes), maxDepthReached, visitedRefs: visited.size, truncationReasons }) });
   return Object.freeze({ ...graph, status: truncationReasons.length > 0 ? "partial" as const : selected.length === 0 ? "abstained" as const : "complete" as const });
 }
 

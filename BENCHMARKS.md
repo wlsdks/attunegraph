@@ -492,6 +492,90 @@ grant an action any authority. Its active maximum is 48 assertions and 32
 single-seed reads; larger scale claims belong to the separate revision-bound
 10K/100K/1M harness.
 
+### Incremental Working Graph token-byte checkpoint (2026-08-01)
+
+The Working Graph compiler previously serialized the complete candidate
+assertion prefix again for every token-budget decision. The candidate retains
+exact UTF-8 JSON byte accounting but serializes each usable assertion at most
+once, accumulates selected assertion bytes, and accounts for commas, the seed,
+and the fixed envelope incrementally. A generated boundary test pins every
+one- through 48-assertion prefix, including multibyte source references, at
+the exact token limit and one token below it.
+
+The base was clean commit
+`05f44c9aa6f0bf7105ef2493b5fecb0f96c89012`, tree
+`cb35c79c9fe0b2540e14628cc5f34a3c97d96735`. The measured candidate source was
+clean commit `3ae9baa1388889b6b6478ae44ee67cc1f95af157`, tree
+`26072b523dcf16934f2ce8890a71167d3b151172`. Both used lockfile SHA-256
+`c696e0cdde9b5e21ee598af9101b4611b5e60e4b75b14c5f5a36e47f8a6338c4`.
+
+Five sequential fresh-process pairs ran in AB, BA, AB, BA, AB order after a
+fresh build of each checkout. Each report used Node 22.22.0 and pnpm 10.18.0
+on macOS arm64, Apple M2 Max, 12 logical CPUs, and 68,719,476,736 bytes of
+memory with `--workload=agent-decision-read-scale@1 --warmups=1
+--repetitions=5`. All ten strict evidence envelopes validate, bind the same
+measurement/workload hashes, and retain byte-identical semantic, authority,
+scope-isolation, work-count, and canonical projection anchors.
+
+Each side value below is the median of the five report p50 values. Each paired
+ratio divides candidate p50 by its adjacent base p50 first, then takes the
+median of those five ratios; it is not a ratio of the side medians.
+
+| Cell | Base cold p50 median | Candidate cold p50 median | Paired cold ratio | Paired warm ratio |
+| --- | ---: | ---: | ---: | ---: |
+| `focused-resumption-16` | 1.603 ms | 1.598 ms | 1.0274 | 1.0241 |
+| `focused-resumption-32` | 3.047 ms | 3.025 ms | 0.9991 | 1.0461 |
+| `focused-resumption-48` | 4.499 ms | 4.448 ms | 0.9947 | 1.0079 |
+| `thread-frontier-16` | 1.685 ms | 1.631 ms | 0.9683 | 0.9528 |
+| `thread-frontier-32` | 3.476 ms | 3.222 ms | 0.9273 | 0.9331 |
+| `thread-frontier-48` | 5.414 ms | 4.810 ms | 0.8892 | 0.9052 |
+| `thread-frontier-48-batch-1` | 5.570 ms | 4.815 ms | 0.8553 | 0.8785 |
+| `thread-frontier-48-batch-4` | 21.730 ms | 19.158 ms | 0.8895 | 0.8870 |
+| `thread-frontier-48-batch-32` | 179.985 ms | 153.920 ms | 0.8645 | 0.8718 |
+
+All five cold pair ratios were below 1.0 for frontier 32, frontier 48, and the
+three frontier-48 batch cells. Their paired median reductions were 7.3% to
+14.5% cold and 6.7% to 12.8% warm. Focused-resumption ratios remained near
+1.0 and include small regressions as well as small improvements, so this
+checkpoint makes no focused-read speed claim.
+
+The ten evidence SHA-256 values are:
+
+| Pair order | Base report SHA-256 | Candidate report SHA-256 |
+| --- | --- | --- |
+| AB | `28d97eceb5c281016956e356ed8267b1d53f6ac2ee01e8dcb45e7f676db03494` | `1793bb3b6e43a8add4492b70be458188247b77b1777183685dae2b921e7b46dd` |
+| BA | `cb9f09ee2d77c25ba7fa37bd7224a563e20dd413336414da27c93480fc503b97` | `8ac95226dd5ea8427ac2d45f0ab6a117f3705937473c9157107284e7bdbb9f4a` |
+| AB | `4e17b29e7923775b044e9326e3d259b441dd4e229ba65095653a3a62f76b7ff9` | `46370cf986538da4c3afdce42d6ee27a2e61039f1e6aa9b1649349502f923570` |
+| BA | `4668c5d15f57610ff8e6c37a885f0d8a771c7c63f5ac88d4f9cb11c060ef1d77` | `384a6363d4e1bbb9b660564163f1c2ce22fc72dadbca5da38c5c722fbd4c9c33` |
+| AB | `a5874b0cfcbbd064a41143c1089972c5fc4661b3844f3cc31669a2ee1c0db59c` | `3ec493e53f069e09ed9329ff6845301c0748ab18f85d1a996df1f759f62f3860` |
+
+An earlier direct-Node attempt is excluded because the base checkout's ignored
+`dist/` did not match its source revision. Rebuilding both sides before the
+paired run removed that attribution error. This also records a harness-v2
+requirement: authoritative performance evidence must bind built runtime bytes,
+not only source revision and lockfile identity.
+
+A separate candidate CPU profile report and `.cpuprofile` have SHA-256 values
+`33b82a439f101071979b7932ef40c8e2ad2777331078520c11f8d3ce7684f7a0`
+and `62670ced50292b1682e61cdec5226f72b76e1cc654ac9e0d84146eb975a6c9d0`.
+The old `estimateTokens` frame is absent; replacement `jsonBytes` accounts for
+24.833 ms self time, and `estimateWorkingGraphTokens` is unsampled. A baseline
+profile from ancestor `f093276ea58bf4fff612349c607d2c0ba9d5de4a` has report
+and profile hashes
+`fa7b8266000a0ca46cc8781a56694606597517eb104f2d121483c3f0373ab44d`
+and `38d9741daec69749d6aba3e58d5995682ae334c0b5c73192f011b964a7aa096c`.
+Its Engine source is byte-identical to the exact paired base, but its harness
+predates the per-read/aggregate work-count naming fix, so this non-interleaved
+profile comparison is hotspot-shape evidence only, not another speedup claim.
+The next measured Engine-local target is repeated `graphRefKey`; full-read time
+is still dominated by stored-projection validation and canonical-envelope
+passes.
+
+Every report remains `measurementOnly: true` and `claimEligible: false`. Five
+pairs on one host support this bounded hot-path observation only; they do not
+establish p95/p99 tails, a production SLA, cross-machine behavior, or a general
+graph-database performance claim.
+
 The separate profiled report and `.cpuprofile` have SHA-256 values
 `2c6fbac01e8a416cc2959ce1dbabf840a40c7767d315cc7a0c78560e8f642927`
 and `7bef59dcb65f09676ac5bc6316445807fdde0b43bcdc850edf75b46bc58b0cc2`.

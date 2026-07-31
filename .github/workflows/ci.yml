@@ -121,4 +121,7 @@ jobs:
           node-version: ${{ matrix.node }}
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm test:local-profile
+      - name: Run local-profile tests on a reviewed filesystem
+        env:
+          TMPDIR: ${{ runner.os == 'macOS' && '/private/tmp' || runner.temp }}
+        run: pnpm test:local-profile

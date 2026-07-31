@@ -429,7 +429,7 @@ describe("AttuneGraph agent decision-read benchmark", () => {
     } finally {
       await rm(directory, { force: true, recursive: true });
     }
-  });
+  }, 30_000);
 
   it("captures repository provenance from the package root, not caller cwd", async () => {
     const foreignRepository = await realpath(

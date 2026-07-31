@@ -309,6 +309,7 @@ pnpm benchmark:scale -- --scale=10000 --profile=core --warmups=0 --repetitions=1
 pnpm benchmark:scale -- --scale=10000 --profile=local-session --warmups=0 --repetitions=1
 pnpm benchmark:scale -- --scale=10000 --profile=local-session-update-comparison --warmups=0 --repetitions=1
 pnpm benchmark:agent-decision-read -- --workload=agent-decision-read@1 --warmups=0 --repetitions=1
+pnpm benchmark:agent-decision-read-scale -- --workload=agent-decision-read-scale@1 --warmups=1 --repetitions=5
 pnpm benchmark:performance -- --scale=10000 --profile=local-session-concurrent --concurrency=4 --warmups=1 --repetitions=2
 pnpm benchmark:performance -- --scale=10000 --profile=portable --concurrency=1 --warmups=1 --repetitions=1
 pnpm performance:regression -- --manifest=/absolute/path/performance-regression-manifest.json
