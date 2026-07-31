@@ -25,9 +25,9 @@ semantic safety, and persistence/portability. It is reported separately from eli
 
 `pnpm verify:working-graph-golden` is the checked-in corpus verifier substrate for
 `working-graph-golden-corpus` and `abstention`. Its one stdout report is not two readiness
-artifacts and cannot be reused or relabeled. Those registry entries remain unavailable until a
-fixed adapter emits one strict, distinct output envelope per check. The corpus result is never
-organic usefulness evidence.
+artifacts and cannot be reused or relabeled. The fixed `run-working-graph-readiness.mjs` adapter
+emits one strict, distinct output envelope per check, making these the first two available registry
+commands. The corpus result is never organic usefulness evidence.
 
 ## Evidence v2
 
@@ -50,9 +50,9 @@ completion.
 
 ## Capture and score
 
-Keep evidence outside both repositories. The current registry deliberately marks all 37 semantic
-verifiers unavailable, so capture writes honest local `not-run` descriptors and refuses substitute
-argv before resolution or spawn:
+Keep evidence outside both repositories. The registry exposes two exact Working Graph commands and
+marks the other 35 semantic verifiers unavailable. Unavailable capture writes honest local
+`not-run` descriptors and refuses substitute argv before resolution or spawn:
 
 ```sh
 pnpm readiness:capture -- \

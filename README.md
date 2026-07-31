@@ -301,9 +301,10 @@ lifecycle proof and the 100K/1M runs are separate evidence activities, not
 normal test gates.
 
 The full gate inventory and artifact contract are documented in
-[READINESS.md](READINESS.md). Every name has one versioned fixed contract.
-Unimplemented semantic verifiers are unavailable and capture only as `not-run`;
-caller-selected commands such as `node --version` are refused. Results bind
+[READINESS.md](READINESS.md). Every name has one versioned fixed contract. Two
+Working Graph checks have strict fixed adapters; other unimplemented semantic
+verifiers are unavailable and capture only as `not-run`. Caller-selected
+commands such as `node --version` are refused. Results bind
 the contract, canonical cwd role, raw streams, timestamps, provenance,
 toolchain identity, clean Git subjects, and the exact Muse gitlink.
 `pnpm readiness:score` accepts only

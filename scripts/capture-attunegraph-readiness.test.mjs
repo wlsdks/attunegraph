@@ -107,16 +107,25 @@ describe("AttuneGraph readiness evidence capture v2", () => {
     });
   });
 
-  it("refuses a fake PATH executable before resolution or spawn", async () => {
+  it("ignores a fake PATH executable and records the actual fixed child identity", async () => {
     await withFixture(async (fixture) => {
       const fakeBin = join(fixture.directory, "fake-bin");
       await mkdir(fakeBin);
       await writeFile(join(fakeBin, process.platform === "win32" ? "node.cmd" : "node"), "fake\n");
-      const result = capture(fixture, ["node", "--version"], {
+      const result = capture(fixture, [
+        "node",
+        "scripts/run-working-graph-readiness.mjs",
+        "--check=working-graph-golden-corpus"
+      ], {
+        name: "working-graph-golden-corpus",
         env: { ...process.env, PATH: `${fakeBin}${process.platform === "win32" ? ";" : ":"}${process.env.PATH ?? ""}` }
       });
-      expect(result.status).toBe(1);
-      expect(result.stderr).toMatch(/substitute argv/u);
+      expect(result.status).toBe(0);
+      const descriptor = JSON.parse(result.stdout);
+      const captured = JSON.parse(await readFile(join(fixture.output, descriptor.check.result.path), "utf8"));
+      expect(captured.state).toBe("fail");
+      expect(captured.executable).toMatchObject({ path: expect.any(String), version: process.version });
+      expect(captured.executable.path).not.toContain("fake-bin");
     });
   });
 

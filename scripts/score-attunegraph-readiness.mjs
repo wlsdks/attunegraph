@@ -404,8 +404,8 @@ function validateCommand(command, checkName, gate, name) {
   return contract;
 }
 
-function validateExecutable(executable, contract, name) {
-  if (contract.availability === "unavailable") {
+function validateExecutable(executable, contract, state, name) {
+  if (contract.availability === "unavailable" || state === "not-run") {
     if (executable !== null) invalid(`${name} must be null for an unavailable check`);
     return;
   }
@@ -467,7 +467,7 @@ function validateCheckResult(
     check.gate,
     `check ${check.name}.result command`
   );
-  validateExecutable(result.executable, contract, `check ${check.name}.result executable`);
+  validateExecutable(result.executable, contract, result.state, `check ${check.name}.result executable`);
   validateProvenance(result.provenance, `check ${check.name}.result provenance`);
   assertNonEmptyString(result.cwd, `check ${check.name}.result cwd`);
   const expectedCwd = contract.cwdRole === "muse"

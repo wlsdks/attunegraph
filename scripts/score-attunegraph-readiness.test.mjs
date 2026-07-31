@@ -204,7 +204,8 @@ describe("AttuneGraph readiness evidence v2 scorer", () => {
   it("runs readiness tests on Node 24.15 for both Ubuntu and Windows and defines attestation issuance", async () => {
     const workflow = await readFile(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8");
     expect(workflow).toMatch(/readiness-contract:[\s\S]*os: \[ubuntu-latest, windows-latest\][\s\S]*node-version: "24\.15\.0"[\s\S]*pnpm test:readiness/u);
-    expect(workflow).toMatch(/actions\/attest-build-provenance@v2/u);
+    expect(workflow).toMatch(/readiness-attestation-contract:[\s\S]*actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1/u);
+    expect(workflow).toMatch(/actions\/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373/u);
   });
 
   it("scores hand-authored local artifacts only as unattested coverage", async () => {

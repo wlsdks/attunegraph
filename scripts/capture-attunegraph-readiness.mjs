@@ -1,7 +1,9 @@
-import { lstatSync, readFileSync, realpathSync } from "node:fs";
+import { spawn } from "node:child_process";
+import { createWriteStream, lstatSync, readFileSync, realpathSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { finished } from "node:stream/promises";
 
 import {
   createReadinessToolchain,
@@ -13,7 +15,8 @@ import {
 } from "./score-attunegraph-readiness.mjs";
 import {
   readinessCheckContract,
-  readinessContractSnapshot
+  readinessContractSnapshot,
+  validateReadinessCommandOutput
 } from "./readiness-check-contracts.mjs";
 
 const CHECKS_BY_NAME = new Map(
@@ -112,6 +115,28 @@ async function ensureOutputRoot(path) {
   return realpathSync(lexical);
 }
 
+async function executeToFiles(executablePath, args, cwd, stdoutPath, stderrPath) {
+  const stdoutStream = createWriteStream(stdoutPath, { flags: "wx", mode: 0o600 });
+  const stderrStream = createWriteStream(stderrPath, { flags: "wx", mode: 0o600 });
+  const startedAt = new Date().toISOString();
+  let spawnError = null;
+  const outcome = await new Promise((resolveOutcome) => {
+    const child = spawn(executablePath, args, {
+      cwd,
+      shell: false,
+      stdio: ["ignore", "pipe", "pipe"]
+    });
+    child.stdout.pipe(stdoutStream);
+    child.stderr.pipe(stderrStream);
+    child.once("error", (error) => {
+      spawnError = `${error.code ?? error.name}: ${error.message}`;
+    });
+    child.once("close", (exitCode, signal) => resolveOutcome({ exitCode, signal }));
+  });
+  await Promise.all([finished(stdoutStream), finished(stderrStream)]);
+  return { ...outcome, endedAt: new Date().toISOString(), spawnError, startedAt };
+}
+
 export async function captureReadinessCheck(options) {
   const before = inspectReadinessSubject(options);
   const lexicalCwd = resolve(options.cwd);
@@ -129,10 +154,9 @@ export async function captureReadinessCheck(options) {
   if (cwd !== expectedCwd) {
     captureError(`cwd must be the canonical ${contract.cwdRole} repository root for check ${options.name}`);
   }
-  if (contract.availability !== "unavailable") {
-    captureError(`available command execution is not implemented for check ${options.name}`);
+  if (JSON.stringify(options.argv) !== JSON.stringify(contract.argv ?? [])) {
+    captureError(`argv does not match the fixed contract for check ${options.name}`);
   }
-  if (options.argv.length !== 0) captureError(`check ${options.name} cannot accept substitute argv`);
   const outputRoot = await ensureOutputRoot(options.outputDirectory);
   const checksRoot = join(outputRoot, "checks");
   await mkdir(checksRoot, { mode: 0o700, recursive: true });
@@ -146,24 +170,65 @@ export async function captureReadinessCheck(options) {
   const stdoutPath = join(checkDirectory, "stdout.bin");
   const stderrPath = join(checkDirectory, "stderr.bin");
   const resultPath = join(checkDirectory, "result.json");
-  await Promise.all([
-    writeFile(stdoutPath, Buffer.alloc(0), { flag: "wx", mode: 0o600 }),
-    writeFile(stderrPath, Buffer.alloc(0), { flag: "wx", mode: 0o600 })
-  ]);
-  const observedAt = new Date().toISOString();
+  let executable = null;
+  let outcome;
+  if (contract.availability === "available") {
+    if (contract.argv[0] !== "node") captureError(`unsupported executable contract for check ${options.name}`);
+    const executablePath = realpathSync(process.execPath);
+    executable = {
+      path: executablePath,
+      sha256: sha256(readFileSync(executablePath)),
+      version: process.version
+    };
+    outcome = await executeToFiles(executablePath, contract.argv.slice(1), cwd, stdoutPath, stderrPath);
+  } else {
+    await Promise.all([
+      writeFile(stdoutPath, Buffer.alloc(0), { flag: "wx", mode: 0o600 }),
+      writeFile(stderrPath, Buffer.alloc(0), { flag: "wx", mode: 0o600 })
+    ]);
+    const observedAt = new Date().toISOString();
+    outcome = {
+      endedAt: observedAt,
+      exitCode: null,
+      signal: null,
+      spawnError: null,
+      startedAt: observedAt
+    };
+  }
   const after = inspectReadinessSubject(options);
   if (!sameSubject(before.subject, after.subject)) {
     captureError("repository subjects changed while the command was running");
   }
   const stdoutBytes = await readFile(stdoutPath);
   const stderrBytes = await readFile(stderrPath);
+  let semanticError = null;
+  if (
+    contract.availability === "available"
+    && outcome.exitCode === 0
+    && outcome.signal === null
+    && outcome.spawnError === null
+  ) {
+    try {
+      validateReadinessCommandOutput(stdoutBytes, contract);
+    } catch (error) {
+      semanticError = error.message;
+    }
+  }
+  const state = contract.availability === "unavailable"
+    ? "not-run"
+    : outcome.exitCode === 0
+      && outcome.signal === null
+      && outcome.spawnError === null
+      && semanticError === null
+      ? "pass"
+      : "fail";
   const captureScriptSha256 = sha256(readFileSync(fileURLToPath(import.meta.url)));
   const result = {
     command: readinessContractSnapshot(contract),
     cwd,
-    endedAt: observedAt,
-    executable: null,
-    exitCode: null,
+    endedAt: outcome.endedAt,
+    executable,
+    exitCode: outcome.exitCode,
     gate: options.gate,
     name: options.name,
     provenance: {
@@ -173,10 +238,10 @@ export async function captureReadinessCheck(options) {
       schema: "attunegraph-readiness-provenance@1"
     },
     schema: READINESS_CHECK_SCHEMA,
-    signal: null,
-    spawnError: null,
-    startedAt: observedAt,
-    state: "not-run",
+    signal: outcome.signal,
+    spawnError: semanticError === null ? outcome.spawnError : `INVALID_OUTPUT: ${semanticError}`,
+    startedAt: outcome.startedAt,
+    state,
     stderr: {
       path: relativeArtifactPath(outputRoot, stderrPath),
       sha256: sha256(stderrBytes)

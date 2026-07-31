@@ -43,6 +43,15 @@ const PERFORMANCE_PARAMETERS = Object.freeze({
   "portable-encode-decode": { metric: "portableEncodeDecodeMilliseconds", profile: "core", repetitions: 5, scale: 100_000, warmups: 1 }
 });
 
+const AVAILABLE_COMMANDS = Object.freeze({
+  abstention: ["node", "scripts/run-working-graph-readiness.mjs", "--check=abstention"],
+  "working-graph-golden-corpus": [
+    "node",
+    "scripts/run-working-graph-readiness.mjs",
+    "--check=working-graph-golden-corpus"
+  ]
+});
+
 function deepFreeze(value) {
   if (value !== null && typeof value === "object") {
     Object.freeze(value);
@@ -53,8 +62,8 @@ function deepFreeze(value) {
 
 export const READINESS_CHECK_CONTRACTS = deepFreeze(Object.fromEntries(
   Object.entries(CHECK_NAMES_BY_GATE).flatMap(([gate, names]) => names.map((name) => [name, {
-    argv: null,
-    availability: "unavailable",
+    argv: AVAILABLE_COMMANDS[name] ?? null,
+    availability: AVAILABLE_COMMANDS[name] ? "available" : "unavailable",
     cwdRole: gate === "muse-integration" ? "muse" : "attunegraph",
     gate,
     id: `${READINESS_CONTRACT_SCHEMA}:${name}`,
@@ -63,7 +72,9 @@ export const READINESS_CHECK_CONTRACTS = deepFreeze(Object.fromEntries(
       semantics: name
     },
     parameters: PERFORMANCE_PARAMETERS[name] ?? {},
-    unavailableReason: "No fixed semantic verifier is registered for this check."
+    unavailableReason: AVAILABLE_COMMANDS[name]
+      ? null
+      : "No fixed semantic verifier is registered for this check."
   }]))
 ));
 
