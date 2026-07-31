@@ -17,6 +17,7 @@
   "files": [
     "dist",
     "README.md",
+    "BENCHMARKS.md",
     "CHANGELOG.md",
     "PORTABLE-FORMAT.md",
     "LICENSE",
@@ -68,10 +69,12 @@
     }
   },
   "scripts": {
+    "benchmark:scale": "pnpm build && node scripts/benchmark-attunegraph-scale.mjs",
     "build": "node scripts/build.mjs",
     "check:naming": "node scripts/check-canonical-naming.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
     "test": "pnpm test:cross-platform",
+    "test:benchmark-qualification": "pnpm build && vitest run --config vitest.benchmark-qualification.config.ts",
     "test:cross-platform": "pnpm build && vitest run --config vitest.cross-platform.config.ts",
     "test:local-profile": "pnpm build && vitest run --config vitest.local-profile.config.ts",
     "test:supported": "pnpm build && vitest run",

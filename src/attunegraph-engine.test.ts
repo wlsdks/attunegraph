@@ -242,6 +242,40 @@ it("admits only complete thread-rooted observations before any Store operation",
   await expect(legacy.head()).resolves.toEqual(legacySnapshot);
 });
 
+it("rejects a projection that cannot be read back before touching the Store", async () => {
+  const backing = new InMemoryAttuneGraphStoreBackend();
+  let reads = 0;
+  let swaps = 0;
+  const attuneGraph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore({
+      async read(scope) {
+        reads += 1;
+        return backing.read(scope);
+      },
+      async compareAndSwap(scope, expected, proposed) {
+        swaps += 1;
+        return backing.compareAndSwap(scope, expected, proposed);
+      }
+    })
+  });
+  const assertions = Array.from(
+    { length: 900 },
+    (_, index) => assertion(`oversized-${index.toString()}`)
+  );
+
+  await expect(attuneGraph.project({
+    operator: "canonical-projection@2",
+    observation: {
+      ...command("oversized", { assertions }).observation,
+      schemaVersion: 2,
+      threadRoot: { id: SCOPE.threadId, kind: "thread" }
+    }
+  })).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  expect({ reads, swaps }).toEqual({ reads: 0, swaps: 0 });
+  await expect(backing.read(SCOPE)).resolves.toBeUndefined();
+});
+
 it("detaches nested caller values and pins one validated Store head per execute", async () => {
   const backend = new InMemoryAttuneGraphStoreBackend();
   let reads = 0;
