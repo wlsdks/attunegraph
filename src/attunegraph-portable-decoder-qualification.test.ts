@@ -168,6 +168,14 @@ function* bytewise(bytes: Uint8Array): Iterable<Uint8Array> {
   for (const byte of bytes) yield Uint8Array.of(byte);
 }
 
+function fixedSizeChunks(size: number): ChunkFactory {
+  return function* chunks(bytes: Uint8Array): Iterable<Uint8Array> {
+    for (let offset = 0; offset < bytes.byteLength; offset += size) {
+      yield bytes.slice(offset, Math.min(bytes.byteLength, offset + size));
+    }
+  };
+}
+
 function* irregular(bytes: Uint8Array): Iterable<Uint8Array> {
   const pattern = [1, 2, 7, 3, 16, 5, 31, 4, 64, 9] as const;
   let offset = 0;
@@ -218,19 +226,31 @@ function* everyLfAndMultibyteBoundary(
   }
 }
 
+function* everyNewlineBoundary(bytes: Uint8Array): Iterable<Uint8Array> {
+  let offset = 0;
+  for (let index = 0; index < bytes.byteLength; index += 1) {
+    if (bytes[index] !== 0x0a) continue;
+    if (index > offset) yield bytes.slice(offset, index);
+    yield bytes.slice(index, index + 1);
+    offset = index + 1;
+  }
+  if (offset < bytes.byteLength) yield bytes.slice(offset);
+}
+
 const completeChunkFamilies: readonly {
   readonly name: string;
   readonly chunks: ChunkFactory;
 }[] = [
   { name: "one", chunks: oneChunk },
+  { name: "256-kib", chunks: fixedSizeChunks(256 * 1_024) },
+  { name: "small-17-byte", chunks: fixedSizeChunks(17) },
   { name: "bytewise", chunks: bytewise },
+  { name: "every-newline-boundary", chunks: everyNewlineBoundary },
   { name: "every-lf-and-multibyte-boundary", chunks: everyLfAndMultibyteBoundary },
   { name: "irregular", chunks: irregular }
 ];
 
-const failureChunkFamilies = completeChunkFamilies.filter(
-  ({ name }) => name === "one" || name === "bytewise" || name === "irregular"
-);
+const failureChunkFamilies = completeChunkFamilies;
 
 async function decodeSuccess(
   bytes: Uint8Array,
@@ -644,7 +664,8 @@ const REVIEWED_DECODER_TOP_LEVEL_DECLARATIONS = Object.freeze([
   "const sink = captureSink(validationSink);",
   "const budgets = decoderBudgets(qualificationLimits);",
   'let phase: DecoderPhase = "manifest";',
-  "let currentLine: number[] = [];",
+  "let currentLine = new Uint8Array(0);",
+  "let currentLineLength = 0;",
   "let artifactBytes = 0;",
   "let priorByteLength = 0;",
   "let recordCount = 0;",
@@ -680,7 +701,8 @@ const REVIEWED_DECODER_DATA_LEDGER = Object.freeze({
   sink: "fixed captured receiver and five methods",
   budgets: "fixed scalar limits object",
   phase: "one fixed enum",
-  currentLine: "only variable-size retained container; configured line guard",
+  currentLine: "only variable-size retained byte buffer; configured line guard",
+  currentLineLength: "one bounded scalar offset into currentLine",
   artifactBytes: "one scalar",
   priorByteLength: "one scalar",
   recordCount: "one scalar",
@@ -782,7 +804,7 @@ function retainedAccumulatorNames(
   const topLevelNames = new Set(topLevelDeclarations.map(declarationName));
   const variableContainerDeclarations = topLevelDeclarations
     .filter((line) =>
-      /(?:\[\]|Array<|=\s*\[|new (?:Map|Set|WeakMap|WeakSet)\b|Object\.create\(|=\s*["'`]["'`])/u
+      /(?:\[\]|Array<|=\s*\[|new (?:Uint8Array|Map|Set|WeakMap|WeakSet)\b|Object\.create\(|=\s*["'`]["'`])/u
         .test(line)
     )
     .map(declarationName);
@@ -816,14 +838,18 @@ function decoderRetentionAudit(source: string): readonly string[] {
   if (
     !body.includes(
       "const maxLineBytes = recordCount === 0\n"
-      + "        ? budgets.maxEdgeLineBytes\n"
-      + "        : budgets.maxPortableLineBytes;"
+        + "        ? budgets.maxEdgeLineBytes\n"
+        + "        : budgets.maxPortableLineBytes;"
     )
-    || !body.includes("if (currentLine.length >= maxLineBytes)")
-    || !body.includes("currentLine.push(byte);")
-    || !body.includes("currentLine = [];")
+    || !body.includes("reflectApply(\n        uint8ArrayIndexOf")
+    || !body.includes(
+      "reflectApply(uint8ArraySet, currentLine, [segment, currentLineLength]);"
+    )
+    || !body.includes("currentLineLength = 0;")
+    || body.includes("currentLine.push(")
+    || body.includes("Uint8Array.from(currentLine)")
   ) {
-    failures.push("currentLine is not tied to its configured line guard");
+    failures.push("currentLine is not a bounded chunk-aware LF scanner");
   }
   return failures;
 }
@@ -854,6 +880,12 @@ function smokeRetentionAudit(source: string): readonly string[] {
 }
 
 describe("AttuneGraph portable decoder qualification", () => {
+  it("uses every complete chunk family for failure equivalence", () => {
+    expect(failureChunkFamilies.map(({ name }) => name)).toEqual(
+      completeChunkFamilies.map(({ name }) => name)
+    );
+  });
+
   it("keeps checked fixtures and production round-trips exact across every chunk family", async () => {
     for (const fixture of fixtures) {
       const baseline = await decodeSuccess(fixture.bytes, oneChunk);
@@ -909,7 +941,7 @@ describe("AttuneGraph portable decoder qualification", () => {
     }
   }, 120_000);
 
-  it("pins exact post-engagement failures across one, bytewise, and irregular chunks", async () => {
+  it("pins exact post-engagement failures across every chunk family", async () => {
     const two = fixtures.find(
       (fixture) => fixture.name === "one-scope-two-generations"
     )!;

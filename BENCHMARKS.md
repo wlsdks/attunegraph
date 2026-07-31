@@ -152,3 +152,50 @@ matrix calibration. Until then it can establish evidence integrity and relative-
 not performance qualification. See
 [`PERFORMANCE-QUALIFICATION.md`](PERFORMANCE-QUALIFICATION.md) for the six-report matrix and
 fail-closed qualifier contract.
+
+## Portable decoder framing hygiene evidence (2026-08-01)
+
+This slice replaces per-byte `number[]` accumulation and `Uint8Array.from`
+materialization with a bounded chunk-aware LF scanner and reusable segment
+buffer. The caller chunk is still detached at `write` entry; removing that
+whole-chunk copy would weaken caller-mutation safety. Captured `Uint8Array`
+`indexOf`, `set`, `slice`, and `subarray` primordials keep the scanner
+independent of later prototype mutation.
+
+The valid baseline is main
+`623d6cfe246af957d22c8a36e25765f936198723` on Node 24.15.0, Apple M2 Max
+arm64 (12 CPUs, 64 GiB), under
+`/private/tmp/attunegraph-portable-10k-valid.C7bYxI`. Its three fresh-process
+10K portable reports used `--scale=10000 --profile=portable --concurrency=1
+--warmups=1 --repetitions=1` and have SHA-256 values
+`a8b33dc40f5c7fdce079292963eae67428069dc5c3c7ec1beb07af65eb749ab9`,
+`ae9210015ac9041d0daad1b6212ca0ffda9a41b6a05f1552280dab032bb75f0f`,
+and `4e4812e162e53fd5d93046ca82dc4a78d7a93995dd9bd1f29bfb89292944f229`.
+The n=3 p50 was 1,367.788 ms preparation, 6,214.140 ms encode, 7,501.015
+ms decode, 394,133,504 bytes peak RSS, and a 10,046,693-byte artifact. Decode
+ranged from 7,458.643 to 7,881.862 ms. Earlier overlapped samples are invalid
+and discarded.
+
+A separate CPU profile report and `.cpuprofile` SHA-256 values are
+`cd5a461792dcbe930fb72a19037f25184610fdb73888aedc6b7888450826c560`
+and `dd0c61c857ecf845865d8a543caacc2accf00b29e83c0b9386eed1ff3f12aa58`.
+Direct framing-loop self time was only 0.584% of the whole profile (1.17% of
+decoder time); canonicalization descendants were 95.37% of decoder time and
+92.8% of the whole profile. This makes the scanner an allocation and streaming
+hygiene change, not a material speed claim.
+
+One fresh-process post-change sanity report is retained at
+`/private/tmp/attunegraph-decoder-sanity.VsbW5C/portable-10k-post.json`, SHA-256
+`73d4eea11324b0ac51accca1bfdebbe3fee13afc2098a61549cc8c892c00193e`.
+It is a dirty-tree, one-repetition `measurementOnly: true`,
+`claimEligible: false` report produced with `--scale=10000 --profile=portable
+--concurrency=1 --warmups=0 --repetitions=1`: 1,263.824 ms preparation,
+6,057.446 ms encode,
+7,468.571 ms decode, 311,279,616 bytes peak RSS, and the same 10,046,693-byte
+artifact with exact 313-head/313-projection convergence. The baseline used one
+warmup while this sanity run used none, so the approximately 0.43% lower decode
+time is directional and non-comparable, not a paired estimate or speed claim.
+It remained inside the baseline's observed range and shows no material
+improvement. The single RSS sample is not a population claim. The next measured
+optimization target is canonicalization and UTF-8 charging reuse, not further
+scanner tuning.
