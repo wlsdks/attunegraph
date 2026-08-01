@@ -15,6 +15,7 @@ import { openLocalAttuneGraph } from "./local.js";
 
 const SCOPE = { sourceId: "revocation-source", threadId: "revocation-thread" };
 const NOW = "2026-08-01T00:00:00.000Z";
+const HAS_REVIEWED_LOCAL_PROFILE = process.platform === "darwin" || process.platform === "linux";
 
 function assertion(
   id: string,
@@ -391,7 +392,7 @@ it("retries once to plan against the external writer's new exact head", async ()
   })).resolves.toMatchObject({ status: "complete", snapshot: { generation: 2 }, impacts: [{ assertionId: "new" }] });
 });
 
-it("leaves SQLite bytes, head, and current Working Graph unchanged", async () => {
+it.runIf(HAS_REVIEWED_LOCAL_PROFILE)("leaves SQLite bytes, head, and current Working Graph unchanged", async () => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "attunegraph-revocation-impact-")));
   const databasePath = join(directory, "graph.sqlite");
   const attuneGraph = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
