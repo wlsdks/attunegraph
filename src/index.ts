@@ -12,9 +12,14 @@ export {
 } from "./constants.js";
 export { AttuneGraphDataError, type AttuneGraphDataErrorCode } from "./error.js";
 export { AttuneGraphError, type AttuneGraphErrorCode } from "./attunegraph-error.js";
+export { AttuneQLSyntaxError, parseAttuneQL } from "./attuneql.js";
 export { createAttuneGraphEngine, openAttuneGraph } from "./attunegraph-engine.js";
 export type {
   AttuneGraph,
+  AttuneGraphDecisionHead,
+  AttuneGraphDecisionQuery,
+  AttuneGraphDecisionQueryReceipt,
+  AttuneGraphDecisionQueryResult,
   AttuneGraphExecuteCommand,
   AttuneGraphOperatorResult,
   AttuneGraphProjectAgainstHeadCommand,

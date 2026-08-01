@@ -6,6 +6,13 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add `decision-query@1`, the first agent-native evidence compiler over the
+  current exact head. Typed objects and bounded AttuneQL normalize to one
+  canonical query, require fresh source state, reuse deterministic Working
+  Graph semantics, expose honest complete/partial/abstained outcomes, and seal
+  a content-addressed evidence-only receipt. The fixed grammar does not expose
+  caller-selected relationship families, writes, or general traversal, and the
+  receipt explicitly does not claim authority or conflict closure.
 - Add the recommended host-neutral readiness `@2` profile: subject-bearing
   evidence names an exact `consumer` gitlink and uses generic consumer CLI,
   gate, and cwd contracts. The existing Muse-shaped `@1` profile remains a
@@ -16,7 +23,8 @@ All notable changes to AttuneGraph are recorded here.
   recomputes it at hard bounds, requires exact survivor subtraction and an
   unchanged thread root, then performs one CAS and seals a transition receipt.
   Only an identical concurrent CAS winner converges; late retry, persisted
-  receipt pins, retention, pruning, compaction, and AttuneQL remain unshipped.
+  receipt pins, retention, pruning, compaction, and general-purpose AttuneQL
+  traversal remain unshipped.
 - Add the provider-neutral `revocation-impact@1` exact-head, read-only plan on
   the durable `AttuneGraph` handle. It normalizes bounded assertion, graph,
   and source selectors before Store I/O; expands immutable assertion-source

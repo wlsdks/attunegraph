@@ -21,6 +21,7 @@ import { createInMemoryAttuneGraphStore } from "./attunegraph-in-memory-store.js
 import { createAttuneGraphStore } from "./attunegraph-backend.js";
 import type { AttuneGraphProjectCommand, AttuneGraphScope } from "./attunegraph-contracts.js";
 import { openAttuneGraph } from "./attunegraph-engine.js";
+import { parseAttuneQL } from "./attuneql.js";
 import { openLocalAttuneGraph, openLocalAttuneGraphSession } from "./local.js";
 import { openLocalAttuneGraphSessionForTesting } from "./local-session-internal.js";
 import { openSqliteAttuneGraphStore } from "./attunegraph-sqlite-store.js";
@@ -75,6 +76,18 @@ function execute(scope: AttuneGraphScope = SCOPE) {
     seed: { id: scope.threadId, kind: "thread" as const },
     now: NOW,
     maxEstimatedTokens: 256
+  };
+}
+
+function decisionQuery(scope: AttuneGraphScope = SCOPE) {
+  return {
+    operator: "decision-query@1" as const,
+    scope,
+    seed: { id: scope.threadId, kind: "thread" as const },
+    asOf: NOW,
+    head: { mode: "current" as const },
+    freshness: { require: "fresh" as const },
+    budget: { maxEstimatedTokens: 256 }
   };
 }
 
@@ -146,6 +159,42 @@ it("persists and reopens byte-identical Engine snapshots and results", async () 
   await expect(reopened.project(input)).rejects.toMatchObject({ code: "CLOSED" });
   await expect(reopened.projectAgainstHead(input)).rejects.toMatchObject({ code: "CLOSED" });
   await expect(reopened.execute(execute())).rejects.toMatchObject({ code: "CLOSED" });
+  await expect(reopened.query(decisionQuery())).rejects.toMatchObject({ code: "CLOSED" });
+});
+
+it("keeps AttuneQL and object decision queries byte-identical across memory and local reopen", async () => {
+  const databasePath = await temporaryDatabase();
+  const local = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  const memory = await openAttuneGraph({
+    scope: SCOPE,
+    store: createInMemoryAttuneGraphStore()
+  });
+  const input = command("decision-query-parity");
+  await Promise.all([local.project(input), memory.project(input)]);
+  const text = parseAttuneQL(`
+    EVIDENCE FOR thread("${SCOPE.threadId}")
+    IN SCOPE("${SCOPE.sourceId}", "${SCOPE.threadId}")
+    AS OF "${NOW}"
+    AT CURRENT HEAD
+    REQUIRE FRESH
+    BUDGET 256 TOKENS;
+  `);
+  const object = decisionQuery();
+
+  const [localText, localObject, memoryText, memoryObject] = await Promise.all([
+    local.query(text),
+    local.query(object),
+    memory.query(text),
+    memory.query(object)
+  ]);
+  expect(JSON.stringify(localText)).toBe(JSON.stringify(memoryText));
+  expect(JSON.stringify(localObject)).toBe(JSON.stringify(memoryObject));
+  expect(JSON.stringify(localText)).toBe(JSON.stringify(localObject));
+  await Promise.all([local.close(), memory.close()]);
+
+  const reopened = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  expect(JSON.stringify(await reopened.query(text))).toBe(JSON.stringify(localText));
+  await reopened.close();
 });
 
 it("uses exact SQLite head reads to reuse one Working Graph plan per open handle", async () => {
@@ -166,6 +215,9 @@ it("uses exact SQLite head reads to reuse one Working Graph plan per open handle
 
   expect(JSON.stringify(second)).toBe(JSON.stringify(first));
   expect(requests).toEqual(["readHead", "read", "readHead"]);
+  requests.length = 0;
+  await graph.query(decisionQuery());
+  expect(requests).toEqual(["readHead"]);
   const writer = await session.open({ scope: SCOPE });
   await writer.project({
     ...command("head-pinned-plan-external-update"),

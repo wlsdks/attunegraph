@@ -263,6 +263,7 @@ describe("production AttuneGraph portable fixture integration", () => {
     ]);
     expect(Object.keys(root).sort()).toEqual([
       "ACTIVATION_PREDICATES", "AttuneGraphDataError", "AttuneGraphError",
+      "AttuneQLSyntaxError",
       "GRAPH_ASSERTION_SOURCE_NAMESPACE", "GRAPH_DERIVATION_KINDS",
       "GRAPH_DIRECTIONS", "GRAPH_EPISTEMIC_CLASSES", "GRAPH_NODE_KINDS",
       "GRAPH_PREDICATES", "InMemoryAttuneGraphDataStore",
@@ -270,7 +271,8 @@ describe("production AttuneGraph portable fixture integration", () => {
       "MAX_GRAPH_ASSERTION_SOURCE_REFS", "MAX_GRAPH_QUERY_ASSERTIONS",
       "MAX_GRAPH_QUERY_CONSIDERED_ASSERTIONS", "MAX_GRAPH_QUERY_DEPTH",
       "MAX_GRAPH_QUERY_SEEDS", "MAX_GRAPH_QUERY_VISITED_REFS",
-      "compileActivationSubgraph", "createAttuneGraphEngine", "openAttuneGraph"
+      "compileActivationSubgraph", "createAttuneGraphEngine", "openAttuneGraph",
+      "parseAttuneQL"
     ]);
     expect(Object.keys(admin).sort()).toEqual([
       "AttuneGraphAdminReadonlyError",

@@ -112,6 +112,71 @@ export interface AttuneGraphOperatorResult {
   readonly workingGraph: AttuneGraphWorkingGraph;
 }
 
+export type AttuneGraphDecisionHead =
+  | Readonly<{ readonly mode: "current" }>
+  | Readonly<{
+    readonly mode: "exact";
+    readonly generation: number;
+    readonly commitId: string;
+  }>;
+
+/**
+ * Canonical agent-decision input. The traversal profile is intentionally fixed:
+ * callers choose the decision anchor, time, exact head posture, and context
+ * budget, but cannot omit evidence classes or relationship families while
+ * claiming that the resulting evidence frontier is complete.
+ */
+export interface AttuneGraphDecisionQuery {
+  readonly operator: "decision-query@1";
+  readonly scope: AttuneGraphScope;
+  readonly seed: GraphRef;
+  readonly asOf: string;
+  readonly head: AttuneGraphDecisionHead;
+  readonly freshness: Readonly<{ readonly require: "fresh" }>;
+  readonly budget: Readonly<{ readonly maxEstimatedTokens: number }>;
+}
+
+export interface AttuneGraphDecisionQueryReceipt {
+  readonly contractRevision: 1;
+  readonly receiptId: string;
+  /** Exact canonical JSON whose content address is receiptId. */
+  readonly canonicalJson: string;
+  readonly use: "evidence-only";
+  readonly query: AttuneGraphDecisionQuery;
+  readonly snapshot: AttuneGraphSnapshot | null;
+  readonly sourceFreshness: AttuneGraphSourceFreshness | null;
+  readonly status: "complete" | "partial" | "abstained";
+  readonly witness: Readonly<{
+    readonly assertionIds: readonly string[];
+    readonly sourceRefs: readonly GraphEvidenceRef[];
+  }>;
+  readonly diagnostics: Readonly<{
+    readonly consideredAssertions: number;
+    readonly estimatedTokens: number;
+    readonly maxDepthReached: number;
+    readonly visitedRefs: number;
+    readonly truncationReasons: readonly ("token-budget" | "traversal-budget")[];
+    readonly abstentionReasons: readonly (
+      | "no-head"
+      | "source-not-fresh"
+      | "no-eligible-evidence"
+    )[];
+    readonly authorityEvaluation: "not-performed";
+    readonly conflictClosure: "not-performed";
+  }>;
+}
+
+export interface AttuneGraphDecisionQueryResult {
+  readonly operator: "decision-query@1";
+  readonly use: "evidence-only";
+  readonly status: "complete" | "partial" | "abstained";
+  /** Absent only when the opened scope has no admitted projection head. */
+  readonly snapshot?: AttuneGraphSnapshot;
+  readonly sourceFreshness?: AttuneGraphSourceFreshness;
+  readonly workingGraph: AttuneGraphWorkingGraph;
+  readonly receipt: AttuneGraphDecisionQueryReceipt;
+}
+
 export interface AttuneGraphRevocationSelector {
   readonly assertionIds?: readonly string[];
   readonly graphRefs?: readonly GraphRef[];
@@ -220,6 +285,8 @@ export interface AttuneGraph {
     command: AttuneGraphProjectAgainstHeadCommand
   ): Promise<AttuneGraphSnapshot>;
   execute(command: AttuneGraphExecuteCommand): Promise<AttuneGraphOperatorResult>;
+  /** Compiles one fixed-profile, evidence-only context against the current exact head. */
+  query(command: AttuneGraphDecisionQuery): Promise<AttuneGraphDecisionQueryResult>;
   /** Read-only revocation planning. Apply, retention, and compaction remain separate operations. */
   planRevocationImpact(
     command: AttuneGraphRevocationImpactCommand

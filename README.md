@@ -4,8 +4,9 @@
 > inspectable evidence for AI-agent decisions.
 
 `@attunegraph/core` turns host-owned observations into an exact-head Working
-Graph with source references and an explicit `complete`, `partial`, or
-`abstained` result.
+Graph with source references. Its fixed-profile Decision Query can be expressed
+as a typed object or bounded AttuneQL and returns an explicit `complete`,
+`partial`, or `abstained` result plus a content-addressed evidence receipt.
 
 **Project status:** usable from source today · not yet published to a package registry · no hosted service · Apache-2.0
 
@@ -34,10 +35,11 @@ flowchart LR
     S["Authoritative sources\nnotes · files · tools · apps"]
     A["Host adapters\nparse · anchor · version"]
     P["AttuneGraph\ntime · provenance · exact head"]
+    Q["Decision Query\nobject · AttuneQL"]
     W["Working Graph\nbounded · deterministic"]
     D["Agent decision\ncomplete · partial · abstained"]
 
-    S --> A --> P --> W --> D
+    S --> A --> P --> Q --> W --> D
     P --> R["Revocation Impact\nread-only plan + receipt"]
 ```
 
@@ -51,7 +53,7 @@ flowchart LR
 
 | Area | Available now | Not claimed |
 | --- | --- | --- |
-| Decision evidence | Exact-head, deterministic, token-bounded Working Graph | A finished named `DecisionContext` / `ContextReceipt` API |
+| Decision evidence | Fixed-profile `decision-query@1`, bounded AttuneQL, exact-head token-bounded Working Graph, evidence-only receipt | A proof-closed `DecisionContext` / `ContextReceipt` with completed authority and conflict evaluation |
 | Time and source | Validity, recording, supersession, freshness, exact source refs | Independent verification that an external source is true or current |
 | Storage | In-memory oracle and worker-isolated local SQLite | Distributed, multi-tenant, or hosted database |
 | Failure semantics | `complete`, `partial`, `abstained` | Universal relevance or answer correctness |
@@ -78,11 +80,11 @@ pnpm install --frozen-lockfile
 pnpm example
 ```
 
-The example projects one source-linked observation and compiles a bounded
-Working Graph. The equivalent public API is:
+The example projects one source-linked observation and compiles bounded
+decision evidence. The equivalent public API is:
 
 ```ts
-import { openAttuneGraph } from "@attunegraph/core";
+import { openAttuneGraph, parseAttuneQL } from "@attunegraph/core";
 import { createInMemoryAttuneGraphStore } from "@attunegraph/core/testing";
 
 const scope = { sourceId: "notes", threadId: "trip-planning" };
@@ -117,19 +119,25 @@ await graph.project({
   }
 });
 
-const result = await graph.execute({
-  operator: "working-graph@1",
-  seed: threadRoot,
-  now,
-  maxEstimatedTokens: 2_000
-});
+const query = parseAttuneQL(`
+  EVIDENCE FOR thread("thread:trip-planning")
+  IN SCOPE("notes", "trip-planning")
+  AS OF "2026-08-01T09:00:00.000Z"
+  AT CURRENT HEAD
+  REQUIRE FRESH
+  BUDGET 2000 TOKENS;
+`);
 
-console.log(result.status, result.workingGraph);
+const result = await graph.query(query);
+
+console.log(result.status, result.workingGraph, result.receipt.receiptId);
 await graph.close();
 ```
 
 `canonical-projection@2` admits only the declared thread-root component before
-Store I/O. See [`examples/basic-agent.mjs`](examples/basic-agent.mjs).
+Store I/O. AttuneQL is parsed into the same canonical query object used by the
+typed API; the parser never executes text directly. See
+[`examples/basic-agent.mjs`](examples/basic-agent.mjs).
 
 ## When to choose AttuneGraph
 
@@ -240,8 +248,24 @@ compaction remain explicitly unshipped. The legacy process-local
 `InMemoryAttuneGraphDataStore.forget()` remains a physical-delete utility, not
 this durable protocol.
 
-Structured operators are the current query surface. An arbitrary `AttuneQL`
-parser remains a future direction.
+AttuneQL deliberately exposes one bounded evidence grammar rather than general
+graph traversal:
+
+```text
+EVIDENCE FOR <kind>(<id>)
+IN SCOPE(<source-id>, <thread-id>)
+AS OF <canonical-ISO-instant>
+AT CURRENT HEAD | AT HEAD <generation> <commit-id>
+REQUIRE FRESH
+BUDGET <tokens> TOKENS;
+```
+
+Callers choose the anchor, scope, time, head posture, and token budget. They
+cannot choose relationship families, omit counterevidence, add writes, or turn
+graph proximity into permission. The receipt is evidence-only: it is not action
+authority, a retention pin, or proof that conflict and authority evaluation
+finished. Arbitrary Cypher-style traversal and mutation remain deliberately
+unshipped.
 
 ## Admin and portable artifacts
 
@@ -261,7 +285,7 @@ identities are rejected rather than silently reinterpreted.
 
 | Import | Use |
 | --- | --- |
-| `@attunegraph/core` | Engine lifecycle, projection, Working Graph, Revocation Impact |
+| `@attunegraph/core` | Engine lifecycle, projection, Decision Query, AttuneQL, Working Graph, Revocation Impact |
 | `@attunegraph/core/source-adapter` | Typed host-source ingestion |
 | `@attunegraph/core/local` | Durable worker-isolated SQLite |
 | `@attunegraph/core/admin` | Offline read-only inspection |

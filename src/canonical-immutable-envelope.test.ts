@@ -1278,6 +1278,7 @@ describe("canonical immutable envelope", () => {
       "ACTIVATION_PREDICATES",
       "AttuneGraphDataError",
       "AttuneGraphError",
+      "AttuneQLSyntaxError",
       "GRAPH_ASSERTION_SOURCE_NAMESPACE",
       "GRAPH_DERIVATION_KINDS",
       "GRAPH_DIRECTIONS",
@@ -1295,7 +1296,8 @@ describe("canonical immutable envelope", () => {
       "MAX_GRAPH_QUERY_VISITED_REFS",
       "compileActivationSubgraph",
       "createAttuneGraphEngine",
-      "openAttuneGraph"
+      "openAttuneGraph",
+      "parseAttuneQL"
     ]);
     const privateSubpath = "@attunegraph/core/canonical-immutable-envelope";
     await expect(import(privateSubpath)).rejects.toThrow(/not exported/u);
