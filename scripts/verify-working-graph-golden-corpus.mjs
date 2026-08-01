@@ -1,9 +1,8 @@
 import { createHash } from "node:crypto";
 import { readFile } from "node:fs/promises";
-import { fileURLToPath } from "node:url";
-
 import { openAttuneGraph } from "../dist/index.js";
 import { createInMemoryAttuneGraphStore } from "../dist/testing.js";
+import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
 
 const FIXTURE_URL = new URL(
   "../fixtures/working-graph-v1/corpus.json",
@@ -294,7 +293,7 @@ export async function verifyWorkingGraphGoldenBytes(bytes, manifestDocument) {
   });
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isDirectEntrypoint(import.meta.url, process.argv[1])) {
   if (process.argv.length !== 2) {
     process.stderr.write("verify-working-graph-golden-corpus accepts no arguments\n");
     process.exitCode = 1;

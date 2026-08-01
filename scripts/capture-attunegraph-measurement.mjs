@@ -17,6 +17,7 @@ import {
   inspectReadinessSubject,
   sha256
 } from "./score-attunegraph-readiness.mjs";
+import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
 export const DEFAULT_MEASUREMENT_LIMITS = Object.freeze({
   maxStderrBytes: 65_536,
   maxStdoutBytes: 2_097_152,
@@ -41,10 +42,11 @@ function captureError(message) {
 }
 
 export function parseReadinessMeasurementCaptureArguments(args) {
-  const separator = args.indexOf("--");
+  const normalized = args[0] === "--" ? args.slice(1) : args;
+  const separator = normalized.indexOf("--");
   if (separator < 0) captureError("a -- separator is required");
   const values = new Map();
-  for (const argument of args.slice(0, separator)) {
+  for (const argument of normalized.slice(0, separator)) {
     const match = /^--([a-z-]+)=(.+)$/u.exec(argument);
     if (!match || !CAPTURE_ARGUMENTS.has(match[1])) {
       captureError(`unsupported argument: ${argument}`);
@@ -58,7 +60,7 @@ export function parseReadinessMeasurementCaptureArguments(args) {
   const name = values.get("name");
   const contract = readinessMeasurementContract(name);
   if (!contract) captureError(`unknown measurement contract: ${name}`);
-  const argv = args.slice(separator + 1);
+  const argv = normalized.slice(separator + 1);
   if (argv.some((argument) => argument.includes("\0"))) {
     captureError("command argv must not contain NUL bytes");
   }
@@ -322,7 +324,7 @@ export async function captureReadinessMeasurement(options) {
   });
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isDirectEntrypoint(import.meta.url, process.argv[1])) {
   try {
     const capture = await captureReadinessMeasurement(
       parseReadinessMeasurementCaptureArguments(process.argv.slice(2))

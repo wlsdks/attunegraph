@@ -13,6 +13,7 @@ import {
   READINESS_GATES,
   sha256
 } from "./score-attunegraph-readiness.mjs";
+import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
 import {
   readinessCheckContract,
   readinessContractSnapshot,
@@ -44,10 +45,11 @@ function captureError(message) {
 }
 
 export function parseReadinessCaptureArguments(args) {
-  const separator = args.indexOf("--");
+  const normalized = args[0] === "--" ? args.slice(1) : args;
+  const separator = normalized.indexOf("--");
   if (separator < 0) captureError("a -- separator is required");
-  const optionArguments = args.slice(0, separator);
-  const argv = args.slice(separator + 1);
+  const optionArguments = normalized.slice(0, separator);
+  const argv = normalized.slice(separator + 1);
   if (argv.some((argument) => argument.includes("\0"))) {
     captureError("command argv must not contain NUL bytes");
   }
@@ -269,7 +271,7 @@ export async function captureReadinessCheck(options) {
   });
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isDirectEntrypoint(import.meta.url, process.argv[1])) {
   try {
     const capture = await captureReadinessCheck(
       parseReadinessCaptureArguments(process.argv.slice(2))

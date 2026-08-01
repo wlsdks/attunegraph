@@ -580,6 +580,7 @@ describe("AttuneGraph readiness evidence protocol", () => {
     );
     expect(workflow).toMatch(/readiness-contract:[\s\S]*os: \[ubuntu-latest, windows-latest\][\s\S]*node-version: "24\.15\.0"[\s\S]*pnpm test:readiness/u);
     expect(workflow).toMatch(/readiness-attestation-contract:[\s\S]*actions\/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1/u);
+    expect(workflow).toMatch(/tar -czf readiness-producer-contract\.tgz scripts\/direct-entrypoint\.mjs scripts\/readiness-check-contracts\.mjs scripts\/readiness-measurement-contracts\.mjs scripts\/capture-attunegraph-readiness\.mjs scripts\/capture-attunegraph-measurement\.mjs scripts\/score-attunegraph-readiness\.mjs/u);
     expect(workflow).toMatch(/actions\/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373/u);
   });
 

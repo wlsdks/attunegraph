@@ -2,7 +2,6 @@ import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
 
 import {
   readinessCheckContract,
@@ -10,6 +9,7 @@ import {
   readinessContractSnapshot,
   validateReadinessCommandOutput
 } from "./readiness-check-contracts.mjs";
+import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
 import {
   READINESS_MEASUREMENT_PROVENANCE_SCHEMA,
   READINESS_MEASUREMENT_RESULT_SCHEMA,
@@ -902,7 +902,7 @@ export function runReadinessScorer(options) {
   });
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isDirectEntrypoint(import.meta.url, process.argv[1])) {
   try {
     const result = runReadinessScorer(parseReadinessArguments(process.argv.slice(2)));
     process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);

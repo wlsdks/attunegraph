@@ -7,6 +7,8 @@ import { fileURLToPath } from "node:url";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { parseReadinessCaptureArguments } from "./capture-attunegraph-readiness.mjs";
+
 const CAPTURE_ENTRYPOINT = fileURLToPath(new URL("./capture-attunegraph-readiness.mjs", import.meta.url));
 
 let repositoryFixture;
@@ -77,6 +79,18 @@ afterAll(async () => {
 });
 
 describe("AttuneGraph readiness evidence capture protocol", () => {
+  it("accepts the package-manager separator before fixed capture options", () => {
+    expect(parseReadinessCaptureArguments([
+      "--",
+      "--name=inspect",
+      "--output-directory=/tmp/evidence",
+      "--attunegraph-repository=/tmp/attunegraph",
+      "--muse-repository=/tmp/muse",
+      "--cwd=/tmp/attunegraph",
+      "--"
+    ])).toMatchObject({ name: "inspect", argv: [] });
+  });
+
   it("captures an unavailable fixed contract only as local-unattested not-run", async () => {
     await withFixture(async (fixture) => {
       const result = capture(fixture);

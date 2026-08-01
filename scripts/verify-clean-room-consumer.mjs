@@ -5,9 +5,11 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
+  realpathSync,
   readdirSync,
   rmSync,
   statSync,
+  symlinkSync,
   writeFileSync
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -39,6 +41,27 @@ function run(command, args, options = {}) {
   return result.stdout;
 }
 
+function runExpectedFailure(command, args, expected, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: packageRoot,
+    encoding: "utf8",
+    ...options
+  });
+  if (result.error) throw result.error;
+  assert.notEqual(result.status, 0, `${command} ${args.join(" ")} must fail closed`);
+  const output = [result.stdout, result.stderr].filter(Boolean).join("\n");
+  assert.match(output, expected, `${command} ${args.join(" ")} must explain its refusal`);
+  assert.doesNotMatch(output, /ERR_MODULE_NOT_FOUND|ENOENT.*pnpm-lock/u);
+}
+
+function runJsonCommand(command, args, expectedSchema, options = {}) {
+  const stdout = run(command, args, options);
+  assert.notEqual(stdout.trim(), "", `${command} ${args.join(" ")} must emit JSON`);
+  const report = JSON.parse(stdout);
+  assert.equal(report.schema, expectedSchema);
+  return report;
+}
+
 function verifyPrivateTemporaryDirectory(directory) {
   const metadata = statSync(directory);
   assert.equal(metadata.isDirectory(), true, "clean-room root must be a directory");
@@ -68,9 +91,9 @@ function scanInstalledBytes(directory) {
 }
 
 const consumerProof = String.raw`import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, relative, resolve, sep } from "node:path";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const packageName = "@attunegraph/core";
 const installedRoot = resolve("node_modules", "@attunegraph", "core");
@@ -92,6 +115,57 @@ for (const exportKey of Object.keys(manifest.exports)) {
   const specifier = exportKey === "." ? packageName : packageName + exportKey.slice(1);
   await import(specifier);
 }
+
+for (const entry of manifest.files.filter((value) => value.endsWith(".mjs"))) {
+  await import(pathToFileURL(realpathSync(resolve(installedRoot, entry))).href);
+}
+
+const { prepareAttuneGraphRuntime } = await import(
+  pathToFileURL(resolve(installedRoot, "scripts/prepare-attunegraph-runtime.mjs")).href
+);
+assert.equal(
+  prepareAttuneGraphRuntime({ packageRoot: installedRoot }).mode,
+  "installed-artifact",
+  "packed runtime preparation must validate bytes without a source compiler"
+);
+
+const { captureSourceCheckoutProvenance } = await import(
+  pathToFileURL(resolve(installedRoot, "scripts/source-checkout-provenance.mjs")).href
+);
+assert.throws(
+  () => captureSourceCheckoutProvenance({ packageRoot: installedRoot }),
+  /revision-bound AttuneGraph evidence requires a source checkout/u,
+  "installed tools must not borrow the consumer repository identity"
+);
+
+const { parseReadinessCaptureArguments } = await import(
+  pathToFileURL(resolve(installedRoot, "scripts/capture-attunegraph-readiness.mjs")).href
+);
+assert.equal(parseReadinessCaptureArguments([
+  "--",
+  "--name=inspect",
+  "--output-directory=/tmp/evidence",
+  "--attunegraph-repository=/tmp/attunegraph",
+  "--muse-repository=/tmp/muse",
+  "--cwd=/tmp/attunegraph",
+  "--"
+]).name, "inspect");
+
+const { parseReadinessMeasurementCaptureArguments } = await import(
+  pathToFileURL(resolve(installedRoot, "scripts/capture-attunegraph-measurement.mjs")).href
+);
+assert.equal(parseReadinessMeasurementCaptureArguments([
+  "--",
+  "--name=mixed-durable-agent-decision-observation",
+  "--producer-mode=local-unattested",
+  "--output-directory=/tmp/measurements",
+  "--attunegraph-repository=/tmp/attunegraph",
+  "--muse-repository=/tmp/muse",
+  "--cwd=/tmp/attunegraph",
+  "--",
+  "node",
+  "scripts/benchmark-attunegraph-agent-decision-mixed-durable.mjs"
+]).name, "mixed-durable-agent-decision-observation");
 
 await assert.rejects(
   import("@attunegraph/core/attunegraph-engine"),
@@ -201,10 +275,52 @@ try {
   run(npm, ["install", "--offline", "--ignore-scripts", "--no-audit", "--no-fund", tarball], {
     cwd: consumer
   });
-  const installedRoot = join(consumer, "node_modules", "@attunegraph", "core");
+  const installedRoot = realpathSync(join(consumer, "node_modules", "@attunegraph", "core"));
   scanInstalledBytes(installedRoot);
   writeFileSync(join(consumer, "consumer-proof.mjs"), consumerProof, { mode: 0o600 });
   run(process.execPath, ["consumer-proof.mjs"], { cwd: consumer });
+  run(npm, ["run", "build", "--silent"], { cwd: installedRoot });
+  runJsonCommand(
+    npm,
+    ["run", "verify:working-graph-golden", "--silent"],
+    "attunegraph-working-graph-golden-report@1",
+    { cwd: installedRoot }
+  );
+  runJsonCommand(
+    npm,
+    ["run", "benchmark:agent-decision-read-durable", "--silent"],
+    "attunegraph-agent-decision-durable-tracer@1",
+    { cwd: installedRoot }
+  );
+  runJsonCommand(
+    npm,
+    ["run", "benchmark:agent-decision-mixed-durable", "--silent"],
+    "attunegraph-agent-decision-mixed-durable-tracer@1",
+    { cwd: installedRoot }
+  );
+  const installedAlias = join(cleanRoom, "installed-alias");
+  symlinkSync(installedRoot, installedAlias, process.platform === "win32" ? "junction" : "dir");
+  runJsonCommand(
+    process.execPath,
+    [join(installedAlias, "scripts", "benchmark-attunegraph-agent-decision-mixed-durable.mjs")],
+    "attunegraph-agent-decision-mixed-durable-tracer@1",
+    { cwd: consumer }
+  );
+  runExpectedFailure(
+    npm,
+    [
+      "run",
+      "benchmark:scale",
+      "--silent",
+      "--",
+      "--scale=10000",
+      "--profile=core",
+      "--warmups=0",
+      "--repetitions=1"
+    ],
+    /revision-bound AttuneGraph evidence requires a source checkout at the repository root/u,
+    { cwd: installedRoot }
+  );
 } finally {
   rmSync(cleanRoom, { force: true, recursive: true });
 }

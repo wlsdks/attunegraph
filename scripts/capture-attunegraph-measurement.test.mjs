@@ -25,6 +25,11 @@ it("accepts only the fixed unscored measurement command", () => {
     name: "mixed-durable-agent-decision-observation",
     producerMode: "local-unattested"
   });
+  expect(parseReadinessMeasurementCaptureArguments(["--", ...argumentsFor()])).toMatchObject({
+    argv: FIXED_ARGV,
+    name: "mixed-durable-agent-decision-observation",
+    producerMode: "local-unattested"
+  });
   expect(() => parseReadinessMeasurementCaptureArguments(argumentsFor([
     "node",
     "--version"

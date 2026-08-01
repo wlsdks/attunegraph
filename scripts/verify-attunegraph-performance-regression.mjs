@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, relative, resolve } from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
+
+import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
 
 const SCHEMA = "attunegraph-performance-regression@1";
 const SHA256 = /^sha256:[a-f0-9]{64}$/u;
@@ -597,4 +599,4 @@ function main() {
   if (!gateQualified) process.exitCode = 1;
 }
 
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) main();
+if (isDirectEntrypoint(import.meta.url, process.argv[1])) main();
