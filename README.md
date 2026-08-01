@@ -1,506 +1,300 @@
-# AttuneGraph Core
+# AttuneGraph
 
-`@attunegraph/core` is an agent-neutral temporal and provenance graph engine.
-It turns bounded source observations into immutable projections and compiles a
-small Working Graph for one agent decision.
+> An embedded temporal and provenance database that compiles bounded,
+> inspectable evidence for AI-agent decisions.
 
-The package does not treat graph proximity as truth, feedback, policy,
-permission, or action authority. Authoritative data remains in its source
-system; AttuneGraph stores rebuildable relations and exact source references.
+`@attunegraph/core` turns host-owned observations into an exact-head Working
+Graph with source references and an explicit `complete`, `partial`, or
+`abstained` result.
 
-The core, in-memory adapter, and portable wire contract require Node.js 22.12
-or newer and are tested on Linux, macOS, and Windows. The worker-isolated local
-SQLite adapter and offline Admin require Node.js 24.15 or newer and currently
-have reviewed filesystem profiles for Linux and macOS only. Opening either
-interface on an older runtime or Windows fails closed; it does not silently
-fall back to a weaker store.
+**Project status:** usable from source today · not yet published to a package registry · no hosted service · Apache-2.0
 
-| Interface | Runtime | Reviewed operating systems |
+AttuneGraph is not a smaller Neo4j. It decides which relationships an agent may use as evidence **now**, under time, provenance, freshness, and context budgets.
+
+## Why agents need a different graph
+
+Long-lived agents rarely fail because one fact is impossible to retrieve. They
+fail because the relationships around that fact have changed.
+
+| Agent failure | AttuneGraph contract |
+| --- | --- |
+| Uses a fact after it was revised | Valid time, recorded time, and supersession remain distinct |
+| Treats a nearby edge as truth or permission | Proximity never becomes evidence class, policy, feedback, or authority |
+| Hides uncertainty after a budget cut | Incomplete work returns `partial` or `abstained`, never a false `complete` |
+| Cannot explain which state informed an action | Exact heads, canonical ordering, and content-addressed receipts support replay |
+| Cannot tell what a revoked source affected | Revocation Impact returns deterministic dependency witnesses before mutation |
+
+The database preserves only relationships whose loss would force reconstruction
+or weaken explanation, invalidation, or replay. Raw records stay at the source.
+
+## How it works
+
+```mermaid
+flowchart LR
+    S["Authoritative sources\nnotes · files · tools · apps"]
+    A["Host adapters\nparse · anchor · version"]
+    P["AttuneGraph\ntime · provenance · exact head"]
+    W["Working Graph\nbounded · deterministic"]
+    D["Agent decision\ncomplete · partial · abstained"]
+
+    S --> A --> P --> W --> D
+    P --> R["Revocation Impact\nread-only plan + receipt"]
+```
+
+| Boundary | Owner |
+| --- | --- |
+| Source bytes, credentials, parsing, OCR, embeddings, model calls | Host application |
+| Immutable projections, temporal/provenance semantics, exact heads, bounded traversal | AttuneGraph |
+| Decision, permission, action, and external effects | Agent application |
+
+## What ships today
+
+| Area | Available now | Not claimed |
 | --- | --- | --- |
-| Core, in-memory, portable wire/decoder | Node.js >=22.12 | Linux, macOS, Windows |
-| Local SQLite (`./local`) | Node.js >=24.15 | Linux, macOS |
-| Offline Admin (`./admin`) | Node.js >=24.15 | Linux, macOS |
+| Decision evidence | Exact-head, deterministic, token-bounded Working Graph | A finished named `DecisionContext` / `ContextReceipt` API |
+| Time and source | Validity, recording, supersession, freshness, exact source refs | Independent verification that an external source is true or current |
+| Storage | In-memory oracle and worker-isolated local SQLite | Distributed, multi-tenant, or hosted database |
+| Failure semantics | `complete`, `partial`, `abstained` | Universal relevance or answer correctness |
+| Revocation | Read-only impact plan with shortest dependency witnesses | Revocation apply, persisted receipt pins, pruning, or compaction |
+| Portability | Canonical `.atgx` NDJSON and checked-in fixtures | Compatibility aliases for superseded identities |
+| Operations | Offline, read-only Admin inspection | Online repair or write administration |
+| Scale | Revision-bound measurement harnesses | Qualified 10M/50M production performance or an SLA |
+| Distribution | Source-checkout use and dry-run package verification | npm registry publication |
 
-## Why AttuneGraph for an agent
+See the [first-principles contract](docs/architecture/first-principles.md) for
+the problem definition, graph inclusion rules, and explicit shipped versus
+directional boundary.
 
-AttuneGraph is not a smaller Neo4j. It is a deterministic, embedded context
-compiler for one agent decision. Use a general graph database when an
-application needs arbitrary graph queries, analytics, clustering, vector
-search, multi-user administration, or a database server. Use AttuneGraph when
-a local agent needs to turn source-linked observations into one small,
-explainable Working Graph without operating a graph service.
+## Quick start from source
 
-The agent-native wedge is the complete decision boundary rather than generic
-graph-query throughput:
+Requires Node.js 22.12 or newer. Node.js 24 LTS is recommended and is required
+for the local SQLite and Admin profiles.
 
-- the engine applies observation time, validity, supersession, freshness,
-  provenance, and abstention semantics before returning context;
-- traversal and output are deterministic and token-bounded, with explicit
-  `partial` and `abstained` terminal states instead of an unbounded
-  neighbourhood;
-- graph proximity never becomes truth, permission, feedback, or action
-  authority;
-- the local profile is an in-process Node API backed by one worker-isolated
-  SQLite file, with no required port, credential, or daemon;
-- repeated decisions on one exact committed head reuse one bounded prepared
-  Working Graph plan while re-evaluating `now`, seed, and budgets for every
-  call.
+```sh
+git clone https://github.com/wlsdks/attunegraph.git
+cd attunegraph
+corepack enable
+pnpm install --frozen-lockfile
+pnpm example
+```
 
-These are defaults AttuneGraph owns, not capabilities claimed to be impossible
-in Neo4j. A fair comparison must give the Neo4j/application baseline equivalent
-temporal, provenance, authority, and budget policy, then report both runtime
-cost and the integration code and operations needed to maintain that parity.
-See [BENCHMARKS.md](BENCHMARKS.md) for the measurement boundary and explicit
-non-claims.
-
-The first-principles product and architecture contract is maintained in
-[`docs/architecture/first-principles.md`](docs/architecture/first-principles.md).
-It defines the long-lived agent discontinuity problem, why a graph is required,
-what must and must not be persisted, the Decision Context direction, the
-10M-50M scale boundary, and the distinction between shipped and directional
-capabilities.
-
-## Package boundary
-
-This is a standalone, publishable package boundary. It has:
-
-- no package dependencies;
-- no TypeScript project references;
-- no host-product imports;
-- a provider-neutral engine and store capability;
-- an in-memory semantic oracle and a worker-isolated SQLite adapter;
-- a canonical NDJSON portable format with checked-in golden fixtures;
-- a checked-in Working Graph retrieval corpus covering exact roots,
-  bitemporal cutoffs, budget partials, freshness, and abstention;
-- a revision-bound, measurement-only 10K/100K/1M scale harness;
-- a bounded agent decision-read scale harness for active 16/32/48 frontier and
-  focused-resumption observations, including frozen semantic/projection
-  anchors and an explicit authority-abstention sentinel; it is measurement-only
-  evidence, never action authority.
-
-Performance is treated as a public contract boundary, not a README claim.
-Harnesses time the public operations an agent invokes, retain raw samples, bind
-evidence to an unchanged clean revision and host identity, and keep unsupported
-percentiles null. The bounded scale workload is an optimization detector for
-its declared shapes; it is not a general scalability or production-SLA claim.
-The external-product performance priorities, admission rules, and path from
-measurement-only evidence to a qualified public engine are maintained in
-[PERFORMANCE-QUALIFICATION.md](PERFORMANCE-QUALIFICATION.md#external-product-performance-roadmap).
-
-The package is not yet published to a registry and does not provide a hosted
-service. Its API is usable locally from this repository now.
-
-The package release number in `package.json` is the product version. Machine
-identifiers ending in `@1`, `@2`, and so on are wire or persisted-schema
-revisions, not product maturity labels. They change only when old bytes would
-otherwise be interpreted with different semantics. A newly public contract
-starts at `@1`; existing store and portable revisions remain explicit so local
-data can be admitted or migrated safely.
-
-## Public exports
-
-- `@attunegraph/core` — engine lifecycle, graph contracts, and bounded
-  Activation Subgraph compilation.
-- `@attunegraph/core/backend` — the expert store-adapter seam.
-- `@attunegraph/core/local` — the durable local SQLite adapter.
-- `@attunegraph/core/admin` — the offline, read-only Admin Interface for
-  explicitly closed and quiescent local stores.
-- `@attunegraph/core/testing` — in-memory adapters and executable conformance
-  contracts.
-- `@attunegraph/core/extension-kit` — a narrow set of canonicalization,
-  validation, settlement, and witness-path primitives for integration
-  packages.
-
-Source filenames and all other package subpaths are private.
-
-## Quick start
+The example projects one source-linked observation and compiles a bounded
+Working Graph. The equivalent public API is:
 
 ```ts
-import {
-  openAttuneGraph,
-  type AttuneGraphScope,
-  type GraphAssertion
-} from "@attunegraph/core";
-import {
-  createInMemoryAttuneGraphStore
-} from "@attunegraph/core/testing";
+import { openAttuneGraph } from "@attunegraph/core";
+import { createInMemoryAttuneGraphStore } from "@attunegraph/core/testing";
 
-const scope: AttuneGraphScope = {
-  sourceId: "notes",
-  threadId: "trip-planning"
-};
+const scope = { sourceId: "notes", threadId: "trip-planning" };
 const threadRoot = { kind: "thread" as const, id: "thread:trip-planning" };
+const now = "2026-08-01T09:00:00.000Z";
 
-const assertion: GraphAssertion = {
-  schemaVersion: 1,
-  id: "trip-linked-to-hotel-comparison",
-  subject: { kind: "artifact", id: "hotel-comparison" },
-  predicate: "LINKED_TO",
-  object: { ...threadRoot },
-  epistemicClass: "source-observed",
-  sourceRefs: [{
-    namespace: "example.notes",
-    id: "travel.md#hotel-comparison"
-  }],
-  recordedAt: "2026-07-30T09:00:00.000Z",
-  derivation: { kind: "projection", version: "example@1" }
-};
-
-const attuneGraph = await openAttuneGraph({
+const graph = await openAttuneGraph({
   scope,
   store: createInMemoryAttuneGraphStore()
 });
 
-const snapshot = await attuneGraph.project({
+await graph.project({
   operator: "canonical-projection@2",
   observation: {
     schemaVersion: 2,
     observationKey: "notes-sync-42",
     scope,
     threadRoot,
-    observedAt: "2026-07-30T09:00:00.000Z",
-    sourceFreshness: {
-      state: "fresh",
-      observedAt: "2026-07-30T09:00:00.000Z"
-    },
-    assertions: [assertion]
+    observedAt: now,
+    sourceFreshness: { state: "fresh", observedAt: now },
+    assertions: [{
+      schemaVersion: 1,
+      id: "trip-linked-to-hotel-comparison",
+      subject: { kind: "artifact", id: "hotel-comparison" },
+      predicate: "LINKED_TO",
+      object: { ...threadRoot },
+      epistemicClass: "source-observed",
+      sourceRefs: [{ namespace: "example.notes", id: "travel.md#hotels" }],
+      recordedAt: now,
+      derivation: { kind: "projection", version: "example@1" }
+    }]
   }
 });
 
-const result = await attuneGraph.execute({
+const result = await graph.execute({
   operator: "working-graph@1",
   seed: threadRoot,
-  now: "2026-07-30T09:00:00.000Z",
+  now,
   maxEstimatedTokens: 2_000
 });
 
-console.log(snapshot.commitId, result.status, result.workingGraph);
-await attuneGraph.close();
+console.log(result.status, result.workingGraph);
+await graph.close();
 ```
 
-`canonical-projection@2` adds **Thread-rooted Admission**. The exact
-`threadRoot` is part of the content-addressed observation; the engine requires
-every normalized assertion to belong to its undirected connected component
-before it performs a Store read or compare-and-swap. Empty observations remain
-valid. A mixed projection containing useful thread context plus disconnected
-graph debris fails closed with `DISCONNECTED_OBSERVATION`, so there is no
-partial generation or hidden orphan component.
+`canonical-projection@2` admits only the declared thread-root component before
+Store I/O. See [`examples/basic-agent.mjs`](examples/basic-agent.mjs).
 
-`scope.threadId` is an isolation key, not an inferred graph node ID. Agents may
-use opaque or content-addressed thread roots and must declare the exact
-`GraphRef`. The legacy `canonical-projection@1` profile remains readable and
-writable for compatibility, but is root-unverified; new agent integrations
-should write `schemaVersion: 2`. Stored and portable schema-revision-1 projections remain readable without
-being retroactively certified as thread-rooted.
+## When to choose AttuneGraph
 
-Schema-revision-2 observation IDs use the `attunegraph.canonical-projection.v2` hash domain;
-v1 IDs retain their original domain and bytes. The Store envelope and `.atgx`
-transport versions do not change because both re-admit the embedded observation
-according to its declared schema version.
+| Need | Best fit |
+| --- | --- |
+| Time/provenance-aware, token-bounded evidence for one agent decision | AttuneGraph |
+| Arbitrary Cypher, general graph analytics, clustering, or multi-user serving | General graph database |
+| Semantic candidate discovery across large text collections | Vector or lexical retrieval system |
+| Both discovery and decision admissibility | Retrieval proposes candidates; AttuneGraph applies the final evidence boundary |
 
-After an exact replay check, both canonical projection profiles refuse a source
-observation whose `observedAt` precedes the active head. This prevents a delayed
-older source read from replacing newer truth; equal-instant distinct writes
-retain the existing expected-snapshot CAS semantics.
+A general database can reproduce these behaviors with application code.
+AttuneGraph makes them one fail-closed decision-evidence contract.
 
-The Engine exposes two intentionally distinct write expectations. `project`
-keeps caller-held optimistic concurrency: after the first generation, a
-distinct observation must carry the exact `expectedSnapshot`. Agents that mean
-"apply this observation to whichever committed head exists when this operation
-starts" may instead call `projectAgainstHead`. That method validates the input
-before Store I/O, performs one complete validated head read on the uncontended
-path, and uses that exact internally read snapshot for one compare-and-swap. It
-does not retry the write, weaken delayed-observation rejection, or provide
-last-write-wins. A CAS miss performs one additional validated read solely to
-distinguish an identical concurrent winner from a conflict: a different winner
-returns `SNAPSHOT_CONFLICT`, while an exact winner or replay converges on the
-same snapshot.
+## Source adapters
 
-The process-local in-memory adapter is intended for tests and experiments. It
-does not provide durable storage.
+`@attunegraph/core/source-adapter` is the provider-neutral ingestion seam. A
+host can connect Markdown, text, PDF, spreadsheets, Obsidian, Notion, tool
+results, or any other source without moving raw source bytes into the graph.
 
-The deterministic retrieval contract can be replayed independently with
-`pnpm verify:working-graph-golden`. It requires exact ordered assertion IDs,
-terminal status, truncation reasons, and source freshness for every checked-in
-query. Its precision/recall report measures this declared corpus only; it is
-not a claim about open-world semantic relevance or personal usefulness.
+Adapters emit bounded assertions with exact anchors and parser provenance;
+AttuneGraph content-binds the adapter identity, source kind, caller
+correlation, and resulting observation before one `projectAgainstHead` write.
 
-## External source adapters
+- API and ownership: [SOURCE-ADAPTERS.md](SOURCE-ADAPTERS.md)
+- Non-Muse example:
+  [`examples/source-adapter-agent.mjs`](examples/source-adapter-agent.mjs)
 
-`@attunegraph/core/source-adapter` turns the reserved source-adapter capability
-into a typed, bounded ingestion seam for any host agent. The host owns source
-bytes, parsing, credentials, OCR, and optional model calls. Factory-defined
-adapters emit only bounded assertions with exact evidence references; the SDK
-content-binds adapter identity, version, source kind, and caller correlation,
-builds `canonical-projection@2`, and submits one `projectAgainstHead` write.
-
-The SDK does not parse or store Markdown, text, PDF, spreadsheet, Obsidian, or
-Notion content. See [`SOURCE-ADAPTERS.md`](SOURCE-ADAPTERS.md) for the public API,
-ownership boundary, and source-anchor recipes, plus
-[`examples/source-adapter-agent.mjs`](examples/source-adapter-agent.mjs) for a
-non-Muse consumer.
-
-## Durable local store
+## Durable local SQLite
 
 ```ts
 import { openLocalAttuneGraph } from "@attunegraph/core/local";
 
-const attuneGraph = await openLocalAttuneGraph({
+const graph = await openLocalAttuneGraph({
   databasePath: "/absolute/local/path/attunegraph.sqlite",
-  scope: {
-    sourceId: "notes",
-    threadId: "trip-planning"
-  }
-});
-
-// Recover the exact optimistic token after a process restart.
-const current = await attuneGraph.head();
-// A distinct projection supplies `current` as expectedSnapshot; an identical
-// observation is replay-safe and returns the same generation.
-
-// When the caller explicitly wants the latest committed head at operation
-// start, avoid a separate head round trip without weakening atomic CAS.
-await attuneGraph.projectAgainstHead(nextProjection);
-await attuneGraph.close();
-```
-
-For many scopes in one caller-owned database lifecycle, open one explicit
-session. It owns exactly one SQLite worker; every Engine handle remains bound
-to the scope supplied to `session.open`. Closing a handle leaves the session
-and other handles available. Closing the session rejects new work, drains
-accepted work, checkpoints, and terminates that worker.
-
-```ts
-import { openLocalAttuneGraphSession } from "@attunegraph/core/local";
-
-const session = await openLocalAttuneGraphSession({
-  databasePath: "/absolute/local/path/attunegraph.sqlite"
-});
-const notes = await session.open({
   scope: { sourceId: "notes", threadId: "trip-planning" }
 });
-const tasks = await session.open({
-  scope: { sourceId: "tasks", threadId: "trip-planning" }
-});
 
-await notes.close(); // tasks and session remain usable
-await tasks.close();
-await session.close();
+console.log(await graph.head());
+await graph.close();
 ```
 
-`openLocalAttuneGraph` remains the cold, one-handle lifecycle API. It is built
-on the same private session path but creates and closes a worker per handle;
-it does not participate in a transparent process-global pool.
+The local profile keeps SQLite, SQL, worker transport, and physical schema
+private. It validates runtime, filesystem ownership and mode, physical
+identity, schema, and safety pragmas before serving data. Unsupported or
+corrupt stores fail closed. Use `projectAgainstHead()` when a host means to
+apply a validated observation to the head current at operation start.
 
-The local adapter keeps SQLite, SQL, worker lifecycle, and physical schema
-private. It validates the runtime, filesystem, ownership, file mode, exact
-physical identity, schema, and safety pragmas before serving data. Unsupported,
-future, corrupt, and incompatible stores fail closed.
+For many scopes in one database lifecycle, use
+`openLocalAttuneGraphSession()`. One session owns one SQLite worker; closing a
+scope handle leaves the other handles and session alive.
 
-The built-in SQLite and in-memory adapters implement the optional expert
-Store Adapter `readHead(scope)` capability. On the first `execute` for an exact
-head, the Engine performs the normal full projection read, semantic admission,
-ordering, byte accounting, and adjacency preparation. Later executes on that
-same open handle perform an exact head read and reuse at most one prepared plan.
-Temporal validity, traversal, token budgeting, diagnostics, and result assembly
-still run for every command. A successful local compare-and-swap or an observed
-external head change invalidates the plan; a head/projection mismatch retries
-once and then fails closed. Custom Store Adapters that omit `readHead` keep the
-original full-read-per-execute behavior.
+## Revocation Impact
 
-## Read-only Admin
+Plan the current and transitive derived assertions affected by a future
+revocation without changing the graph:
 
 ```ts
-import {
-  openAttuneGraphAdminReadonlyApplication
-} from "@attunegraph/core/admin";
-
-const admin = await openAttuneGraphAdminReadonlyApplication({
-  databasePath: "/absolute/local/path/attunegraph.sqlite",
-  sourceState: "closed-quiescent"
+const plan = await graph.planRevocationImpact({
+  operator: "revocation-impact@1",
+  selector: { sourceRefs: [{ namespace: "notes", id: "trip-plan" }] },
+  maxAssertions: 16,
+  maxConsideredAssertions: 256
 });
 
-const summary = await admin.inspectSummary();
-const integrity = await admin.verifyIntegrity();
-const head = await admin.inspectHead({
-  sourceId: "notes",
-  threadId: "trip-planning"
-});
-
-console.log(summary, integrity, head);
-await admin.close();
+console.log(plan.status, plan.impacts, plan.receipt.receiptId);
 ```
 
-This Interface is deliberately offline and read-only. The caller must stop the
-writer and explicitly attest `closed-quiescent`; snapshot acquisition can
-detect source changes while copying, but cannot prove the lifecycle. The
-Interface exposes no SQLite handle, filesystem authority, Worker transport,
-repair, export, or mutation primitive.
+Selectors accept bounded assertion IDs, graph refs, and source refs. Versioned
+source refs match exactly; versionless refs match every version with the same
+namespace and ID. Dependency cycles terminate, equal shortest witnesses settle
+lexicographically, and either work cap produces `partial`.
 
-## Portable format
+This operation is read-only. It does **not** apply a revocation, persist a
+retention pin, prune history, or compact SQLite. The legacy process-local
+`InMemoryAttuneGraphDataStore.forget()` remains a physical-delete utility, not
+the durable plan/apply protocol.
 
-Portable artifacts use the `.atgx` extension and the
-`attunegraph-portable` manifest identity. The format is canonical NDJSON, not a
-binary container. Exact framing, hashes, ordering, limits, and validation-sink
-requirements are specified in [PORTABLE-FORMAT.md](PORTABLE-FORMAT.md).
+## Admin and portable artifacts
 
-Artifacts and databases created with the superseded identities are
-intentionally incompatible. The package rejects them before mutation; it does
-not carry a compatibility alias or migration path.
+| Interface | Purpose | Boundary |
+| --- | --- | --- |
+| `@attunegraph/core/admin` | Inspect summaries, heads, and integrity | Offline, read-only, explicitly closed and quiescent Store |
+| `.atgx` | Canonical multi-scope transport | NDJSON with exact framing, hashes, ordering, and limits |
+
+The Admin interface exposes no SQLite handle, filesystem authority, repair,
+export, or mutation primitive. Portable artifacts created under superseded
+identities are rejected rather than silently reinterpreted.
+
+- Portable wire contract: [PORTABLE-FORMAT.md](PORTABLE-FORMAT.md)
+- Checked-in fixtures: [`fixtures/portable-v1/`](fixtures/portable-v1/)
+
+## Public interfaces
+
+| Import | Use |
+| --- | --- |
+| `@attunegraph/core` | Engine lifecycle, projection, Working Graph, Revocation Impact |
+| `@attunegraph/core/source-adapter` | Typed host-source ingestion |
+| `@attunegraph/core/local` | Durable worker-isolated SQLite |
+| `@attunegraph/core/admin` | Offline read-only inspection |
+| `@attunegraph/core/backend` | Expert Store adapter seam |
+| `@attunegraph/core/readonly-working-graph` | Offline Working Graph read from a closed local Store |
+| `@attunegraph/core/testing` | In-memory adapters and conformance contracts |
+| `@attunegraph/core/extension-kit` | Canonicalization, validation, settlement, witness primitives |
+
+Source filenames and unlisted package subpaths are private.
+
+## Compatibility and safety
+
+| Interface | Runtime | Reviewed operating systems |
+| --- | --- | --- |
+| Core, in-memory, portable wire/decoder | Node.js >=22.12 | Linux, macOS, Windows |
+| Local SQLite, offline Admin, read-only Working Graph | Node.js >=24.15 | Linux, macOS |
+
+The core package has no runtime package dependencies. Node built-ins and the
+declared runtime versions are still required. Unsupported local-profile hosts
+fail closed; they do not fall back to a weaker Store.
+
+Identifiers such as `working-graph@1` and `canonical-projection@2` are wire or
+persisted-contract revisions, not product maturity labels. They change only
+when existing bytes would otherwise be interpreted with different semantics.
+The package version in `package.json` is the product version.
+
+## Benchmarks and verification
+
+```sh
+pnpm typecheck
+pnpm test:focused
+pnpm test                 # cross-platform core, memory, and portable contracts
+pnpm test:local-profile   # reviewed Linux/macOS SQLite and Admin profile
+pnpm verify:working-graph-golden
+pnpm pack:dry-run
+```
+
+Performance evidence is revision-, host-, dataset-, and semantic-hash-bound.
+The checked-in harnesses are measurement tools, not a general production SLA,
+a 10M/50M qualification, or proof that AttuneGraph is faster than Neo4j. A fair
+comparison must give the baseline equivalent time, provenance, authority,
+budget, and partiality semantics.
+
+- Workloads and claim limits: [BENCHMARKS.md](BENCHMARKS.md)
+- Qualification policy: [PERFORMANCE-QUALIFICATION.md](PERFORMANCE-QUALIFICATION.md)
+- Gate and evidence contracts: [READINESS.md](READINESS.md)
+
+## Documentation
+
+| Document | Question answered |
+| --- | --- |
+| [First principles](docs/architecture/first-principles.md) | Why does this database exist, and what belongs in the graph? |
+| [Source adapters](SOURCE-ADAPTERS.md) | How does a host connect structured and unstructured sources? |
+| [Portable format](PORTABLE-FORMAT.md) | How are `.atgx` artifacts framed and admitted? |
+| [Benchmarks](BENCHMARKS.md) | What is measured, and which claims are forbidden? |
+| [Performance qualification](PERFORMANCE-QUALIFICATION.md) | What evidence is required before performance claims? |
+| [Readiness](READINESS.md) | Which checks and artifacts define a verified revision? |
+| [Contributing](CONTRIBUTING.md) | How should changes be proposed and verified? |
+| [Security](SECURITY.md) | How should vulnerabilities be reported? |
 
 ## Development
 
 ```sh
-pnpm install
+pnpm install --frozen-lockfile
 pnpm typecheck
 pnpm test:focused
-pnpm test                 # cross-platform core/in-memory/portable contracts
-pnpm test:local-profile   # reviewed Linux/macOS local SQLite and Admin
-pnpm test:supported       # both profiles on a reviewed local-profile host
-pnpm test:benchmark-qualification # separate real 10K lifecycle proof
 pnpm build
 pnpm example
-pnpm pack:dry-run
-pnpm verify:clean-room-consumer
-pnpm fixtures:portable
-pnpm verify:portable-fixtures
-pnpm verify:local
-pnpm benchmark:scale -- --scale=10000 --profile=core --warmups=0 --repetitions=1
-pnpm benchmark:scale -- --scale=10000 --profile=local-session --warmups=0 --repetitions=1
-pnpm benchmark:scale -- --scale=10000 --profile=local-session-update-comparison --warmups=0 --repetitions=1
-pnpm benchmark:agent-decision-read -- --workload=agent-decision-read@1 --warmups=0 --repetitions=1
-pnpm benchmark:agent-decision-read-scale -- --workload=agent-decision-read-scale@1 --warmups=1 --repetitions=5
-pnpm --silent benchmark:agent-decision-read-durable
-pnpm --silent benchmark:agent-decision-mixed-durable
-pnpm --silent benchmark:worker-resource-lifecycle
-pnpm --silent benchmark:sqlite-generation-growth
-pnpm benchmark:performance -- --scale=10000 --profile=local-session-concurrent --concurrency=4 --warmups=1 --repetitions=2
-pnpm benchmark:performance -- --scale=10000 --profile=portable --concurrency=1 --warmups=1 --repetitions=1
-pnpm performance:regression -- --manifest=/absolute/path/performance-regression-manifest.json
-pnpm performance:regression:advisory -- --manifest=/absolute/path/performance-regression-manifest.json
-pnpm readiness:capture -- \
-  --name=inspect \
-  --output-directory=/absolute/path/readiness-evidence \
-  --attunegraph-repository=/absolute/path/attunegraph \
-  --muse-repository=/absolute/path/Muse \
-  --cwd=/absolute/path/attunegraph --
-pnpm readiness:capture-measurement -- \
-  --name=mixed-durable-agent-decision-observation \
-  --output-directory=/absolute/path/readiness-evidence \
-  --attunegraph-repository=/absolute/path/attunegraph \
-  --muse-repository=/absolute/path/Muse \
-  --cwd=/absolute/path/attunegraph -- \
-  node scripts/benchmark-attunegraph-agent-decision-mixed-durable.mjs
-pnpm readiness:score -- --as-of=2026-07-31T00:00:00.000Z \
-  --evidence=/absolute/path/readiness-evidence.json \
-  --attunegraph-repository=/absolute/path/attunegraph \
-  --muse-repository=/absolute/path/Muse
 ```
 
-The benchmark's fixed thread-rooted canonical corpus, evidence schema, output safety, and
-claim boundary are documented in [BENCHMARKS.md](BENCHMARKS.md). It includes
-measurement-only in-memory decision workloads and four local SQLite measurement
-tools. The single-session tracer writes eight generations, gracefully closes the
-Store, opens a new Worker in the same process, and verifies one exact decision
-read. The four-session tracer exercises a deterministic 100-operation timed
-schedule against one shared SQLite file, verifies the final public results
-after a new Worker opens, and records settled DB/WAL/SHM logical sizes. The
-worker-resource tracer performs one excluded preparation write, then measures
-four identical read-only session/Worker lifecycles. It keeps whole-process RSS,
-main-thread heap, and active-Worker isolate heap in separate scopes and samples
-the Worker again after its graph handle closes. It does not infer a leak,
-allocator release, per-Worker RSS, SQLite native allocation, or resource
-qualification. Those three existing tracers are permanently claim-ineligible: they
-do not establish cold-cache, crash recovery, database execution overlap, lock
-contention, tails, SLA, or qualification. The generation-growth tracer isolates
-32 fixed-width generations on one scope, samples DB/WAL/SHM logical sizes at
-15 settled public-API boundaries, and verifies the exact final head and decision
-after a new Worker opens. It does not infer allocated bytes, checkpoint
-effectiveness, compaction, retention fitness, or a growth slope. All four tools
-remain measurement-only and claim-ineligible. The real 10K lifecycle proof and the
-100K/1M runs are separate evidence activities, not normal test gates. In
-particular, the current 1M workload is a many-scope
-throughput test, not a one-million-edge graph claim.
-
-The full gate inventory and artifact contract are documented in
-[READINESS.md](READINESS.md). Every name has one stable fixed contract. Two
-Working Graph checks have strict fixed adapters; other unimplemented semantic
-verifiers are unavailable and capture only as `not-run`. Caller-selected
-commands such as `node --version` are refused. Results bind
-the contract, canonical cwd role, raw streams, timestamps, provenance,
-toolchain identity, clean Git subjects, and the exact Muse gitlink.
-`pnpm readiness:score` accepts the first public
-`attunegraph-readiness-evidence@1` contract, validates every referenced hash,
-and rejects artifact reuse, symlinks, and dirty or mismatched repositories. The
-manifest contains the exact 37 checks plus one separately captured, unscored
-mixed-durable observation. That measurement is reported only as `observed`,
-`failed`, or `stale`; it never passes concurrency, resources, or qualification.
-Freshness is measured through exactly 168 hours from capture end. Local artifacts
-produce an unattested integrity coverage report with `eligible: false`, never an
-execution-authentic or product-usefulness claim.
-
-Performance measurement and qualification remain separate. Every performance report is
-measurement-only. The checked-in policy requires clean 10K, 100K, and 1M reports for bounded-pool
-single-session ingestion and portable encode/decode. That profile owns one SQLite Worker and does
-not establish multi-client database contention. The qualifier strictly recomputes throughput
-and ratios from raw samples; it currently reports evidence-integrity and relative-policy status
-but fails closed on full performance qualification until independent absolute throughput/latency
-thresholds are calibrated. See [`PERFORMANCE-QUALIFICATION.md`](PERFORMANCE-QUALIFICATION.md).
-
-`attunegraph-performance-regression@1` compares an exact frozen AB/BA bundle
-against the packaged policy and recomputes paired ratios, absolute deltas,
-eligible percentiles, correctness identity, and RSS policy math. Local bundles
-are explicitly unattested: `claimEligible`, `latencyAuthoritative`,
-`resourceAuthoritative`, `resourceQualified`, and `regressionQualified` remain
-false. The default command therefore exits nonzero. The separately named
-`performance:regression:advisory` command may exit zero only when the packaged
-shared-GitHub policy's structural integrity and self-reported resource checks
-pass; that exit is not a latency, resource, or regression qualification. See
-[BENCHMARKS.md](BENCHMARKS.md#offline-performance-regression-verifier).
-
-Canonical-envelope admission performs one unsigned encode and digest, then
-freezes and recursively verifies the detached output before re-encoding the
-complete signed envelope byte-for-byte. Exact full-envelope equality plus the
-exact frozen content ID proves the unsigned body is unchanged without repeating
-its encode and SHA-256 pass. The bounded one-host checkpoint and its explicit
-claim limits are recorded in
-[BENCHMARKS.md](BENCHMARKS.md#post-freeze-canonical-verification-checkpoint-2026-08-01).
-
-Working Graph compilation builds a bounded execute-local adjacency index from
-the already validated, temporally active assertion set. It does not cache or
-trust Store output across reads. Exact output and diagnostics remain pinned by
-the golden corpus and endpoint-direction regression test; the one-host
-measurement-only checkpoint is recorded in
-[BENCHMARKS.md](BENCHMARKS.md#working-graph-adjacency-checkpoint-2026-08-01).
-
-Portable decoding reuses the canonical store-envelope result it has already
-verified when it performs exact Engine normalization. It does not bypass the
-canonicalization boundary or trust caller-owned bytes. The bounded 10K AB/BA
-checkpoint records a 29.89% paired-median decode-latency reduction while
-disclosing unchanged encode time and unclassified RSS evidence in
-[BENCHMARKS.md](BENCHMARKS.md#portable-decoder-admission-checkpoint-2026-08-01).
-
-Fixture generation is deterministic. Regeneration must reproduce the checked-in
-inputs, `.atgx` artifacts, manifest hashes, byte counts, record identities, and
-state identities exactly.
-
-`pnpm test:local-profile` intentionally fails closed on unsupported hosts; CI
-runs it only on reviewed Linux and macOS profiles. No platform test is silently
-skipped.
-
-Ubuntu Node 24.15 CI runs `pnpm verify:clean-room-consumer`, which packs the
-built package into an owner-private temporary directory and installs that
-tarball offline into a fresh consumer. It exercises every public export,
-imports every shipped tool module, validates the installed runtime without a
-source compiler, and runs the Golden, durable, mixed-durable, worker-resource,
-and SQLite generation-growth tools from the installed bytes. The two resource
-commands require the same reviewed Node 24.15 local profile and each emit at
-most 128 KiB.
-Revision-bound scale and qualification tools intentionally
-refuse an installed location instead of borrowing the consumer repository's
-Git identity; authoritative evidence still requires the exact source checkout.
-
-Passing these checks proves the package contracts. It does not prove that an
-agent has learned a person, improved its timing, or produced a real-world
-outcome. Agent bridges, MCP transport, hosted operation, and product-specific
-policy are roadmap work outside this neutral core.
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow. AttuneGraph is
+licensed under [Apache-2.0](LICENSE).

@@ -1,4 +1,4 @@
-import type { GraphAssertion, GraphRef } from "./types.js";
+import type { GraphAssertion, GraphEvidenceRef, GraphRef } from "./types.js";
 
 declare const attuneGraphStoreBrand: unique symbol;
 declare const attuneGraphSourceAdapterBrand: unique symbol;
@@ -112,6 +112,58 @@ export interface AttuneGraphOperatorResult {
   readonly workingGraph: AttuneGraphWorkingGraph;
 }
 
+export interface AttuneGraphRevocationSelector {
+  readonly assertionIds?: readonly string[];
+  readonly graphRefs?: readonly GraphRef[];
+  readonly sourceRefs?: readonly GraphEvidenceRef[];
+}
+
+export interface AttuneGraphRevocationImpactCommand {
+  readonly operator: "revocation-impact@1";
+  readonly selector: AttuneGraphRevocationSelector;
+  /** Hard cap on returned impacted assertions. */
+  readonly maxAssertions: number;
+  /** Hard cap on admitted projection assertions inspected while planning. */
+  readonly maxConsideredAssertions: number;
+}
+
+export interface AttuneGraphRevocationImpact {
+  readonly assertionId: string;
+  readonly reason: "direct" | "dependency";
+  /** Direct selector match through this impacted assertion, inclusive. */
+  readonly witnessAssertionIds: readonly string[];
+}
+
+export interface AttuneGraphRevocationImpactDiagnostics {
+  readonly consideredAssertions: number;
+  readonly directMatches: number;
+  readonly truncationReasons: readonly ("assertion-budget" | "considered-budget")[];
+}
+
+/** Immutable, content-addressed plan receipt. It is an informational pin, not retention. */
+export interface AttuneGraphRevocationImpactReceipt {
+  readonly contractRevision: 1;
+  readonly receiptId: string;
+  /** Exact canonical JSON whose content address is receiptId. */
+  readonly canonicalJson: string;
+  readonly snapshot: AttuneGraphSnapshot | null;
+  readonly selector: AttuneGraphRevocationSelector;
+  readonly impacts: readonly AttuneGraphRevocationImpact[];
+  readonly diagnostics: AttuneGraphRevocationImpactDiagnostics;
+  readonly status: "complete" | "partial" | "abstained";
+}
+
+export interface AttuneGraphRevocationImpactResult {
+  readonly operator: "revocation-impact@1";
+  readonly status: "complete" | "partial" | "abstained";
+  /** Undefined only when the opened scope has no admitted projection head. */
+  readonly snapshot?: AttuneGraphSnapshot;
+  readonly selector: AttuneGraphRevocationSelector;
+  readonly impacts: readonly AttuneGraphRevocationImpact[];
+  readonly diagnostics: AttuneGraphRevocationImpactDiagnostics;
+  readonly receipt: AttuneGraphRevocationImpactReceipt;
+}
+
 export interface AttuneGraph {
   /**
    * Reads the exact current projection head for this opened scope.
@@ -129,6 +181,10 @@ export interface AttuneGraph {
     command: AttuneGraphProjectAgainstHeadCommand
   ): Promise<AttuneGraphSnapshot>;
   execute(command: AttuneGraphExecuteCommand): Promise<AttuneGraphOperatorResult>;
+  /** Read-only revocation planning. Apply, retention, and compaction remain separate operations. */
+  planRevocationImpact(
+    command: AttuneGraphRevocationImpactCommand
+  ): Promise<AttuneGraphRevocationImpactResult>;
   close(): Promise<void>;
 }
 
