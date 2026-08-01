@@ -527,6 +527,15 @@ qualification, p95/p99 evidence, an SLA, a production/cross-host result, cold
 disk/process restart, crash/power-loss recovery, or sustained-load evidence.
 Those remain separate qualification work.
 
+The same raw tracer can be admitted to readiness evidence only through
+`pnpm readiness:capture-measurement`. That bounded producer binds one clean
+AttuneGraph revision, the exact clean Muse gitlink consumer, canonical cwd,
+Node executable bytes, runtime identity, raw artifact hashes, and the
+checked-out tracer hash. The scorer revalidates the complete 100-entry ledger
+and semantic output. This is an unscored observation lane: success never
+changes the eight readiness gates, fills the separate `concurrency` contract,
+or creates a performance qualification.
+
 ## Agent decision-read active scale
 
 `agent-decision-read-scale@1` is a separate, in-memory public

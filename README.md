@@ -51,6 +51,13 @@ measurement-only evidence to a qualified public engine are maintained in
 The package is not yet published to a registry and does not provide a hosted
 service. Its API is usable locally from this repository now.
 
+The package release number in `package.json` is the product version. Machine
+identifiers ending in `@1`, `@2`, and so on are wire or persisted-schema
+revisions, not product maturity labels. They change only when old bytes would
+otherwise be interpreted with different semantics. A newly public contract
+starts at `@1`; existing store and portable revisions remain explicit so local
+data can be admitted or migrated safely.
+
 ## Public exports
 
 - `@attunegraph/core` — engine lifecycle, graph contracts, and bounded
@@ -325,6 +332,13 @@ pnpm readiness:capture -- \
   --attunegraph-repository=/absolute/path/attunegraph \
   --muse-repository=/absolute/path/Muse \
   --cwd=/absolute/path/attunegraph --
+pnpm readiness:capture-measurement -- \
+  --name=mixed-durable-agent-decision-observation \
+  --output-directory=/absolute/path/readiness-evidence \
+  --attunegraph-repository=/absolute/path/attunegraph \
+  --muse-repository=/absolute/path/Muse \
+  --cwd=/absolute/path/attunegraph -- \
+  node scripts/benchmark-attunegraph-agent-decision-mixed-durable.mjs
 pnpm readiness:score -- --as-of=2026-07-31T00:00:00.000Z \
   --evidence=/absolute/path/readiness-evidence.json \
   --attunegraph-repository=/absolute/path/attunegraph \
@@ -352,13 +366,15 @@ verifiers are unavailable and capture only as `not-run`. Caller-selected
 commands such as `node --version` are refused. Results bind
 the contract, canonical cwd role, raw streams, timestamps, provenance,
 toolchain identity, clean Git subjects, and the exact Muse gitlink.
-`pnpm readiness:score` accepts only
-`attunegraph-readiness-evidence@2`, validates every referenced hash and rejects
-artifact reuse, symlinks, dirty or mismatched repositories, and v1
-metadata-only evidence. Freshness is measured through exactly 168 hours from
-the captured command end. Local artifacts produce an unattested integrity
-coverage report with `eligible: false`, never an execution-authentic or
-product-usefulness claim.
+`pnpm readiness:score` accepts the first public
+`attunegraph-readiness-evidence@1` contract, validates every referenced hash,
+and rejects artifact reuse, symlinks, and dirty or mismatched repositories. The
+manifest contains the exact 37 checks plus one separately captured, unscored
+mixed-durable observation. That measurement is reported only as `observed`,
+`failed`, or `stale`; it never passes concurrency, resources, or qualification.
+Freshness is measured through exactly 168 hours from capture end. Local artifacts
+produce an unattested integrity coverage report with `eligible: false`, never an
+execution-authentic or product-usefulness claim.
 
 Performance measurement and qualification remain separate. Every performance report is
 measurement-only. The checked-in policy requires clean 10K, 100K, and 1M reports for bounded-pool

@@ -25,7 +25,7 @@ async function initializeRepository(path, filename) {
 }
 
 async function createRepositoryFixture() {
-  const directory = await mkdtemp(join(tmpdir(), "attunegraph-capture-v2-"));
+  const directory = await mkdtemp(join(tmpdir(), "attunegraph-capture-protocol-"));
   const attunegraph = join(directory, "attunegraph");
   const muse = join(directory, "muse");
   await Promise.all([mkdir(attunegraph), mkdir(muse)]);
@@ -76,7 +76,7 @@ afterAll(async () => {
   }
 });
 
-describe("AttuneGraph readiness evidence capture v2", () => {
+describe("AttuneGraph readiness evidence capture protocol", () => {
   it("captures an unavailable fixed contract only as local-unattested not-run", async () => {
     await withFixture(async (fixture) => {
       const result = capture(fixture);
