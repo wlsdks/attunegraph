@@ -6,6 +6,12 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add `generation-churn-8x40@1`, a measurement-only durable SQLite agent
+  decision tracer using only the public local API. It projects eight
+  generation-specific 16-active/24-temporal-decoy heads, gracefully reopens a
+  new Worker in the same process, and pins exact head, ordered provenance,
+  diagnostics, and full-result equality without claiming cold cache, crash
+  recovery, multi-client contention, tails, or qualification.
 - Add `agent-decision-read-scale@1`, a strict measurement-only active-scale
   Working Graph harness with cold/warm rebuilt heads, raw timings, stored-v2
   byte and semantic anchors, bounded p50-only reporting, an explicit temporal

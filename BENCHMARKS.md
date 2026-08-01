@@ -139,10 +139,13 @@ being silently treated as successful retrieval.
 ## External-project performance qualification profiles
 
 `benchmark:performance` adds two reports without changing the measurement-only scale reports
-above. `local-session-concurrent` uses a bounded pool and an alternating AB/BA same-run sequential
-baseline, separate SQLite databases, exact reopen verification, and cold/warm session-open
-measurements. `portable` times the production encoder, contiguous `.atgx` materialization, and
-production decoder separately while verifying exact terminal convergence.
+above. `local-session-concurrent` uses a bounded caller Promise pool over one session, one Worker,
+and one synchronous SQLite connection, plus an alternating AB/BA same-run sequential baseline on
+a separate SQLite database. It measures single-session request pipelining, not independent SQLite
+clients or writer contention. Exact reopen verification and new-versus-reused session-open
+measurements remain explicit; OS page-cache state is uncontrolled. `portable` times the production
+encoder, contiguous `.atgx` materialization, and production decoder separately while verifying
+exact terminal convergence.
 
 Process peak RSS comes from `process.resourceUsage().maxRSS` normalized to bytes and is combined
 with phase-boundary RSS. Absolute p50/p95/p99 throughput and latency summaries are mandatory and
@@ -430,6 +433,41 @@ Every included report remains `measurementOnly: true` and
 observation only. They do not make p95 or p99 eligible and do not establish an
 SLA, an absolute performance qualification, a production-workload result, or
 a general macOS, arm64, Apple Silicon, or other-hardware claim.
+
+## Durable agent decision-read tracer
+
+`generation-churn-8x40@1` is the first durable public-API decision tracer. On
+a reviewed Linux/macOS host with Node 24.15 or newer, run:
+
+```sh
+pnpm --silent benchmark:agent-decision-read-durable
+```
+
+It creates a private temporary SQLite database through
+`@attunegraph/core/local`, projects eight generation-specific heads, and then
+gracefully closes the Engine, session, and Worker. Every head has 16 active
+assertions plus 24 temporal decoys: six expired, six future-valid, six recorded
+after the decision cutoff, and six superseded. That is 320 projected assertion
+inputs. The final canonical observation is measured against the Engine's fixed
+15,500-byte envelope before the report is returned.
+
+The tracer opens a new Worker in the same process and performs exactly one
+`working-graph@1` decision read. It pins generation 8, the exact head commit,
+ordered assertion and graph-reference IDs, source references, derivations,
+freshness, diagnostics, and the complete public result before and after reopen.
+Any divergence fails instead of emitting a report.
+
+`reopenAfterGracefulCloseMilliseconds` and
+`executeAfterReopenMilliseconds` are the only timed phases. Eight-generation
+preparation and the pre-close reference read are excluded. OS page-cache state
+is uncontrolled. The temporary database is deleted after output.
+
+Every report is permanently `measurementOnly: true` and
+`claimEligible: false`. This profile does not measure cold-disk start, process
+restart, crash or power-loss recovery, multiple SQLite clients, writer
+contention, 48/256 active assertions, 48 temporal decoys, long-run storage
+growth, tail percentiles, or an SLA. It does not join the performance
+qualification matrix yet.
 
 ## Agent decision-read active scale
 

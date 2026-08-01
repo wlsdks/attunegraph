@@ -29,6 +29,7 @@
     "performance-thresholds.json",
     "scripts/benchmark-attunegraph-agent-decision-read.mjs",
     "scripts/benchmark-attunegraph-agent-decision-read-scale.mjs",
+    "scripts/benchmark-attunegraph-agent-decision-durable.mjs",
     "scripts/benchmark-attunegraph-performance.mjs",
     "scripts/qualify-attunegraph-performance.mjs",
     "scripts/verify-attunegraph-performance-regression.mjs",
@@ -89,6 +90,7 @@
   "scripts": {
     "benchmark:agent-decision-read": "pnpm build && node scripts/benchmark-attunegraph-agent-decision-read.mjs",
     "benchmark:agent-decision-read-scale": "pnpm build && node scripts/benchmark-attunegraph-agent-decision-read-scale.mjs",
+    "benchmark:agent-decision-read-durable": "pnpm build && node scripts/benchmark-attunegraph-agent-decision-durable.mjs",
     "benchmark:scale": "pnpm build && node scripts/benchmark-attunegraph-scale.mjs",
     "benchmark:performance": "pnpm build && node scripts/benchmark-attunegraph-performance.mjs",
     "build": "node scripts/build.mjs",
