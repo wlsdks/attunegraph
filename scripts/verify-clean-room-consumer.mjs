@@ -54,9 +54,15 @@ function runExpectedFailure(command, args, expected, options = {}) {
   assert.doesNotMatch(output, /ERR_MODULE_NOT_FOUND|ENOENT.*pnpm-lock/u);
 }
 
-function runJsonCommand(command, args, expectedSchema, options = {}) {
+function runJsonCommand(command, args, expectedSchema, options = {}, maxOutputBytes) {
   const stdout = run(command, args, options);
   assert.notEqual(stdout.trim(), "", `${command} ${args.join(" ")} must emit JSON`);
+  if (maxOutputBytes !== undefined) {
+    assert.ok(
+      Buffer.byteLength(stdout, "utf8") <= maxOutputBytes,
+      `${command} ${args.join(" ")} must emit at most ${maxOutputBytes} bytes`
+    );
+  }
   const report = JSON.parse(stdout);
   assert.equal(report.schema, expectedSchema);
   return report;
@@ -298,6 +304,17 @@ try {
     "attunegraph-agent-decision-mixed-durable-tracer@1",
     { cwd: installedRoot }
   );
+  const workerLifecycle = runJsonCommand(
+    npm,
+    ["run", "benchmark:worker-resource-lifecycle", "--silent"],
+    "attunegraph-worker-resource-lifecycle@1",
+    { cwd: installedRoot },
+    128 * 1_024
+  );
+  assert.equal(workerLifecycle.measurementOnly, true);
+  assert.equal(workerLifecycle.claimEligible, false);
+  assert.equal(workerLifecycle.correctness.cyclesCompleted, 4);
+  assert.equal(workerLifecycle.correctness.workerHeapSamples, 12);
   const installedAlias = join(cleanRoom, "installed-alias");
   symlinkSync(installedRoot, installedAlias, process.platform === "win32" ? "junction" : "dir");
   runJsonCommand(

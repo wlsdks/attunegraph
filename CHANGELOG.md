@@ -6,6 +6,14 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add `worker-resource-lifecycle@1`, a packed measurement-only diagnostic that
+  performs one excluded preparation write followed by four identical read-only
+  public session/Worker reopen cycles. It separates whole-process RSS,
+  main-thread memory, and active-Worker isolate heap, samples after handle
+  close, waits for session-close Worker exit, binds harness/workload hashes,
+  enforces fresh DB/WAL/SHM state and a 128 KiB emitted-report cap, runs from a
+  compiler-free clean installation, and makes no leak, allocator, per-Worker
+  RSS, performance, or qualification claim.
 - Close the packed-tool boundary with source-versus-installed runtime preparation,
   complete script/Golden fixture inclusion, clean-room execution of installed
   Golden and durable tracers, explicit refusal of revision-bound evidence under
