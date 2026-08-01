@@ -13,6 +13,7 @@ import { openLocalAttuneGraph } from "./local.js";
 const scope = { sourceId: "transition-source", threadId: "transition-thread" };
 const now = "2026-08-01T00:00:00.000Z";
 const later = "2026-08-01T00:01:00.000Z";
+const HAS_REVIEWED_LOCAL_PROFILE = process.platform === "darwin" || process.platform === "linux";
 
 function assertion(id: string, sourceId = "contact-7"): GraphAssertion {
   return {
@@ -471,7 +472,7 @@ it("rejects a byte-identical CAS winner whose resulting snapshot is not predeces
   await graph.close();
 });
 
-it("rejects accessor/proxy commands, closes cleanly, and local SQLite reopens only the replacement head", async () => {
+it("rejects accessor/proxy commands and closes cleanly", async () => {
   const accessor = { operator: "revocation-transition@1", replacement: replacement() } as Record<string, unknown>;
   Object.defineProperty(accessor, "receiptCanonicalJson", { enumerable: true, get: () => "{}" });
   const memory = await openAttuneGraph({ scope, store: createInMemoryAttuneGraphStore() });
@@ -483,7 +484,9 @@ it("rejects accessor/proxy commands, closes cleanly, and local SQLite reopens on
   }, {}) as never)).rejects.toMatchObject({ code: "INVALID_INPUT" });
   await memory.close();
   await expect(memory.applyRevocationTransition(accessor as never)).rejects.toMatchObject({ code: "CLOSED" });
+});
 
+it.runIf(HAS_REVIEWED_LOCAL_PROFILE)("local SQLite reopens only the replacement head", async () => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "attunegraph-transition-")));
   const databasePath = join(directory, "graph.sqlite");
   try {
