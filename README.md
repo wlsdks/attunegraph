@@ -154,7 +154,7 @@ AttuneGraph content-binds the adapter identity, source kind, caller
 correlation, and resulting observation before one `projectAgainstHead` write.
 
 - API and ownership: [SOURCE-ADAPTERS.md](SOURCE-ADAPTERS.md)
-- Non-Muse example:
+- Standalone host-neutral example:
   [`examples/source-adapter-agent.mjs`](examples/source-adapter-agent.mjs)
 
 ## Durable local SQLite

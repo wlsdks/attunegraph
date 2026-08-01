@@ -534,7 +534,7 @@ Those remain separate qualification work.
 
 The same raw tracer can be admitted to readiness evidence only through
 `pnpm readiness:capture-measurement`. That bounded producer binds one clean
-AttuneGraph revision, the exact clean Muse gitlink consumer, canonical cwd,
+AttuneGraph revision, an exact clean consumer gitlink subject, canonical cwd,
 Node executable bytes, runtime identity, raw artifact hashes, and the
 checked-out tracer hash. The scorer revalidates the complete 100-entry ledger
 and semantic output. This is an unscored observation lane: success never

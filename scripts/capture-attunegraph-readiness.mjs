@@ -7,25 +7,65 @@ import { finished } from "node:stream/promises";
 
 import {
   createReadinessToolchain,
+  inspectReadinessConsumerSubject,
   inspectReadinessSubject,
   READINESS_CAPTURE_SCHEMA,
+  READINESS_CAPTURE_SCHEMA_V2,
   READINESS_CHECK_SCHEMA,
+  READINESS_CHECK_SCHEMA_V2,
+  READINESS_EVIDENCE_SCHEMA,
+  READINESS_EVIDENCE_SCHEMA_V2,
   READINESS_GATES,
+  READINESS_GATES_V2,
   sha256
 } from "./score-attunegraph-readiness.mjs";
 import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
 import {
   readinessCheckContract,
   readinessContractSnapshot,
+  READINESS_CONTRACT_SCHEMA,
+  READINESS_CONTRACT_SCHEMA_V2,
   validateReadinessCommandOutput
 } from "./readiness-check-contracts.mjs";
 
-const CHECKS_BY_NAME = new Map(
+const CHECKS_BY_NAME_V1 = new Map(
   READINESS_GATES.flatMap((gate) => gate.checks.map((name) => [name, gate.name]))
 );
+const CHECKS_BY_NAME_V2 = new Map(
+  READINESS_GATES_V2.flatMap((gate) => gate.checks.map((name) => [name, gate.name]))
+);
+const CAPTURE_PROFILES = Object.freeze({
+  [READINESS_EVIDENCE_SCHEMA]: Object.freeze({
+    captureSchema: READINESS_CAPTURE_SCHEMA,
+    checkSchema: READINESS_CHECK_SCHEMA,
+    checksByName: CHECKS_BY_NAME_V1,
+    consumerRole: "muse",
+    consumerRoot: "museRoot",
+    contractSchema: READINESS_CONTRACT_SCHEMA,
+    inspector: inspectReadinessSubject,
+    producer: "capture-attunegraph-readiness@1",
+    provenanceSchema: "attunegraph-readiness-provenance@1",
+    version: 1
+  }),
+  [READINESS_EVIDENCE_SCHEMA_V2]: Object.freeze({
+    captureSchema: READINESS_CAPTURE_SCHEMA_V2,
+    checkSchema: READINESS_CHECK_SCHEMA_V2,
+    checksByName: CHECKS_BY_NAME_V2,
+    consumerRole: "consumer",
+    consumerRoot: "consumerRoot",
+    contractSchema: READINESS_CONTRACT_SCHEMA_V2,
+    inspector: inspectReadinessConsumerSubject,
+    producer: "capture-attunegraph-readiness@2",
+    provenanceSchema: "attunegraph-readiness-provenance@2",
+    version: 2
+  })
+});
 const CAPTURE_ARGUMENTS = new Set([
   "attunegraph-repository",
+  "consumer-gitlink",
+  "consumer-repository",
   "cwd",
+  "evidence-schema",
   "muse-gitlink",
   "muse-repository",
   "name",
@@ -35,7 +75,6 @@ const CAPTURE_ARGUMENTS = new Set([
 const REQUIRED_ARGUMENTS = new Set([
   "attunegraph-repository",
   "cwd",
-  "muse-repository",
   "name",
   "output-directory"
 ]);
@@ -65,10 +104,26 @@ export function parseReadinessCaptureArguments(args) {
   for (const required of REQUIRED_ARGUMENTS) {
     if (!values.has(required)) captureError(`--${required} is required`);
   }
+  const evidenceSchema = values.get("evidence-schema") ?? READINESS_EVIDENCE_SCHEMA;
+  const profile = CAPTURE_PROFILES[evidenceSchema];
+  if (!profile) captureError(`unsupported readiness evidence schema: ${evidenceSchema}`);
+  if (profile.version === 1) {
+    if (values.has("consumer-repository") || values.has("consumer-gitlink")) {
+      captureError("must not mix V1 Muse and V2 consumer arguments");
+    }
+    if (!values.has("muse-repository")) captureError("--muse-repository is required");
+  } else {
+    if (values.has("muse-repository") || values.has("muse-gitlink")) {
+      captureError("must not mix V1 Muse and V2 consumer arguments");
+    }
+    for (const required of ["consumer-repository", "consumer-gitlink"]) {
+      if (!values.has(required)) captureError(`--${required} is required`);
+    }
+  }
   const name = values.get("name");
-  const gate = CHECKS_BY_NAME.get(name);
+  const gate = profile.checksByName.get(name);
   if (!gate) captureError(`unknown readiness check: ${name}`);
-  const contract = readinessCheckContract(name);
+  const contract = readinessCheckContract(name, profile.contractSchema);
   if (!contract || contract.gate !== gate) captureError(`missing fixed contract for check: ${name}`);
   const producerMode = values.get("producer-mode") ?? "local-unattested";
   if (producerMode !== "local-unattested") {
@@ -82,17 +137,57 @@ export function parseReadinessCaptureArguments(args) {
       captureError(`argv does not match the fixed contract for check ${name}`);
     }
   }
-  return Object.freeze({
+  const common = {
     argv: Object.freeze(argv),
     attunegraphRepository: values.get("attunegraph-repository"),
     cwd: values.get("cwd"),
     gate,
-    museGitlinkPath: values.get("muse-gitlink") ?? "packages/attunegraph",
-    museRepository: values.get("muse-repository"),
     name,
     outputDirectory: values.get("output-directory"),
     producerMode
+  };
+  return Object.freeze(profile.version === 1 ? {
+    argv: common.argv,
+    attunegraphRepository: common.attunegraphRepository,
+    cwd: common.cwd,
+    gate: common.gate,
+    museGitlinkPath: values.get("muse-gitlink") ?? "packages/attunegraph",
+    museRepository: values.get("muse-repository"),
+    name: common.name,
+    outputDirectory: common.outputDirectory,
+    producerMode: common.producerMode
+  } : {
+    ...common,
+    consumerGitlinkPath: values.get("consumer-gitlink"),
+    consumerRepository: values.get("consumer-repository"),
+    evidenceSchema
   });
+}
+
+function captureProfile(options) {
+  const evidenceSchema = options.evidenceSchema ?? READINESS_EVIDENCE_SCHEMA;
+  const profile = CAPTURE_PROFILES[evidenceSchema];
+  if (!profile) captureError(`unsupported readiness evidence schema: ${evidenceSchema}`);
+  if (
+    (profile.version === 1 && (
+      options.consumerRepository !== undefined || options.consumerGitlinkPath !== undefined
+    ))
+    || (profile.version === 2 && (
+      options.museRepository !== undefined || options.museGitlinkPath !== undefined
+    ))
+  ) {
+    captureError("must not mix V1 Muse and V2 consumer arguments");
+  }
+  if (profile.version === 1 && options.museRepository === undefined) {
+    captureError("V1 capture requires a Muse repository");
+  }
+  if (
+    profile.version === 2
+    && (options.consumerRepository === undefined || options.consumerGitlinkPath === undefined)
+  ) {
+    captureError("V2 capture requires a consumer repository and gitlink");
+  }
+  return profile;
 }
 
 function sameSubject(left, right) {
@@ -140,7 +235,8 @@ async function executeToFiles(executablePath, args, cwd, stdoutPath, stderrPath)
 }
 
 export async function captureReadinessCheck(options) {
-  const before = inspectReadinessSubject(options);
+  const profile = captureProfile(options);
+  const before = profile.inspector(options);
   const lexicalCwd = resolve(options.cwd);
   let cwd;
   try {
@@ -150,9 +246,11 @@ export async function captureReadinessCheck(options) {
   } catch (error) {
     captureError(`cwd cannot be resolved: ${error.message}`);
   }
-  const contract = readinessCheckContract(options.name);
+  const contract = readinessCheckContract(options.name, profile.contractSchema);
   if (!contract || contract.gate !== options.gate) captureError(`missing fixed contract for check: ${options.name}`);
-  const expectedCwd = contract.cwdRole === "muse" ? before.museRoot : before.attunegraphRoot;
+  const expectedCwd = contract.cwdRole === profile.consumerRole
+    ? before[profile.consumerRoot]
+    : before.attunegraphRoot;
   if (cwd !== expectedCwd) {
     captureError(`cwd must be the canonical ${contract.cwdRole} repository root for check ${options.name}`);
   }
@@ -197,7 +295,7 @@ export async function captureReadinessCheck(options) {
       startedAt: observedAt
     };
   }
-  const after = inspectReadinessSubject(options);
+  const after = profile.inspector(options);
   if (!sameSubject(before.subject, after.subject)) {
     captureError("repository subjects changed while the command was running");
   }
@@ -236,10 +334,10 @@ export async function captureReadinessCheck(options) {
     provenance: {
       captureScriptSha256,
       kind: "local-unattested",
-      producer: "capture-attunegraph-readiness@1",
-      schema: "attunegraph-readiness-provenance@1"
+      producer: profile.producer,
+      schema: profile.provenanceSchema
     },
-    schema: READINESS_CHECK_SCHEMA,
+    schema: profile.checkSchema,
     signal: outcome.signal,
     spawnError: semanticError === null ? outcome.spawnError : `INVALID_OUTPUT: ${semanticError}`,
     startedAt: outcome.startedAt,
@@ -266,7 +364,7 @@ export async function captureReadinessCheck(options) {
         sha256: sha256(resultBody)
       })
     }),
-    schema: READINESS_CAPTURE_SCHEMA,
+    schema: profile.captureSchema,
     subject: before.subject
   });
 }

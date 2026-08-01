@@ -10,6 +10,7 @@ import {
   verifyWorkingGraphGoldenDocument
 } from "./verify-working-graph-golden-corpus.mjs";
 import { runWorkingGraphReadiness } from "./run-working-graph-readiness.mjs";
+import { READINESS_CONTRACT_SCHEMA_V2 } from "./readiness-check-contracts.mjs";
 
 const ENTRYPOINT = fileURLToPath(
   new URL("./verify-working-graph-golden-corpus.mjs", import.meta.url)
@@ -102,4 +103,16 @@ describe("Working Graph golden corpus", () => {
       });
     }
   );
+
+  it("selects the V2 envelope contract while preserving the raw @1 output schema", async () => {
+    await expect(runWorkingGraphReadiness(
+      "working-graph-golden-corpus",
+      READINESS_CONTRACT_SCHEMA_V2
+    )).resolves.toMatchObject({
+      check: "working-graph-golden-corpus",
+      contractId: "attunegraph-readiness-check-contract@2:working-graph-golden-corpus",
+      passed: true,
+      schema: "attunegraph-readiness-command-output@1"
+    });
+  });
 });

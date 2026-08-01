@@ -171,4 +171,4 @@ temporary file URLs as evidence identity. See the official Notion
 - The SDK does not retry extraction or graph writes.
 
 See [`examples/source-adapter-agent.mjs`](examples/source-adapter-agent.mjs) for
-a runnable non-Muse consumer.
+a runnable host-neutral consumer.

@@ -6,6 +6,11 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add the recommended host-neutral readiness `@2` profile: subject-bearing
+  evidence names an exact `consumer` gitlink and uses generic consumer CLI,
+  gate, and cwd contracts. The existing Muse-shaped `@1` profile remains a
+  frozen compatibility profile rather than being silently reinterpreted; Muse
+  is now only an optional dogfood consumer, not a standalone product contract.
 - Add `revocation-transition@1`: a source-authoritative, exact-head V2
   replacement protocol that re-admits a complete canonical impact receipt,
   recomputes it at hard bounds, requires exact survivor subtraction and an

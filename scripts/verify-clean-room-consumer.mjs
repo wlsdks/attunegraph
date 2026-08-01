@@ -156,6 +156,19 @@ assert.equal(parseReadinessCaptureArguments([
   "--cwd=/tmp/attunegraph",
   "--"
 ]).name, "inspect");
+const v2CaptureArguments = parseReadinessCaptureArguments([
+  "--evidence-schema=attunegraph-readiness-evidence@2",
+  "--name=submodule-pinned",
+  "--output-directory=/tmp/evidence-v2",
+  "--attunegraph-repository=/tmp/attunegraph",
+  "--consumer-repository=/tmp/consumer",
+  "--consumer-gitlink=vendor/attunegraph",
+  "--cwd=/tmp/consumer",
+  "--"
+]);
+assert.equal(v2CaptureArguments.gate, "consumer-integration");
+assert.equal(v2CaptureArguments.consumerRepository, "/tmp/consumer");
+assert.equal("museRepository" in v2CaptureArguments, false);
 
 const { parseReadinessMeasurementCaptureArguments } = await import(
   pathToFileURL(resolve(installedRoot, "scripts/capture-attunegraph-measurement.mjs")).href
@@ -172,6 +185,35 @@ assert.equal(parseReadinessMeasurementCaptureArguments([
   "node",
   "scripts/benchmark-attunegraph-agent-decision-mixed-durable.mjs"
 ]).name, "mixed-durable-agent-decision-observation");
+const v2MeasurementArguments = parseReadinessMeasurementCaptureArguments([
+  "--evidence-schema=attunegraph-readiness-evidence@2",
+  "--name=mixed-durable-agent-decision-observation",
+  "--producer-mode=local-unattested",
+  "--output-directory=/tmp/measurements-v2",
+  "--attunegraph-repository=/tmp/attunegraph",
+  "--consumer-repository=/tmp/consumer",
+  "--consumer-gitlink=vendor/attunegraph",
+  "--cwd=/tmp/attunegraph",
+  "--",
+  "node",
+  "scripts/benchmark-attunegraph-agent-decision-mixed-durable.mjs"
+]);
+assert.equal(v2MeasurementArguments.consumerGitlinkPath, "vendor/attunegraph");
+assert.equal("museRepository" in v2MeasurementArguments, false);
+
+const { parseReadinessArguments } = await import(
+  pathToFileURL(resolve(installedRoot, "scripts/score-attunegraph-readiness.mjs")).href
+);
+const v2ScorerArguments = parseReadinessArguments([
+  "--as-of=2026-07-31T00:00:00.000Z",
+  "--evidence=/tmp/evidence-v2/readiness-evidence.json",
+  "--attunegraph-repository=/tmp/attunegraph",
+  "--evidence-schema=attunegraph-readiness-evidence@2",
+  "--consumer-repository=/tmp/consumer",
+  "--consumer-gitlink=vendor/attunegraph"
+]);
+assert.equal(v2ScorerArguments.consumerRepository, "/tmp/consumer");
+assert.equal("museRepository" in v2ScorerArguments, false);
 
 await assert.rejects(
   import("@attunegraph/core/attunegraph-engine"),
