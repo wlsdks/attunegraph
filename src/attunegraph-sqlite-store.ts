@@ -34,6 +34,23 @@ export interface SqliteAttuneGraphTestInspection {
   readonly maxGeneration: number;
 }
 
+export interface SqliteWorkerHeapStatistics {
+  readonly detachedContexts: number;
+  readonly externalMemoryBytes: number;
+  readonly heapSizeLimitBytes: number;
+  readonly mallocedMemoryBytes: number;
+  readonly nativeContexts: number;
+  readonly peakMallocedMemoryBytes: number;
+  readonly totalAvailableSizeBytes: number;
+  readonly totalGlobalHandlesSizeBytes: number;
+  readonly totalHeapSizeBytes: number;
+  readonly totalHeapSizeExecutableBytes: number;
+  readonly totalPhysicalSizeBytes: number;
+  readonly usedGlobalHandlesSizeBytes: number;
+  readonly usedHeapSizeBytes: number;
+  readonly zapGarbage: boolean;
+}
+
 /** Internal deterministic lifecycle instrumentation; never exported from ./local. */
 export interface SqliteAttuneGraphTestHooks {
   workerStarted?(): void;
@@ -73,6 +90,8 @@ export interface OpenedSqliteAttuneGraphStore {
   holdWriteLockForTesting(durationMs: number): Promise<void>;
   /** Internal physical-state fixture; never exported from the public local subpath. */
   inspectForTesting(): Promise<SqliteAttuneGraphTestInspection>;
+  /** Package-owned measurement probe; never exported from the public local subpath. */
+  inspectWorkerHeapStatisticsForMeasurement(): Promise<SqliteWorkerHeapStatistics>;
 }
 
 function storeFailure(message: string, cause?: unknown): AttuneGraphError {
@@ -595,6 +614,81 @@ export async function openSqliteAttuneGraphStore(
       maxGeneration: response.maxGeneration as number
     });
   };
+  const inspectWorkerHeapStatisticsForMeasurement = (): Promise<SqliteWorkerHeapStatistics> =>
+    begin(async () => {
+      const statistics: unknown = await worker.getHeapStatistics();
+      if (statistics === null || typeof statistics !== "object" || Array.isArray(statistics)) {
+        return rejectAfterFailStop(
+          storeFailure("local AttuneGraph worker returned invalid heap statistics")
+        );
+      }
+      const raw = statistics as Record<string, unknown>;
+      const number = (key: string): number | undefined => {
+        const value = raw[key];
+        return Number.isSafeInteger(value) && (value as number) >= 0
+          ? value as number
+          : undefined;
+      };
+      const detachedContexts = number("number_of_detached_contexts");
+      const externalMemoryBytes = number("external_memory");
+      const heapSizeLimitBytes = number("heap_size_limit");
+      const mallocedMemoryBytes = number("malloced_memory");
+      const nativeContexts = number("number_of_native_contexts");
+      const peakMallocedMemoryBytes = number("peak_malloced_memory");
+      const totalAvailableSizeBytes = number("total_available_size");
+      const totalGlobalHandlesSizeBytes = number("total_global_handles_size");
+      const totalHeapSizeBytes = number("total_heap_size");
+      const totalHeapSizeExecutableBytes = number("total_heap_size_executable");
+      const totalPhysicalSizeBytes = number("total_physical_size");
+      const usedGlobalHandlesSizeBytes = number("used_global_handles_size");
+      const usedHeapSizeBytes = number("used_heap_size");
+      if (
+        detachedContexts === undefined
+        || externalMemoryBytes === undefined
+        || heapSizeLimitBytes === undefined
+        || mallocedMemoryBytes === undefined
+        || nativeContexts === undefined
+        || peakMallocedMemoryBytes === undefined
+        || totalAvailableSizeBytes === undefined
+        || totalGlobalHandlesSizeBytes === undefined
+        || totalHeapSizeBytes === undefined
+        || totalHeapSizeExecutableBytes === undefined
+        || totalPhysicalSizeBytes === undefined
+        || usedGlobalHandlesSizeBytes === undefined
+        || usedHeapSizeBytes === undefined
+      ) {
+        return rejectAfterFailStop(
+          storeFailure("local AttuneGraph worker returned invalid heap statistics")
+        );
+      }
+      const rawZapGarbage = raw.does_zap_garbage;
+      const zapGarbage = rawZapGarbage === true || rawZapGarbage === 1
+        ? true
+        : rawZapGarbage === false || rawZapGarbage === 0
+          ? false
+          : undefined;
+      if (zapGarbage === undefined) {
+        return rejectAfterFailStop(
+          storeFailure("local AttuneGraph worker returned invalid heap statistics")
+        );
+      }
+      return Object.freeze({
+        detachedContexts,
+        externalMemoryBytes,
+        heapSizeLimitBytes,
+        mallocedMemoryBytes,
+        nativeContexts,
+        peakMallocedMemoryBytes,
+        totalAvailableSizeBytes,
+        totalGlobalHandlesSizeBytes,
+        totalHeapSizeBytes,
+        totalHeapSizeExecutableBytes,
+        totalPhysicalSizeBytes,
+        usedGlobalHandlesSizeBytes,
+        usedHeapSizeBytes,
+        zapGarbage
+      });
+    });
 
   return Object.freeze({
     backend,
@@ -603,6 +697,7 @@ export async function openSqliteAttuneGraphStore(
     terminateForTesting,
     mutateForTesting,
     holdWriteLockForTesting,
-    inspectForTesting
+    inspectForTesting,
+    inspectWorkerHeapStatisticsForMeasurement
   });
 }

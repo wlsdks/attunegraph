@@ -265,7 +265,7 @@ GitHub latency is always advisory. Absolute RSS policy math checks both the
 packaged byte ceiling and 50% of reported host memory.
 
 ```sh
-# Qualification gate: v1 local evidence is unattested, so this exits nonzero.
+# Qualification gate: current local evidence is unattested, so this exits nonzero.
 pnpm performance:regression -- \
   --manifest=/absolute/evidence/performance-regression-manifest.json
 
@@ -284,7 +284,7 @@ authority. The default qualification command consequently exits 1. The
 explicit advisory command exits 0 only for the packaged shared-GitHub class
 when strict evidence integrity and the self-reported RSS policy both pass.
 
-V1 deliberately records the remaining limits instead of implying attestation:
+The current contract deliberately records the remaining limits instead of implying attestation:
 the AB/BA plan and attempt ledger, artifact/output identities, host/runtime/
 harness/corpus identities, and scalar RSS are self-reported. There is no
 signature, append-only precommit service, dedicated-runner attestation, raw
@@ -540,6 +540,46 @@ checked-out tracer hash. The scorer revalidates the complete 100-entry ledger
 and semantic output. This is an unscored observation lane: success never
 changes the eight readiness gates, fills the separate `concurrency` contract,
 or creates a performance qualification.
+
+## Worker resource lifecycle tracer
+
+`worker-resource-lifecycle@1` is a bounded local diagnostic for the public
+session/Worker lifecycle. On a reviewed Linux/macOS host with Node 24.15 or
+newer, run:
+
+```sh
+pnpm --silent benchmark:worker-resource-lifecycle
+```
+
+The command owns a mode-0700 temporary directory, requires a new canonical
+database path with no DB/WAL/SHM entry, prints at most 128 KiB of JSON, and
+removes its database after output. The same tool is shipped in the npm tarball
+and runs from a clean offline installation without a TypeScript compiler or a
+source checkout.
+
+One excluded preparation session writes generation 1 and verifies the fixed
+16-active/8-expired result. Four measured cycles then open independent public
+sessions and Workers over that prepared database and perform only `head()` plus
+one `working-graph@1` read. Every cycle requires byte-exact head stability and
+the same ordered semantic result. A graph-handle close is followed by another
+Worker-isolate heap sample, proving the handle did not own the Worker; session
+close then resolves only after the adapter's close acknowledgement and Worker
+exit contract.
+
+Memory scopes are deliberately separate. `wholeProcess` contains RSS and peak
+RSS for the Node process, including any active Worker. `mainThread` contains
+the non-RSS fields returned by `process.memoryUsage()` on the calling thread.
+`workerHeap` comes from `Worker.getHeapStatistics()` for the active Worker V8
+isolate. There is no post-session-close Worker sample because that Worker has
+terminated. The report binds exact harness/workload hashes and runtime identity
+but remains `unattested-local-process`, `measurementOnly: true`, and
+`claimEligible: false`.
+
+This diagnostic does not measure or infer per-Worker RSS, native SQLite total
+allocation, forced-GC recovery, allocator fragmentation/release, OS page-cache
+effects, leak slope, cold-process behavior, sustained load, production hosts,
+latency/throughput qualification, tails, or an SLA. It is intentionally not a
+readiness score input yet.
 
 ## Agent decision-read active scale
 

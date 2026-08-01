@@ -14,7 +14,8 @@ import { openAttuneGraph } from "./attunegraph-engine.js";
 import { AttuneGraphError } from "./attunegraph-error.js";
 import {
   openSqliteAttuneGraphStore,
-  type OpenSqliteAttuneGraphStoreOptions
+  type OpenSqliteAttuneGraphStoreOptions,
+  type SqliteWorkerHeapStatistics
 } from "./attunegraph-sqlite-store.js";
 
 export interface OpenLocalAttuneGraphSessionOptions {
@@ -28,6 +29,24 @@ export interface OpenLocalAttuneGraphHandleOptions {
 export interface LocalAttuneGraphSession {
   open(options: OpenLocalAttuneGraphHandleOptions): Promise<AttuneGraph>;
   close(): Promise<void>;
+}
+
+const workerHeapMeasurementProbes = new WeakMap<
+  LocalAttuneGraphSession,
+  () => Promise<SqliteWorkerHeapStatistics>
+>();
+
+/** Package-owned measurement probe; absent from the public local contract and object shape. */
+export function inspectLocalSessionWorkerHeapStatisticsForMeasurement(
+  session: LocalAttuneGraphSession
+): Promise<SqliteWorkerHeapStatistics> {
+  const probe = workerHeapMeasurementProbes.get(session);
+  if (probe === undefined) {
+    return Promise.reject(
+      new AttuneGraphError("INVALID_INPUT", "worker heap measurement requires a local session")
+    );
+  }
+  return probe();
 }
 
 export interface OpenLocalAttuneGraphSessionForTestingOptions
@@ -190,7 +209,7 @@ async function openLocalAttuneGraphSessionWithStoreOptions(
     }
   });
 
-  return Object.freeze({
+  const session = {
     open(handleOptions: OpenLocalAttuneGraphHandleOptions): Promise<AttuneGraph> {
       if (lifecycle !== "open") return rejectClosed<AttuneGraph>();
       let normalizedHandle: OpenLocalAttuneGraphHandleOptions;
@@ -223,7 +242,12 @@ async function openLocalAttuneGraphSessionWithStoreOptions(
       });
       return closePromise;
     }
-  });
+  } satisfies LocalAttuneGraphSession;
+  workerHeapMeasurementProbes.set(
+    session,
+    () => resource.inspectWorkerHeapStatisticsForMeasurement()
+  );
+  return Object.freeze(session);
 }
 
 export function openLocalAttuneGraphSession(
