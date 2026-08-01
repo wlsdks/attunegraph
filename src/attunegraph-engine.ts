@@ -4,9 +4,14 @@ import {
   CANONICAL_IMMUTABLE_ENVELOPE_LIMITS,
   CanonicalImmutableEnvelopeError,
   canonicalizeImmutableEnvelope,
+  mintCanonicalImmutableEnvelopeFromFrozenUnsignedForInternalUse,
   type CanonicalImmutableEnvelopeResult
 } from "./canonical-immutable-envelope.js";
-import { ACTIVATION_PREDICATES, MAX_ACTIVATION_ESTIMATED_TOKENS } from "./constants.js";
+import {
+  ACTIVATION_PREDICATES,
+  GRAPH_ASSERTION_SOURCE_NAMESPACE,
+  MAX_ACTIVATION_ESTIMATED_TOKENS
+} from "./constants.js";
 import { AttuneGraphError } from "./attunegraph-error.js";
 import type { AttuneGraphStoredProjection } from "./attunegraph-backend.js";
 import type {
@@ -17,12 +22,21 @@ import type {
   AttuneGraphProjectCommand,
   AttuneGraphRevocationImpactCommand,
   AttuneGraphRevocationImpactResult,
+  AttuneGraphRevocationTransitionCommand,
+  AttuneGraphRevocationTransitionReceipt,
+  AttuneGraphRevocationTransitionResult,
   AttuneGraphScope,
   AttuneGraphSnapshot,
   AttuneGraphSourceFreshness,
+  AttuneGraphSourceObservationV2,
   OpenAttuneGraphOptions
 } from "./attunegraph-contracts.js";
-import { compileRevocationImpact, normalizeRevocationImpactCommand } from "./revocation-impact.js";
+import {
+  admitRevocationImpactReceiptCanonicalJson,
+  compileRevocationImpact,
+  matchesRevocationSelector,
+  normalizeRevocationImpactCommand
+} from "./revocation-impact.js";
 import { registeredAttuneGraphStoreBackend } from "./attunegraph-store-internal.js";
 import { graphRefKey, instantEpoch, normalizeGraphAssertionBatch } from "./validation.js";
 import type { GraphAssertion, GraphRef } from "./types.js";
@@ -35,16 +49,28 @@ const MAX_STORED_PROJECTION_TEXT =
   CANONICAL_IMMUTABLE_ENVELOPE_LIMITS.maxStringCodeUnits;
 const MAX_STORED_PROJECTION_BYTES =
   CANONICAL_IMMUTABLE_ENVELOPE_LIMITS.maxStringBytes;
+const transitionReceiptSpec = Object.freeze({
+  hashDomain: "attunegraph.revocation-transition.v1",
+  idField: "receiptId",
+  idPrefix: "attunegraph-revocation-transition:"
+} as const);
 
 type DataRecord = Record<string, unknown>;
 
 interface NormalizedObservation {
+  readonly hasDuplicateAssertionIds: boolean;
   readonly assertionFingerprint: string;
   readonly assertions: readonly GraphAssertion[];
   readonly canonicalProjection: string;
   readonly observationId: string;
   readonly observedAt: string;
   readonly sourceFreshness: AttuneGraphSourceFreshness;
+  readonly threadRoot?: GraphRef;
+}
+
+interface NormalizedRevocationTransition {
+  readonly impactReceipt: ReturnType<typeof admitRevocationImpactReceiptCanonicalJson>;
+  readonly replacement: NormalizedObservation;
 }
 
 function attuneGraphError(code: AttuneGraphError["code"], message: string, options?: ErrorOptions): never {
@@ -202,13 +228,16 @@ function normalizedObservationFromEnvelope(
   const observedScope = normalizeAttuneGraphScope(input.scope, "source observation.scope", code);
   if (!sameScope(observedScope, expectedScope)) attuneGraphError(code === "INVALID_INPUT" ? "INVALID_SCOPE" : code, "source observation must match the opened scope");
   if (!Array.isArray(input.assertions)) attuneGraphError(code, "source observation.assertions must be an array");
-  let assertions: readonly GraphAssertion[];
+  let normalizedAssertions: readonly GraphAssertion[];
   try {
-    assertions = dedupeAssertions(normalizeGraphAssertionBatch(input.assertions), code);
+    normalizedAssertions = normalizeGraphAssertionBatch(input.assertions);
   } catch (cause) {
     if (cause instanceof AttuneGraphError) throw cause;
     throw new AttuneGraphError(code, "source observation assertions are invalid", { cause });
   }
+  const hasDuplicateAssertionIds = new Set(normalizedAssertions.map((assertion) => assertion.id)).size !== normalizedAssertions.length;
+  const assertions = dedupeAssertions(normalizedAssertions, code);
+  let threadRoot: GraphRef | undefined;
   if (version === 2) {
     const rootInput = record(
       input.threadRoot,
@@ -220,7 +249,7 @@ function normalizedObservationFromEnvelope(
     if (rootInput.kind !== "thread") {
       attuneGraphError(code, "source observation.threadRoot.kind must be thread");
     }
-    const threadRoot = Object.freeze({
+    threadRoot = Object.freeze({
       id: text(rootInput.id, "source observation.threadRoot.id", code),
       kind: "thread" as const
     });
@@ -233,12 +262,14 @@ function normalizedObservationFromEnvelope(
   const derivedId = text(input.observationId, "source observation.observationId", code);
   if (derivedId !== observationId) attuneGraphError(code, "source observation content identifier mismatches its canonical envelope");
   return Object.freeze({
+    hasDuplicateAssertionIds,
     assertionFingerprint: JSON.stringify(assertions),
     assertions,
     canonicalProjection,
     observationId,
     observedAt: instant(input.observedAt, "source observation.observedAt", code),
-    sourceFreshness: freshness(input.sourceFreshness, "source observation.sourceFreshness", code)
+    sourceFreshness: freshness(input.sourceFreshness, "source observation.sourceFreshness", code),
+    ...(threadRoot === undefined ? {} : { threadRoot })
   });
 }
 
@@ -318,6 +349,121 @@ function normalizeProjectAgainstHead(
     );
   }
   return observation;
+}
+
+function normalizeRevocationTransition(
+  value: unknown,
+  expectedScope: AttuneGraphScope
+): NormalizedRevocationTransition {
+  const input = record(
+    value,
+    "revocation transition command",
+    ["operator", "receiptCanonicalJson", "replacement"],
+    ["operator", "receiptCanonicalJson", "replacement"]
+  );
+  if (input.operator !== "revocation-transition@1") {
+    attuneGraphError("UNSUPPORTED_OPERATOR", "applyRevocationTransition supports revocation-transition@1");
+  }
+  const impactReceipt = admitRevocationImpactReceiptCanonicalJson(input.receiptCanonicalJson);
+  if (impactReceipt.status !== "complete" || impactReceipt.snapshot === null) {
+    attuneGraphError("INVALID_INPUT", "revocation transition requires a complete non-empty impact receipt");
+  }
+  if (!sameScope(impactReceipt.snapshot.scope, expectedScope)) {
+    attuneGraphError("INVALID_SCOPE", "revocation impact receipt must match the opened scope");
+  }
+  const replacement = record(
+    input.replacement,
+    "revocation transition command.replacement",
+    ["operator", "observation"],
+    ["operator", "observation"]
+  );
+  if (replacement.operator !== "canonical-projection@2") {
+    attuneGraphError("UNSUPPORTED_OPERATOR", "revocation transition replacement must use canonical-projection@2");
+  }
+  const normalizedReplacement = normalizeProjectAgainstHead(
+    Object.freeze({ operator: "canonical-projection@2" as const, observation: replacement.observation as AttuneGraphSourceObservationV2 }),
+    expectedScope
+  );
+  if (normalizedReplacement.hasDuplicateAssertionIds) {
+    attuneGraphError("INVALID_INPUT", "revocation transition replacement must not contain duplicate assertion IDs");
+  }
+  if (
+    normalizedReplacement.sourceFreshness.state !== "fresh"
+    || normalizedReplacement.sourceFreshness.observedAt !== normalizedReplacement.observedAt
+  ) {
+    attuneGraphError("INVALID_INPUT", "revocation transition replacement must be fresh at its observation time");
+  }
+  return Object.freeze({ impactReceipt, replacement: normalizedReplacement });
+}
+
+function exactV2ThreadRoot(projection: AttuneGraphStoredProjection): GraphRef {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(projection.canonicalProjection);
+  } catch (cause) {
+    throw new AttuneGraphError("CORRUPT_STORE", "stored canonical projection is invalid JSON", { cause });
+  }
+  const observation = record(
+    parsed,
+    "stored canonical projection",
+    ["schemaVersion", "observationId", "observationKey", "scope", "threadRoot", "observedAt", "sourceFreshness", "assertions"],
+    ["schemaVersion", "observationId", "observationKey", "scope", "observedAt", "sourceFreshness", "assertions"],
+    "CORRUPT_STORE"
+  );
+  if (observation.schemaVersion !== 2) {
+    attuneGraphError("SNAPSHOT_CONFLICT", "revocation transition requires a canonical-projection@2 predecessor");
+  }
+  const root = record(observation.threadRoot, "stored canonical projection.threadRoot", ["id", "kind"], ["id", "kind"], "CORRUPT_STORE");
+  if (root.kind !== "thread") attuneGraphError("CORRUPT_STORE", "stored canonical projection.threadRoot is invalid");
+  return Object.freeze({ id: text(root.id, "stored canonical projection.threadRoot.id", "CORRUPT_STORE"), kind: "thread" });
+}
+
+function sameGraphRef(left: GraphRef, right: GraphRef): boolean {
+  return left.id === right.id && left.kind === right.kind;
+}
+
+function sameAssertions(left: readonly GraphAssertion[], right: readonly GraphAssertion[]): boolean {
+  if (left.length !== right.length) return false;
+  for (let index = 0; index < left.length; index += 1) {
+    if (left[index]?.id !== right[index]?.id || JSON.stringify(left[index]) !== JSON.stringify(right[index])) return false;
+  }
+  return true;
+}
+
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object") {
+    for (const key of Reflect.ownKeys(value)) deepFreeze((value as Record<PropertyKey, unknown>)[key]);
+    Object.freeze(value);
+  }
+  return value;
+}
+
+function sealRevocationTransitionReceipt(
+  scope: AttuneGraphScope,
+  planReceiptId: string,
+  priorSnapshot: AttuneGraphSnapshot,
+  replacementObservationId: string,
+  resultSnapshot: AttuneGraphSnapshot,
+  plannedImpactIds: readonly string[],
+  preservedSurvivorCount: number
+): AttuneGraphRevocationTransitionReceipt {
+  const unsigned = deepFreeze({
+    contractRevision: 1 as const,
+    scope: Object.freeze({ ...scope }),
+    planReceiptId,
+    priorSnapshot: freezeSnapshot(priorSnapshot),
+    replacementObservationId,
+    resultSnapshot: freezeSnapshot(resultSnapshot),
+    plannedImpactIds: Object.freeze([...plannedImpactIds]),
+    preservedSurvivorCount,
+    zeroResidueProof: Object.freeze({ impactIds: 0 as const, selectorMatches: 0 as const, witnessAssertionRefs: 0 as const })
+  });
+  try {
+    const minted = mintCanonicalImmutableEnvelopeFromFrozenUnsignedForInternalUse(unsigned, transitionReceiptSpec);
+    return Object.freeze({ ...minted.envelope, canonicalJson: minted.canonicalJson }) as unknown as AttuneGraphRevocationTransitionReceipt;
+  } catch (cause) {
+    throw new AttuneGraphError("CORRUPT_STORE", "revocation transition receipt could not be sealed", { cause });
+  }
 }
 
 function safeRef(value: unknown): GraphRef {
@@ -832,6 +978,126 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
       return begin(async () => {
         const normalized = normalizeRevocationImpactCommand(command);
         return compileRevocationImpact(await readHeadPinnedProjection(), normalized);
+      });
+    },
+    applyRevocationTransition(
+      command: AttuneGraphRevocationTransitionCommand
+    ): Promise<AttuneGraphRevocationTransitionResult> {
+      return begin(async () => {
+        // Both untrusted public inputs are fully admitted before any Store I/O.
+        const normalized = normalizeRevocationTransition(command, openedScope);
+        const receiptSnapshot = normalized.impactReceipt.snapshot;
+        const predecessor = await readHeadPinnedProjection();
+        if (
+          predecessor === undefined
+          || receiptSnapshot === null
+          || !sameSnapshot(predecessor.snapshot, receiptSnapshot)
+        ) {
+          attuneGraphError("SNAPSHOT_CONFLICT", "revocation impact receipt does not name the exact current head");
+        }
+        const predecessorRoot = exactV2ThreadRoot(predecessor);
+        if (
+          normalized.replacement.threadRoot === undefined
+          || !sameGraphRef(predecessorRoot, normalized.replacement.threadRoot)
+        ) {
+          attuneGraphError("INVALID_INPUT", "revocation transition replacement must preserve the predecessor thread root");
+        }
+        if (Date.parse(normalized.replacement.observedAt) <= Date.parse(predecessor.observedAt)) {
+          attuneGraphError("SNAPSHOT_CONFLICT", "revocation transition replacement must be newer than its predecessor");
+        }
+        const recomputed = compileRevocationImpact(
+          predecessor,
+          normalizeRevocationImpactCommand({
+            operator: "revocation-impact@1",
+            selector: normalized.impactReceipt.selector,
+            maxAssertions: 16,
+            maxConsideredAssertions: 4096
+          })
+        );
+        if (
+          recomputed.status !== "complete"
+          || recomputed.receipt.canonicalJson !== normalized.impactReceipt.canonicalJson
+        ) {
+          attuneGraphError("SNAPSHOT_CONFLICT", "revocation impact receipt is not the complete exact-head plan");
+        }
+        const plannedImpactIds = Object.freeze(recomputed.impacts.map((impact) => impact.assertionId));
+        const impactIds = new Set(plannedImpactIds);
+        const expectedSurvivors = predecessor.assertions.filter((assertion) => !impactIds.has(assertion.id));
+        if (!sameAssertions(expectedSurvivors, normalized.replacement.assertions)) {
+          attuneGraphError("INVALID_INPUT", "revocation transition replacement must equal the exact predecessor survivor set");
+        }
+        const witnessAssertionIds = new Set(
+          recomputed.impacts.flatMap((impact) => impact.witnessAssertionIds)
+        );
+        const residueCounts = normalized.replacement.assertions.reduce<{
+          impactIds: number;
+          selectorMatches: number;
+          witnessAssertionRefs: number;
+        }>(
+          (counts, assertion) => Object.freeze({
+            impactIds: counts.impactIds + (impactIds.has(assertion.id) ? 1 : 0),
+            selectorMatches: counts.selectorMatches + (matchesRevocationSelector(recomputed.selector, assertion) ? 1 : 0),
+            witnessAssertionRefs: counts.witnessAssertionRefs + assertion.sourceRefs.filter(
+              (source) => source.namespace === GRAPH_ASSERTION_SOURCE_NAMESPACE && witnessAssertionIds.has(source.id)
+            ).length
+          }),
+          { impactIds: 0, selectorMatches: 0, witnessAssertionRefs: 0 }
+        );
+        if (
+          residueCounts.impactIds !== 0
+          || residueCounts.selectorMatches !== 0
+          || residueCounts.witnessAssertionRefs !== 0
+        ) {
+          attuneGraphError("INVALID_INPUT", "revocation transition replacement leaves planned revocation residue");
+        }
+        const nextSnapshot = Object.freeze({
+          schemaVersion: 1 as const,
+          scope: Object.freeze({ ...openedScope }),
+          generation: predecessor.snapshot.generation + 1,
+          commitId: `attunegraph-commit:${normalized.replacement.observationId}`
+        });
+        const proposed: AttuneGraphStoredProjection = Object.freeze({
+          schemaVersion: 1,
+          snapshot: nextSnapshot,
+          observationId: normalized.replacement.observationId,
+          canonicalProjection: normalized.replacement.canonicalProjection,
+          projectionFingerprint: normalized.replacement.observationId,
+          observedAt: normalized.replacement.observedAt,
+          sourceFreshness: Object.freeze({ ...normalized.replacement.sourceFreshness }),
+          assertions: Object.freeze([...normalized.replacement.assertions])
+        });
+        let committed: unknown;
+        try {
+          committed = await backend.compareAndSwap(openedScope, predecessor.snapshot, proposed);
+        } catch (cause) {
+          throw new AttuneGraphError("STORE_FAILURE", "store compare-and-swap failed", { cause });
+        }
+        if (committed !== true && committed !== false) {
+          attuneGraphError("CORRUPT_STORE", "store compare-and-swap returned a non-boolean result");
+        }
+        if (committed) {
+          invalidateWorkingGraphPlan();
+          return Object.freeze({
+            operator: "revocation-transition@1" as const,
+            disposition: "committed" as const,
+            receipt: sealRevocationTransitionReceipt(openedScope, normalized.impactReceipt.receiptId, predecessor.snapshot, normalized.replacement.observationId, nextSnapshot, plannedImpactIds, expectedSurvivors.length)
+          });
+        }
+        const winner = await read();
+        if (
+          winner?.observationId === normalized.replacement.observationId
+          && winner.canonicalProjection === normalized.replacement.canonicalProjection
+          && winner.projectionFingerprint === normalized.replacement.observationId
+          && sameSnapshot(winner.snapshot, nextSnapshot)
+        ) {
+          invalidateWorkingGraphPlan();
+          return Object.freeze({
+            operator: "revocation-transition@1" as const,
+            disposition: "converged" as const,
+            receipt: sealRevocationTransitionReceipt(openedScope, normalized.impactReceipt.receiptId, predecessor.snapshot, normalized.replacement.observationId, nextSnapshot, plannedImpactIds, expectedSurvivors.length)
+          });
+        }
+        attuneGraphError("SNAPSHOT_CONFLICT", "revocation transition compare-and-swap failed");
       });
     },
     close(): Promise<void> {

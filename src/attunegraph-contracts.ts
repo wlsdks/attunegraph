@@ -164,6 +164,45 @@ export interface AttuneGraphRevocationImpactResult {
   readonly receipt: AttuneGraphRevocationImpactReceipt;
 }
 
+/** A source-authoritative replacement applied against one complete impact plan. */
+export interface AttuneGraphRevocationTransitionCommand {
+  readonly operator: "revocation-transition@1";
+  /** Exact canonical JSON of a complete revocation-impact@1 receipt. */
+  readonly receiptCanonicalJson: string;
+  readonly replacement: {
+    readonly operator: "canonical-projection@2";
+    readonly observation: AttuneGraphSourceObservationV2;
+  };
+}
+
+export interface AttuneGraphRevocationTransitionReceipt {
+  readonly contractRevision: 1;
+  readonly receiptId: string;
+  /** Exact canonical JSON whose content address is receiptId. */
+  readonly canonicalJson: string;
+  readonly scope: AttuneGraphScope;
+  readonly planReceiptId: string;
+  readonly priorSnapshot: AttuneGraphSnapshot;
+  readonly replacementObservationId: string;
+  readonly resultSnapshot: AttuneGraphSnapshot;
+  readonly plannedImpactIds: readonly string[];
+  /** Assertions preserved exactly from the predecessor. */
+  readonly preservedSurvivorCount: number;
+  readonly zeroResidueProof: Readonly<{
+    readonly impactIds: 0;
+    readonly selectorMatches: 0;
+    readonly witnessAssertionRefs: 0;
+  }>;
+}
+
+export type AttuneGraphRevocationTransitionResult =
+  | Readonly<{
+    readonly operator: "revocation-transition@1";
+    /** The caller committed, or lost one CAS to an identical validated replacement. */
+    readonly disposition: "committed" | "converged";
+    readonly receipt: AttuneGraphRevocationTransitionReceipt;
+  }>;
+
 export interface AttuneGraph {
   /**
    * Reads the exact current projection head for this opened scope.
@@ -185,6 +224,9 @@ export interface AttuneGraph {
   planRevocationImpact(
     command: AttuneGraphRevocationImpactCommand
   ): Promise<AttuneGraphRevocationImpactResult>;
+  applyRevocationTransition(
+    command: AttuneGraphRevocationTransitionCommand
+  ): Promise<AttuneGraphRevocationTransitionResult>;
   close(): Promise<void>;
 }
 

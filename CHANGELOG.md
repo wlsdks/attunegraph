@@ -6,6 +6,12 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add `revocation-transition@1`: a source-authoritative, exact-head V2
+  replacement protocol that re-admits a complete canonical impact receipt,
+  recomputes it at hard bounds, requires exact survivor subtraction and an
+  unchanged thread root, then performs one CAS and seals a transition receipt.
+  Only an identical concurrent CAS winner converges; late retry, persisted
+  receipt pins, retention, pruning, compaction, and AttuneQL remain unshipped.
 - Add the provider-neutral `revocation-impact@1` exact-head, read-only plan on
   the durable `AttuneGraph` handle. It normalizes bounded assertion, graph,
   and source selectors before Store I/O; expands immutable assertion-source

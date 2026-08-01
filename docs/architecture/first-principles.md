@@ -208,18 +208,21 @@ Shipped in the current core:
 - in-memory and worker-isolated local SQLite profiles;
 - canonical portable artifacts and a read-only offline Admin;
 - head-pinned prepared plans with fail-closed snapshot mismatch handling.
-- exact-head, read-only `revocation-impact@1` planning with normalized bounded
-  selectors, deterministic dependency witnesses, partiality, and
-  content-addressed receipts.
+- exact-head `revocation-impact@1` planning with normalized bounded selectors,
+  deterministic dependency witnesses, partiality, and content-addressed
+  receipts; and `revocation-transition@1`, a one-CAS source-authoritative V2
+  replacement that proves exact survivor subtraction, never graph-owned delete.
 
 Directional, not yet shipped as a complete public contract:
 
 - `DecisionContext` and `ContextReceipt` named public interfaces;
 - proof-closed conflict and authority selection;
 - non-destructive temporal identity resolution;
-- applying logical revoke, receipt-pin persistence, retention, journal
-  pruning, and physical compaction (the shipped impact plan does not perform
-  any of these stages);
+- receipt-pin persistence, historical receipt lookup, retention, journal
+  pruning, physical compaction, and any retry ergonomics that would require a
+  persisted predecessor proof;
+- an arbitrary AttuneQL parser (structured operators are the shipped query
+  surface);
 - multi-source snapshot vectors;
 - Agent Experience Graph and outcome-linked evaluation;
 - normalized 10M/50M decision indexes and any Rust acceleration.
