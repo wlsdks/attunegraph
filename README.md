@@ -313,6 +313,7 @@ pnpm benchmark:scale -- --scale=10000 --profile=local-session --warmups=0 --repe
 pnpm benchmark:scale -- --scale=10000 --profile=local-session-update-comparison --warmups=0 --repetitions=1
 pnpm benchmark:agent-decision-read -- --workload=agent-decision-read@1 --warmups=0 --repetitions=1
 pnpm benchmark:agent-decision-read-scale -- --workload=agent-decision-read-scale@1 --warmups=1 --repetitions=5
+pnpm --silent benchmark:agent-decision-read-durable
 pnpm benchmark:performance -- --scale=10000 --profile=local-session-concurrent --concurrency=4 --warmups=1 --repetitions=2
 pnpm benchmark:performance -- --scale=10000 --profile=portable --concurrency=1 --warmups=1 --repetitions=1
 pnpm performance:regression -- --manifest=/absolute/path/performance-regression-manifest.json
@@ -330,12 +331,14 @@ pnpm readiness:score -- --as-of=2026-07-31T00:00:00.000Z \
 ```
 
 The benchmark's fixed connected v2 corpus, evidence schema, output safety, and
-claim boundary are documented in [BENCHMARKS.md](BENCHMARKS.md). It also fixes
-the measurement-only in-memory agent decision-read workload; that profile is
-not a SQLite/backend claim and is not part of performance qualification. The
-real 10K lifecycle proof and the 100K/1M runs are separate evidence activities,
-not normal test gates. In particular, the current 1M workload is a many-scope
-throughput test, not a one-million-edge graph claim.
+claim boundary are documented in [BENCHMARKS.md](BENCHMARKS.md). It includes
+measurement-only in-memory decision workloads and a separate durable SQLite
+tracer. The durable tracer writes eight generations, gracefully closes the
+Store, opens a new Worker in the same process, and verifies one exact decision
+read. It is not a cold-cache, crash-recovery, multi-client, or qualification
+claim. The real 10K lifecycle proof and the 100K/1M runs are separate evidence
+activities, not normal test gates. In particular, the current 1M workload is a
+many-scope throughput test, not a one-million-edge graph claim.
 
 The full gate inventory and artifact contract are documented in
 [READINESS.md](READINESS.md). Every name has one versioned fixed contract. Two
@@ -353,8 +356,9 @@ coverage report with `eligible: false`, never an execution-authentic or
 product-usefulness claim.
 
 Performance measurement and qualification remain separate. Every performance report is
-measurement-only. The checked-in policy requires clean 10K, 100K, and 1M reports for concurrent
-local-session ingestion and portable encode/decode. The qualifier strictly recomputes throughput
+measurement-only. The checked-in policy requires clean 10K, 100K, and 1M reports for bounded-pool
+single-session ingestion and portable encode/decode. That profile owns one SQLite Worker and does
+not establish multi-client database contention. The qualifier strictly recomputes throughput
 and ratios from raw samples; it currently reports evidence-integrity and relative-policy status
 but fails closed on full performance qualification until independent absolute throughput/latency
 thresholds are calibrated. See [`PERFORMANCE-QUALIFICATION.md`](PERFORMANCE-QUALIFICATION.md).

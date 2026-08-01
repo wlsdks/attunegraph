@@ -13,11 +13,14 @@ qualifier cannot claim full performance qualification until that calibration is 
 
 ## Measurement contracts
 
-`local-session-concurrent` compares a bounded four-operation pool with a sequential pool using
-separate new SQLite databases. Repetitions alternate baseline-first and candidate-first order.
-Each side closes its first session, reopens the same database, and verifies every exact generation
-and commit. The report preserves pairwise throughput/latency ratios, cold and warm session-open
-latency, raw projection samples, pair order, and process peak RSS.
+`local-session-concurrent` compares a bounded four-operation caller pool with a sequential pool
+using separate new SQLite databases. Each side still owns one session, one Worker, and one
+synchronous SQLite connection, so this is a single-session pipelining comparison rather than
+multi-client SQLite concurrency or contention evidence. Repetitions alternate baseline-first and
+candidate-first order. Each side closes its first session, reopens the same database, and verifies
+every exact generation and commit. The report preserves pairwise throughput/latency ratios,
+new-worker and reused-database session-open latency, raw projection samples, pair order, and
+process peak RSS. OS page-cache state is uncontrolled.
 
 `portable` builds the deterministic corpus through the Engine, encodes it with the production
 package-private `.atgx` encoder, materializes one contiguous artifact, and decodes that artifact
@@ -93,6 +96,9 @@ mixed or noisy result is rejected instead of being merged on intuition.
 
 The current harnesses prove less than their largest number may suggest:
 
+- `generation-churn-8x40@1` is now the first durable SQLite decision vertical:
+  16 active plus 24 inactive assertions per head, eight generations, and one
+  exact read after a same-process new-Worker graceful reopen;
 - the 1M scale workload distributes one million assertions across many bounded
   scopes; it is not a one-million-edge graph query;
 - `agent-decision-read-scale@1` measures in-memory scopes with at most 48
@@ -107,10 +113,11 @@ The current harnesses prove less than their largest number may suggest:
 The 90-level qualification stage targets the workload an AI agent actually
 puts on the engine:
 
-1. Add a versioned durable decision workload with 16, 48, and 256 active
-   assertions, large inactive/expired/superseded sets, generations 1, 8, and
-   64, in-memory and SQLite profiles, 1/4/16 clients, 80/20 read/write phases,
-   and exact restart/reopen verification.
+1. Extend the shipped versioned durable decision vertical from its current
+   16-active/24-inactive, generation-8, single-client graceful-reopen cell to
+   48 and 256 active assertions, larger inactive sets, generations 1 and 64,
+   paired in-memory/SQLite profiles, 1/4/16 real sessions, 80/20 read/write
+   phases, and exact cross-process restart/reopen verification.
 2. Bind verified projection and query-index reuse to an exact commit identity,
    or prove an equivalent incremental design, so an unchanged head does not
    require avoidable full admission and index reconstruction.
