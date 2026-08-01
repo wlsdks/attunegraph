@@ -7,7 +7,7 @@ export const MAX_ENVELOPE_BYTES = 2_097_152;
 export const APPLICATION_ID = ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.applicationId;
 export const USER_VERSION = ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.userVersion;
 /** @typedef {"CORRUPT_STORE" | "FUTURE_STORE_STATE" | "INCOMPATIBLE_STORE_PROFILE" | "STORE_FAILURE" | "UNSUPPORTED_STORE_PROFILE"} SerializedErrorCode */
-/** @typedef {"initialize" | "read" | "compareAndSwap" | "holdWriteLockForTesting" | "inspectForTesting" | "mutateForTesting" | "close"} WorkerRequestType */
+/** @typedef {"initialize" | "read" | "readHead" | "compareAndSwap" | "holdWriteLockForTesting" | "inspectForTesting" | "mutateForTesting" | "close"} WorkerRequestType */
 /** @typedef {"future-user-version" | "wrong-application-id" | "malformed-projection-json" | "missing-journal-row" | "partial-bootstrap" | "oversized-projection-json" | "mismatched-head" | "quick-check-corruption"} TestMutation */
 /** @typedef {import("./attunegraph-contracts.js").AttuneGraphScope} AttuneGraphScope */
 /** @typedef {import("./attunegraph-contracts.js").AttuneGraphSnapshot} AttuneGraphSnapshot */
@@ -16,6 +16,7 @@ export const USER_VERSION = ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.userVersion;
 
 /** @typedef {{ readonly databasePath: string }} InitializePayload */
 /** @typedef {{ readonly scope: AttuneGraphScope }} ReadPayload */
+/** @typedef {{ readonly scope: AttuneGraphScope }} ReadHeadPayload */
 /** @typedef {{ readonly scope: AttuneGraphScope, readonly expected: AttuneGraphSnapshot | null, readonly proposed: AttuneGraphStoredProjection }} CompareAndSwapPayload */
 /** @typedef {{ readonly durationMs: number }} HoldWriteLockPayload */
 /** @typedef {{ readonly mutation: TestMutation }} MutatePayload */
@@ -23,20 +24,22 @@ export const USER_VERSION = ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.userVersion;
 
 /** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "initialize", readonly payload: InitializePayload }} InitializeRequest */
 /** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "read", readonly payload: ReadPayload }} ReadRequest */
+/** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "readHead", readonly payload: ReadHeadPayload }} ReadHeadRequest */
 /** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "compareAndSwap", readonly payload: CompareAndSwapPayload }} CompareAndSwapRequest */
 /** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "holdWriteLockForTesting", readonly payload: HoldWriteLockPayload }} HoldWriteLockRequest */
 /** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "inspectForTesting", readonly payload: EmptyPayload }} InspectRequest */
 /** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "mutateForTesting", readonly payload: MutatePayload }} MutateRequest */
 /** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "close", readonly payload: EmptyPayload }} CloseRequest */
-/** @typedef {InitializeRequest | ReadRequest | CompareAndSwapRequest | HoldWriteLockRequest | InspectRequest | MutateRequest | CloseRequest} WorkerRequest */
+/** @typedef {InitializeRequest | ReadRequest | ReadHeadRequest | CompareAndSwapRequest | HoldWriteLockRequest | InspectRequest | MutateRequest | CloseRequest} WorkerRequest */
 /** @typedef {{ readonly applicationId: number, readonly profileVersion: 1, readonly protocolVersion: 1, readonly sqliteVersion: string, readonly userVersion: 1 }} InitializeResult */
 /** @typedef {{ readonly found: false } | { readonly found: true, readonly projection: AttuneGraphStoredProjection }} ReadResult */
+/** @typedef {{ readonly found: false } | { readonly found: true, readonly snapshot: AttuneGraphSnapshot }} ReadHeadResult */
 /** @typedef {{ readonly committed: boolean }} CompareAndSwapResult */
 /** @typedef {{ readonly acquired: true }} HoldWriteLockResult */
 /** @typedef {{ readonly headRows: number, readonly journalRows: number, readonly maxGeneration: number }} InspectResult */
 /** @typedef {{ readonly mutated: true }} MutateResult */
 /** @typedef {{ readonly closed: true }} CloseResult */
-/** @typedef {InitializeResult | ReadResult | CompareAndSwapResult | HoldWriteLockResult | InspectResult | MutateResult | CloseResult} WorkerResult */
+/** @typedef {InitializeResult | ReadResult | ReadHeadResult | CompareAndSwapResult | HoldWriteLockResult | InspectResult | MutateResult | CloseResult} WorkerResult */
 /** @typedef {{ readonly code: SerializedErrorCode, readonly message: string }} SerializedError */
 /** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly ok: true, readonly result: WorkerResult }} WorkerSuccessResponse */
 /** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly ok: false, readonly error: SerializedError }} WorkerErrorResponse */
@@ -51,6 +54,7 @@ const ERROR_CODES = /** @type {ReadonlySet<SerializedErrorCode>} */ (new Set([
 const REQUEST_TYPES = /** @type {ReadonlySet<WorkerRequestType>} */ (new Set([
   "initialize",
   "read",
+  "readHead",
   "compareAndSwap",
   "holdWriteLockForTesting",
   "inspectForTesting",
@@ -321,7 +325,7 @@ export function parseSnapshot(value, scope, label = "snapshot") {
 /**
  * @param {WorkerRequestType} type
  * @param {unknown} value
- * @returns {InitializePayload | ReadPayload | CompareAndSwapPayload | HoldWriteLockPayload | InspectRequest["payload"] | MutatePayload | CloseRequest["payload"]}
+ * @returns {InitializePayload | ReadPayload | ReadHeadPayload | CompareAndSwapPayload | HoldWriteLockPayload | InspectRequest["payload"] | MutatePayload | CloseRequest["payload"]}
  */
 export function parseRequestPayload(type, value) {
   switch (type) {
@@ -331,6 +335,7 @@ export function parseRequestPayload(type, value) {
       return Object.freeze({ databasePath: input.databasePath });
     }
     case "read":
+    case "readHead":
       return Object.freeze({ scope: parseScope(plainRecord(value, "read payload", ["scope"]).scope) });
     case "compareAndSwap": {
       const input = plainRecord(value, "compare-and-swap payload", ["scope", "expected", "proposed"]);
@@ -380,6 +385,7 @@ export function createWorkerRequest(id, type, payload) {
   switch (type) {
     case "initialize": request = { protocolVersion: PROTOCOL_VERSION, id, type, payload: /** @type {InitializePayload} */ (parsedPayload) }; break;
     case "read": request = { protocolVersion: PROTOCOL_VERSION, id, type, payload: /** @type {ReadPayload} */ (parsedPayload) }; break;
+    case "readHead": request = { protocolVersion: PROTOCOL_VERSION, id, type, payload: /** @type {ReadHeadPayload} */ (parsedPayload) }; break;
     case "compareAndSwap": request = { protocolVersion: PROTOCOL_VERSION, id, type, payload: /** @type {CompareAndSwapPayload} */ (parsedPayload) }; break;
     case "holdWriteLockForTesting": request = { protocolVersion: PROTOCOL_VERSION, id, type, payload: /** @type {HoldWriteLockPayload} */ (parsedPayload) }; break;
     case "inspectForTesting": request = { protocolVersion: PROTOCOL_VERSION, id, type, payload: /** @type {EmptyPayload} */ (parsedPayload) }; break;
@@ -480,6 +486,20 @@ export function parseWorkerResult(type, value) {
         "worker projection scope"
       );
       return Object.freeze({ found: true, projection: parseProjection(input.projection, scope) });
+    }
+    case "readHead": {
+      const input = plainRecord(value, "worker read-head result", ["found", "snapshot"], ["found"]);
+      if (input.found === false && !Object.hasOwn(input, "snapshot")) {
+        return Object.freeze({ found: false });
+      }
+      if (input.found !== true || !Object.hasOwn(input, "snapshot")) {
+        fail("STORE_FAILURE", "local AttuneGraph worker returned an invalid read-head result");
+      }
+      const snapshotInput = plainRecord(input.snapshot, "worker head snapshot", [
+        "schemaVersion", "scope", "generation", "commitId"
+      ]);
+      const scope = parseScope(snapshotInput.scope, "worker head scope");
+      return Object.freeze({ found: true, snapshot: parseSnapshot(input.snapshot, scope, "worker head snapshot") });
     }
     case "compareAndSwap": {
       const input = plainRecord(value, "worker compare-and-swap result", ["committed"]);

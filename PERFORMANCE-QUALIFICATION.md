@@ -124,9 +124,11 @@ puts on the engine:
    48 and 256 active assertions, larger inactive sets, generation 64, paired
    in-memory/SQLite profiles, 1/4/16 sessions, same-scope contention, sustained
    repetitions, and exact cross-process restart/reopen verification.
-2. Bind verified projection and query-index reuse to an exact commit identity,
-   or prove an equivalent incremental design, so an unchanged head does not
-   require avoidable full admission and index reconstruction.
+2. Keep the shipped exact-head-pinned per-handle Working Graph plan reuse under
+   deterministic invalidation and semantic-differential tests, then expose
+   package-private measurement counters for head reads, full projection
+   admissions, plan builds, hits, invalidations, and transferred bytes. This
+   is needed to attribute gains instead of inferring them from wall time.
 3. Record interval memory for the main process and Worker, heap/external/
    array-buffer peaks, GC pauses where observable, and repeated-run slope.
 4. Measure SQLite database and WAL growth, checkpoint cost, contention,

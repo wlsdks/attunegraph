@@ -595,6 +595,17 @@ function currentSnapshot(scope) {
   };
 }
 
+/** @param {import("./attunegraph-local-protocol.mjs").ReadHeadPayload} payload @returns {import("./attunegraph-local-protocol.mjs").ReadHeadResult} */
+function readHead(payload) {
+  assertReady();
+  const input = plainRecord(payload, "read-head payload", ["scope"]);
+  const scope = parseScope(input.scope);
+  const snapshot = currentSnapshot(scope);
+  return snapshot === undefined
+    ? { found: false }
+    : { found: true, snapshot };
+}
+
 /** @param {import("./attunegraph-contracts.js").AttuneGraphSnapshot | undefined} left @param {import("./attunegraph-contracts.js").AttuneGraphSnapshot | undefined} right */
 function sameSnapshot(left, right) {
   return (
@@ -826,6 +837,8 @@ export async function dispatchSqliteRequest(request) {
       return initialize(request.payload);
     case "read":
       return read(request.payload);
+    case "readHead":
+      return readHead(request.payload);
     case "compareAndSwap":
       return compareAndSwap(request.payload);
     case "holdWriteLockForTesting":

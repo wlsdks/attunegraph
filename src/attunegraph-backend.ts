@@ -27,11 +27,37 @@ export interface AttuneGraphStoredProjection {
  */
 export interface AttuneGraphStoreBackend {
   read(scope: AttuneGraphScope): Promise<AttuneGraphStoredProjection | undefined>;
+  /** Optional exact-head fast path for bounded per-handle execution-plan reuse. */
+  readHead?(scope: AttuneGraphScope): Promise<AttuneGraphSnapshot | undefined>;
   compareAndSwap(
     scope: AttuneGraphScope,
     expected: AttuneGraphSnapshot | undefined,
     proposed: AttuneGraphStoredProjection
   ): Promise<boolean>;
+}
+
+function optionalBackendMethod<T extends keyof AttuneGraphStoreBackend>(
+  backend: AttuneGraphStoreBackend,
+  name: T
+): NonNullable<AttuneGraphStoreBackend[T]> | undefined {
+  if (backend === null || typeof backend !== "object" || nodeTypes.isProxy(backend)) {
+    throw new TypeError("AttuneGraph Store Adapter must be a non-proxy object");
+  }
+  let cursor: object | null = backend;
+  while (cursor !== null) {
+    if (nodeTypes.isProxy(cursor)) throw new TypeError("AttuneGraph Store Adapter prototype must not be a proxy");
+    const descriptor = Object.getOwnPropertyDescriptor(cursor, name);
+    if (descriptor) {
+      if (!("value" in descriptor)) {
+        throw new TypeError(`AttuneGraph Store Adapter ${name} must be a data method`);
+      }
+      if (descriptor.value === undefined) return undefined;
+      if (typeof descriptor.value !== "function") throw new TypeError(`AttuneGraph Store Adapter ${name} must be a data method`);
+      return descriptor.value.bind(backend) as NonNullable<AttuneGraphStoreBackend[T]>;
+    }
+    cursor = Object.getPrototypeOf(cursor);
+  }
+  return undefined;
 }
 
 function backendMethod<T extends keyof AttuneGraphStoreBackend>(
@@ -58,9 +84,11 @@ function backendMethod<T extends keyof AttuneGraphStoreBackend>(
 
 /** Creates the opaque root capability from a Store Adapter implementation. */
 export function createAttuneGraphStore(backend: AttuneGraphStoreBackend): AttuneGraphStore {
+  const readHead = optionalBackendMethod(backend, "readHead");
   const safeBackend: AttuneGraphStoreBackend = Object.freeze({
     compareAndSwap: backendMethod(backend, "compareAndSwap"),
-    read: backendMethod(backend, "read")
+    read: backendMethod(backend, "read"),
+    ...(readHead === undefined ? {} : { readHead })
   });
   const capability = Object.freeze(Object.create(null)) as AttuneGraphStore;
   registerAttuneGraphStore(capability, safeBackend);

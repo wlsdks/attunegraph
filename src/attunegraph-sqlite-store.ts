@@ -55,6 +55,7 @@ export interface SqliteWorkerHeapStatistics {
 export interface SqliteAttuneGraphTestHooks {
   workerStarted?(): void;
   workerTerminalSettled?(): void;
+  requestSent?(type: WorkerRequestType): void;
 }
 
 interface PendingRequest {
@@ -214,12 +215,13 @@ export async function openSqliteAttuneGraphStore(
     const hooks = plainRecord(
       input.testHooks,
       "SQLite AttuneGraph test hooks",
-      ["workerStarted", "workerTerminalSettled"],
+      ["workerStarted", "workerTerminalSettled", "requestSent"],
       []
     );
     if (
       (hooks.workerStarted !== undefined && typeof hooks.workerStarted !== "function")
       || (hooks.workerTerminalSettled !== undefined && typeof hooks.workerTerminalSettled !== "function")
+      || (hooks.requestSent !== undefined && typeof hooks.requestSent !== "function")
     ) {
       throw new AttuneGraphError("INVALID_INPUT", "SQLite AttuneGraph test hooks are invalid");
     }
@@ -412,6 +414,7 @@ export async function openSqliteAttuneGraphStore(
     } catch (cause) {
       return rejectAfterFailStop(storeFailure("local AttuneGraph request is invalid", cause));
     }
+    testHooks?.requestSent?.(type);
     return new Promise<unknown>((resolve, reject) => {
       const timeout = setTimeout(() => {
         if (!pending.has(id)) return;
@@ -489,6 +492,23 @@ export async function openSqliteAttuneGraphStore(
           );
         }
         return detachedProjection(response.projection);
+      });
+    },
+    readHead(scope: AttuneGraphScope): Promise<AttuneGraphSnapshot | undefined> {
+      return begin(async () => {
+        const response = plainRecord(
+          await request("readHead", { scope }),
+          "worker read-head result",
+          ["found", "snapshot"],
+          ["found"]
+        );
+        if (response.found === false && !Object.hasOwn(response, "snapshot")) return undefined;
+        if (response.found !== true || !Object.hasOwn(response, "snapshot")) {
+          return rejectAfterFailStop(
+            storeFailure("local AttuneGraph worker returned an invalid read-head result")
+          );
+        }
+        return JSON.parse(JSON.stringify(response.snapshot)) as AttuneGraphSnapshot;
       });
     },
     compareAndSwap(

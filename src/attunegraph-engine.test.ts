@@ -5,6 +5,7 @@ import { expect, it } from "vitest";
 import { AttuneGraphError, openAttuneGraph } from "./index.js";
 import { createAttuneGraphStore, type AttuneGraphStoreBackend } from "./attunegraph-backend.js";
 import { createInMemoryAttuneGraphStore, InMemoryAttuneGraphStoreBackend, runAttuneGraphStoreConformance } from "./testing.js";
+import type { AttuneGraphSnapshot } from "./attunegraph-contracts.js";
 import type { GraphAssertion } from "./types.js";
 
 const SCOPE = { sourceId: "source-a", threadId: "thread-a" };
@@ -590,6 +591,288 @@ it("detaches nested caller values and pins one validated Store head per execute"
   expect(result.snapshot.generation).toBe(1);
   expect(result.workingGraph.assertions[0]?.sourceRefs[0]?.id).toBe("source-mutable");
   expect(Object.isFrozen(result.workingGraph.assertions[0]?.sourceRefs)).toBe(true);
+});
+
+it("reuses one admitted Working Graph plan while the exact Store head is unchanged", async () => {
+  const backing = new InMemoryAttuneGraphStoreBackend();
+  let headReads = 0;
+  let projectionReads = 0;
+  const counted = {
+    async read(scope: typeof SCOPE) {
+      projectionReads += 1;
+      return backing.read(scope);
+    },
+    async readHead(scope: typeof SCOPE) {
+      headReads += 1;
+      return (await backing.read(scope))?.snapshot;
+    },
+    compareAndSwap: backing.compareAndSwap.bind(backing)
+  } satisfies AttuneGraphStoreBackend & {
+    readHead(scope: typeof SCOPE): Promise<AttuneGraphSnapshot | undefined>;
+  };
+  const attuneGraph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(counted)
+  });
+  await attuneGraph.project(command("cached-plan"));
+  headReads = 0;
+  projectionReads = 0;
+
+  const execute = () => attuneGraph.execute({
+    operator: "working-graph@1",
+    seed: { id: SCOPE.threadId, kind: "thread" },
+    now: NOW,
+    maxEstimatedTokens: 4_000
+  });
+  const first = await execute();
+  const second = await execute();
+
+  expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  expect({ headReads, projectionReads }).toEqual({ headReads: 2, projectionReads: 1 });
+  await attuneGraph.close();
+});
+
+it("treats an explicitly undefined optional Store head as an omitted capability", async () => {
+  const backing = new InMemoryAttuneGraphStoreBackend();
+  const writer = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(backing)
+  });
+  await writer.project(command("legacy-undefined-head"));
+  await writer.close();
+  let projectionReads = 0;
+  const legacy = {
+    async read(scope: typeof SCOPE) {
+      projectionReads += 1;
+      return backing.read(scope);
+    },
+    compareAndSwap: backing.compareAndSwap.bind(backing)
+  } as AttuneGraphStoreBackend;
+  Object.defineProperty(legacy, "readHead", {
+    configurable: true,
+    enumerable: true,
+    value: undefined
+  });
+  const graph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(legacy)
+  });
+
+  await graph.execute({ operator: "working-graph@1", seed: { id: SCOPE.threadId, kind: "thread" }, now: NOW, maxEstimatedTokens: 4_000 });
+  await graph.execute({ operator: "working-graph@1", seed: { id: SCOPE.threadId, kind: "thread" }, now: NOW, maxEstimatedTokens: 4_000 });
+
+  expect(projectionReads).toBe(2);
+  await graph.close();
+});
+
+it("shares one cold exact-head admission across concurrent executes", async () => {
+  const backing = new InMemoryAttuneGraphStoreBackend();
+  const writer = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(backing)
+  });
+  await writer.project(command("shared-cold-plan"));
+  await writer.close();
+  let headReads = 0;
+  let projectionReads = 0;
+  const graph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore({
+      async read(scope) {
+        projectionReads += 1;
+        return backing.read(scope);
+      },
+      async readHead(scope) {
+        headReads += 1;
+        return backing.readHead(scope);
+      },
+      compareAndSwap: backing.compareAndSwap.bind(backing)
+    })
+  });
+  const execute = () => graph.execute({
+    operator: "working-graph@1",
+    seed: { id: SCOPE.threadId, kind: "thread" },
+    now: NOW,
+    maxEstimatedTokens: 4_000
+  });
+
+  const [first, second] = await Promise.all([execute(), execute()]);
+
+  expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  expect({ headReads, projectionReads }).toEqual({ headReads: 1, projectionReads: 1 });
+  await graph.close();
+});
+
+it("does not let a delayed older admission overwrite a newer local projection", async () => {
+  const backing = new InMemoryAttuneGraphStoreBackend();
+  const writer = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(backing)
+  });
+  const firstHead = await writer.project(command("delayed-old-head"));
+  await writer.close();
+  const entered = deferred();
+  const release = deferred();
+  let blockFirstRead = true;
+  const graph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore({
+      async read(scope) {
+        const projection = await backing.read(scope);
+        if (blockFirstRead) {
+          blockFirstRead = false;
+          entered.resolve();
+          await release.promise;
+        }
+        return projection;
+      },
+      readHead: backing.readHead.bind(backing),
+      compareAndSwap: backing.compareAndSwap.bind(backing)
+    })
+  });
+  const delayed = graph.execute({
+    operator: "working-graph@1",
+    seed: { id: SCOPE.threadId, kind: "thread" },
+    now: NOW,
+    maxEstimatedTokens: 4_000
+  });
+  await entered.promise;
+  const newer = await graph.project({
+    ...command("newer-local-head", { observedAt: "2026-07-30T00:00:01.000Z" }),
+    expectedSnapshot: firstHead
+  });
+  release.resolve();
+  const result = await delayed;
+
+  expect(result.snapshot).toEqual(newer);
+  expect(result.workingGraph.assertions.map((item) => item.id)).toEqual(["newer-local-head"]);
+  await graph.close();
+});
+
+it("rebuilds the prepared Working Graph after an external writer changes the exact head", async () => {
+  const backing = new InMemoryAttuneGraphStoreBackend();
+  let headReads = 0;
+  let projectionReads = 0;
+  const reader = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore({
+      async read(scope) {
+        projectionReads += 1;
+        return backing.read(scope);
+      },
+      async readHead(scope) {
+        headReads += 1;
+        return backing.readHead(scope);
+      },
+      compareAndSwap: backing.compareAndSwap.bind(backing)
+    })
+  });
+  const writer = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(backing)
+  });
+  const firstHead = await writer.project(command("external-before"));
+  const execute = () => reader.execute({
+    operator: "working-graph@1",
+    seed: { id: SCOPE.threadId, kind: "thread" },
+    now: NOW,
+    maxEstimatedTokens: 4_000
+  });
+
+  const before = await execute();
+  await writer.project({
+    ...command("external-after", { observedAt: "2026-07-30T00:00:01.000Z" }),
+    expectedSnapshot: firstHead
+  });
+  const after = await execute();
+
+  expect(before.workingGraph.assertions.map((item) => item.id)).toEqual(["external-before"]);
+  expect(after).toMatchObject({ snapshot: { generation: 2 } });
+  expect(after.workingGraph.assertions.map((item) => item.id)).toEqual(["external-after"]);
+  expect({ headReads, projectionReads }).toEqual({ headReads: 2, projectionReads: 2 });
+  await Promise.all([reader.close(), writer.close()]);
+});
+
+it("re-evaluates temporal validity for every execute while reusing the same prepared head", async () => {
+  const backing = new InMemoryAttuneGraphStoreBackend();
+  let headReads = 0;
+  let projectionReads = 0;
+  const graph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore({
+      async read(scope) {
+        projectionReads += 1;
+        return backing.read(scope);
+      },
+      async readHead(scope) {
+        headReads += 1;
+        return backing.readHead(scope);
+      },
+      compareAndSwap: backing.compareAndSwap.bind(backing)
+    })
+  });
+  await graph.project(command("future-validity", {
+    assertions: [{
+      ...assertion("future-validity"),
+      validFrom: "2026-07-30T00:00:01.000Z"
+    }]
+  }));
+  headReads = 0;
+  projectionReads = 0;
+
+  const before = await graph.execute({
+    operator: "working-graph@1",
+    seed: { id: SCOPE.threadId, kind: "thread" },
+    now: NOW,
+    maxEstimatedTokens: 4_000
+  });
+  const after = await graph.execute({
+    operator: "working-graph@1",
+    seed: { id: SCOPE.threadId, kind: "thread" },
+    now: "2026-07-30T00:00:01.000Z",
+    maxEstimatedTokens: 4_000
+  });
+
+  expect(before).toMatchObject({ status: "abstained", workingGraph: { assertions: [] } });
+  expect(after).toMatchObject({ status: "complete" });
+  expect(after.workingGraph.assertions.map((item) => item.id)).toEqual(["future-validity"]);
+  expect({ headReads, projectionReads }).toEqual({ headReads: 2, projectionReads: 1 });
+  await graph.close();
+});
+
+it("fails closed when an optional Store head never matches its admitted projection", async () => {
+  const backing = new InMemoryAttuneGraphStoreBackend();
+  const writer = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(backing)
+  });
+  const committed = await writer.project(command("mismatched-head"));
+  await writer.close();
+  let headReads = 0;
+  let projectionReads = 0;
+  const graph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore({
+      async read(scope) {
+        projectionReads += 1;
+        return backing.read(scope);
+      },
+      async readHead() {
+        headReads += 1;
+        return { ...committed, commitId: "attunegraph-commit:mismatched" };
+      },
+      compareAndSwap: backing.compareAndSwap.bind(backing)
+    })
+  });
+
+  await expect(graph.execute({
+    operator: "working-graph@1",
+    seed: { id: SCOPE.threadId, kind: "thread" },
+    now: NOW,
+    maxEstimatedTokens: 4_000
+  })).rejects.toMatchObject({ code: "SNAPSHOT_CONFLICT" });
+  expect({ headReads, projectionReads }).toEqual({ headReads: 2, projectionReads: 2 });
+  await graph.close();
 });
 
 it("rejects proxy/accessor Adapters before invocation and keeps bound Store methods safe", async () => {

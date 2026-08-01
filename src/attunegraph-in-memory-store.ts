@@ -26,6 +26,13 @@ export class InMemoryAttuneGraphStoreBackend implements AttuneGraphStoreBackend 
       : JSON.parse(JSON.stringify(stored)) as AttuneGraphStoredProjection;
   }
 
+  async readHead(scope: AttuneGraphScope): Promise<AttuneGraphSnapshot | undefined> {
+    const snapshot = this.projections.get(scopeKey(scope))?.snapshot;
+    return snapshot === undefined
+      ? undefined
+      : JSON.parse(JSON.stringify(snapshot)) as AttuneGraphSnapshot;
+  }
+
   async compareAndSwap(
     scope: AttuneGraphScope,
     expected: AttuneGraphSnapshot | undefined,
