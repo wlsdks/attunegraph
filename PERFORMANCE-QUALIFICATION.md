@@ -119,7 +119,7 @@ The current harnesses prove less than their largest number may suggest:
 The 90-level qualification stage targets the workload an AI agent actually
 puts on the engine:
 
-1. Extend the shipped versioned durable decision vertical from its current
+1. Extend the shipped schema-bound durable decision vertical from its current
    16-active/24-inactive cells and four-session distinct-scope 80/20 schedule to
    48 and 256 active assertions, larger inactive sets, generation 64, paired
    in-memory/SQLite profiles, 1/4/16 sessions, same-scope contention, sustained
@@ -132,7 +132,7 @@ puts on the engine:
 4. Measure SQLite database and WAL growth, checkpoint cost, contention,
    retention, compaction, and reopen latency over generation churn.
 5. Connect the fixed performance checks in the readiness inventory to real
-   versioned evidence producers instead of accepting substitute commands.
+   fixed evidence producers instead of accepting substitute commands.
 6. Run the full six-report matrix on dedicated runners, calibrate absolute
    thresholds independently, attest the raw artifacts, and keep ordinary PR
    CI on short semantic and performance smoke gates.

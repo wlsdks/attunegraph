@@ -1,12 +1,12 @@
 import { Buffer } from "node:buffer";
 import { chmodSync, existsSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { pathToFileURL } from "node:url";
 import { types as nodeTypes } from "node:util";
 
 import { openLocalAttuneGraph } from "@attunegraph/core/local";
+import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
 
 const NOW = "2026-08-01T12:00:00.000Z";
 const OBSERVED_AT = "2026-08-01T11:59:00.000Z";
@@ -312,11 +312,7 @@ export async function runDurableAgentDecisionTracerCommand(argv = process.argv.s
   }
 }
 
-const entryPath = process.argv[1];
-if (
-  typeof entryPath === "string"
-  && import.meta.url === pathToFileURL(resolve(entryPath)).href
-) {
+if (isDirectEntrypoint(import.meta.url, process.argv[1])) {
   await runDurableAgentDecisionTracerCommand().catch((cause) => {
     process.stderr.write(`${cause instanceof Error ? cause.message : String(cause)}\n`);
     process.exitCode = 1;

@@ -1,6 +1,5 @@
-import { fileURLToPath } from "node:url";
-
 import { verifyWorkingGraphGoldenCorpus } from "./verify-working-graph-golden-corpus.mjs";
+import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
 
 import {
   readinessCheckContract,
@@ -26,7 +25,7 @@ export async function runWorkingGraphReadiness(check) {
   };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isDirectEntrypoint(import.meta.url, process.argv[1])) {
   const match = /^--check=(.+)$/u.exec(process.argv[2] ?? "");
   if (process.argv.length !== 3 || !match) {
     process.stderr.write("Working Graph readiness runner requires exactly --check=<name>\n");

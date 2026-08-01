@@ -10,7 +10,7 @@ usefulness, personal attunement, or user delight.
 | Gate | Weight | Required checks |
 | --- | ---: | --- |
 | Independent clean room | 15 | install, build, test, example, pack, consumer install |
-| Muse integration | 20 | exact submodule pin, narrow public port, no copied Engine, durable v2 path |
+| Muse integration | 20 | exact submodule pin, narrow public port, no copied Engine, durable `canonical-projection@2` path |
 | Semantic safety | 20 | conformance, adversarial, property, fault, authority fail-closed |
 | Persistence and portability | 10 | SQLite crash/CAS, `.atgx` streaming round trip |
 | Retrieval quality | 10 | Working Graph golden corpus, abstention |
@@ -34,7 +34,7 @@ commands. The corpus result is never organic usefulness evidence.
 `attunegraph-readiness-evidence@1` is the first public evidence contract. It contains the clean
 exact AttuneGraph and Muse commit/tree subject, 37 `{ name, gate, result }` descriptors, and exactly
 one descriptor from the separate unscored measurement registry:
-`mixed-durable-agent-decision-observation`. Each check result binds the name to one versioned
+`mixed-durable-agent-decision-observation`. Each check result binds the name to one fixed
 registry contract, canonical repository cwd role, fixed argv template, output semantics, and fixed
 parameters. It also carries timestamps, process outcome, capture toolchain, subject identities,
 provenance, and unique hashed stdout/stderr artifacts.
@@ -113,8 +113,9 @@ integrity could not be established.
 ## Attested producer boundary
 
 CI runs the contract tests on Node 24.15 for Ubuntu and Windows and issues GitHub build provenance
-for the versioned producer-contract bundle. That attestation proves only which producer bytes CI
-bundled. It does not attest 37 executions and does not change local authenticity.
+for the producer-contract bundle. The bundle includes the fixed check and measurement registries,
+both bounded capture entrypoints, and the scorer. That attestation proves only which producer bytes
+CI bundled. It does not attest 37 executions and does not change local authenticity.
 
 The intended qualification producer is a public GitHub Actions run that checks out exact clean
 AttuneGraph and Muse subjects, verifies the gitlink, executes only available fixed commands,

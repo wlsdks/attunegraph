@@ -6,6 +6,10 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Close the packed-tool boundary with source-versus-installed runtime preparation,
+  complete script/Golden fixture inclusion, clean-room execution of installed
+  Golden and durable tracers, explicit refusal of revision-bound evidence under
+  `node_modules`, and package-manager-safe readiness capture arguments.
 - Add the first public readiness evidence contract with a separate fail-closed, unscored measurement
   registry and bounded producer for the four-session durable tracer. The
   scorer validates the raw 80-read/20-write ledger, full 88-read/24-write run,
@@ -25,7 +29,7 @@ All notable changes to AttuneGraph are recorded here.
   diagnostics, and full-result equality without claiming cold cache, crash
   recovery, multi-client contention, tails, or qualification.
 - Add `agent-decision-read-scale@1`, a strict measurement-only active-scale
-  Working Graph harness with cold/warm rebuilt heads, raw timings, stored-v2
+  Working Graph harness with cold/warm rebuilt heads, raw timings, stored schema-revision-2
   byte and semantic anchors, bounded p50-only reporting, an explicit temporal
   authorization-abstention sentinel, process-observational memory checkpoints,
   explicit per-read versus aggregate batch work counts, and clean
@@ -53,7 +57,7 @@ All notable changes to AttuneGraph are recorded here.
   fail-closed six-report 10K/100K/1M threshold policy.
 - Add a zero-dependency `@attunegraph/core/source-adapter` SDK for typed,
   factory-defined external adapters. It validates bounded metadata,
-  capabilities, host extraction results, exact evidence references, and v2
+  capabilities, host extraction results, exact evidence references, and `schemaVersion: 2`
   projection inputs before Store I/O, then uses `projectAgainstHead` without
   parsing or retaining authoritative source bytes.
 - Add a fixed Working Graph golden corpus and strict verifier for ordered
@@ -80,7 +84,7 @@ All notable changes to AttuneGraph are recorded here.
   check handling, substitute-command rejection, provenance boundaries,
   Ubuntu/Windows Node 24.15 tests, and a GitHub producer-contract
   attestation skeleton.
-- Add a deterministic connected-v2 10K/100K/1M scale benchmark with fixed
+- Add a deterministic thread-rooted schema-revision-2 10K/100K/1M scale benchmark with fixed
   shards, revision/toolchain/corpus binding, raw latency and RSS samples,
   in-memory and local SQLite profiles, safe non-overwriting JSON output, and an
   explicit measurement-only/no-readiness-claim boundary.
@@ -120,7 +124,7 @@ All notable changes to AttuneGraph are recorded here.
   rebuilt AB/BA pairs show no focused-read speed claim and a 7.3% to 14.5%
   cold paired-median reduction for the declared frontier-32/48 and frontier-48
   batch cells. Evidence remains measurement-only and records built-artifact
-  binding as a harness-v2 requirement.
+  binding as a second harness-revision requirement.
 - Measure bounded error paths, ASCII contract fields, and canonical JSON
   fragment/body-envelope limits through a captured Node `Buffer.byteLength`
   primordial instead of allocating a `TextEncoder` result at those call sites.

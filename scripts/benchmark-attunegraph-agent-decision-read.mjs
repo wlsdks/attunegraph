@@ -6,10 +6,11 @@ import { lstat, realpath, writeFile } from "node:fs/promises";
 import { arch, cpus, platform, totalmem } from "node:os";
 import { dirname, isAbsolute, normalize, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import { openAttuneGraph } from "@attunegraph/core";
 import { createInMemoryAttuneGraphStore } from "@attunegraph/core/testing";
+import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
 
 const WORKLOAD = "agent-decision-read@1";
 const NOW = "2026-08-01T12:00:00.000Z";
@@ -1241,9 +1242,7 @@ async function main() {
   await runAgentDecisionReadCommand(process.argv.slice(2));
 }
 
-const invokedDirectly = process.argv[1] !== undefined
-  && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
-if (invokedDirectly) {
+if (isDirectEntrypoint(import.meta.url, process.argv[1])) {
   main().catch((cause) => {
     process.stderr.write(
       `${cause instanceof Error ? cause.message : "agent decision-read benchmark failed"}\n`

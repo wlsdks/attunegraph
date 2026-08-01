@@ -9,14 +9,15 @@ import {
   rmSync
 } from "node:fs";
 import { cpus, release, tmpdir, totalmem } from "node:os";
-import { isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { performance } from "node:perf_hooks";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { isDeepStrictEqual, types as nodeTypes } from "node:util";
 
 import { openLocalAttuneGraphSession } from "@attunegraph/core/local";
 
 import { composeDurableTracerCleanupFailure } from "./benchmark-attunegraph-agent-decision-durable.mjs";
+import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
 
 const NOW = "2026-08-01T12:00:00.000Z";
 const OBSERVED_AT = "2026-08-01T11:59:00.000Z";
@@ -801,11 +802,7 @@ export async function runMixedDurableAgentDecisionTracerCommand(argv = process.a
   }
 }
 
-const entryPath = process.argv[1];
-if (
-  typeof entryPath === "string"
-  && import.meta.url === pathToFileURL(resolve(entryPath)).href
-) {
+if (isDirectEntrypoint(import.meta.url, process.argv[1])) {
   await runMixedDurableAgentDecisionTracerCommand().catch((cause) => {
     process.stderr.write(`${cause instanceof Error ? cause.message : String(cause)}\n`);
     process.exitCode = 1;

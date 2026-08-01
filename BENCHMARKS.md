@@ -222,11 +222,16 @@ the lockfile are bound to the canonical script package root, which must itself
 be the Git top level; invoking the absolute script from another repository
 cannot substitute that caller working directory's provenance.
 
-The decision-read script is included in the npm tarball and its module boundary
-is import-smoked from an installed package. Authoritative benchmark execution
-is supported only from a clean source checkout because revision provenance
-reads that checkout's Git commit/tree/status and lockfile. Importability must
-not be read as support for producing authoritative evidence from `node_modules`.
+The revision-bound benchmark and qualification scripts are included in the npm
+tarball and every module boundary is import-smoked from a clean installation.
+Golden-corpus and durable measurement tools execute directly from those packed
+bytes. Authoritative scale, performance, and qualification evidence is
+supported only from a source checkout because its provenance reads that exact
+checkout's Git commit/tree/status and lockfile. Those commands fail with an
+explicit source-checkout refusal under `node_modules`; they never borrow the
+consumer repository's Git identity. The decision-read tools retain their
+narrower import-only package contract and also require a source checkout for
+execution. Importability is not evidence authority.
 
 The CLI allows at most 10 independent fresh-Store repetitions. Consequently
 p95 and p99 are `null`: the schema requires at least 20 and 100 independent
@@ -507,7 +512,7 @@ pure SQLite or API latency.
 Every read is compared with a complete expected `working-graph@1` result,
 including the current commit, ordered assertions and refs, source provenance,
 freshness timestamp, token estimate, and diagnostics. Generation-6 results are
-also pinned to a versioned golden commit manifest before and after graceful
+also pinned to a fixed golden commit manifest before and after graceful
 close and same-process new-Worker reopen. Existing-but-safe orphan sidecars are
 rejected rather than admitted into a nominal fresh run.
 
@@ -656,7 +661,7 @@ The ten evidence SHA-256 values are:
 
 An earlier direct-Node attempt is excluded because the base checkout's ignored
 `dist/` did not match its source revision. Rebuilding both sides before the
-paired run removed that attribution error. This also records a harness-v2
+paired run removed that attribution error. This also records a second harness-revision
 requirement: authoritative performance evidence must bind built runtime bytes,
 not only source revision and lockfile identity.
 

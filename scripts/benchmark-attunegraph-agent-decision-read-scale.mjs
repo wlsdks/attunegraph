@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { dirname, isAbsolute, normalize, relative, resolve } from "node:path";
 import { lstat, realpath, writeFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 
 import { openAttuneGraph } from "@attunegraph/core";
 import { createAttuneGraphStore } from "@attunegraph/core/backend";
@@ -13,6 +13,7 @@ import {
   captureAgentDecisionReadHostIdentity,
   captureAgentDecisionReadRepositoryIdentity
 } from "./benchmark-attunegraph-agent-decision-read.mjs";
+import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
 
 const WORKLOAD = "agent-decision-read-scale@1";
 const NOW = "2026-08-01T12:00:00.000Z";
@@ -959,5 +960,4 @@ export async function runAgentDecisionReadScaleCommand(argv, runtime = {}) {
   return evidence;
 }
 
-const invokedDirectly = process.argv[1] !== undefined && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
-if (invokedDirectly) runAgentDecisionReadScaleCommand(process.argv.slice(2)).catch((cause) => { process.stderr.write(`${cause instanceof Error ? cause.message : "agent decision-read scale benchmark failed"}\n`); process.exitCode = 1; });
+if (isDirectEntrypoint(import.meta.url, process.argv[1])) runAgentDecisionReadScaleCommand(process.argv.slice(2)).catch((cause) => { process.stderr.write(`${cause instanceof Error ? cause.message : "agent decision-read scale benchmark failed"}\n`); process.exitCode = 1; });

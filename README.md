@@ -151,10 +151,10 @@ partial generation or hidden orphan component.
 use opaque or content-addressed thread roots and must declare the exact
 `GraphRef`. The legacy `canonical-projection@1` profile remains readable and
 writable for compatibility, but is root-unverified; new agent integrations
-should write v2. Stored and portable v1 projections remain readable without
+should write `schemaVersion: 2`. Stored and portable schema-revision-1 projections remain readable without
 being retroactively certified as thread-rooted.
 
-V2 observation IDs use the `attunegraph.canonical-projection.v2` hash domain;
+Schema-revision-2 observation IDs use the `attunegraph.canonical-projection.v2` hash domain;
 v1 IDs retain their original domain and bytes. The Store envelope and `.atgx`
 transport versions do not change because both re-admit the embedded observation
 according to its declared schema version.
@@ -345,7 +345,7 @@ pnpm readiness:score -- --as-of=2026-07-31T00:00:00.000Z \
   --muse-repository=/absolute/path/Muse
 ```
 
-The benchmark's fixed connected v2 corpus, evidence schema, output safety, and
+The benchmark's fixed thread-rooted canonical corpus, evidence schema, output safety, and
 claim boundary are documented in [BENCHMARKS.md](BENCHMARKS.md). It includes
 measurement-only in-memory decision workloads and two durable SQLite tracers.
 The single-session tracer writes eight generations, gracefully closes the
@@ -360,7 +360,7 @@ not normal test gates. In particular, the current 1M workload is a many-scope
 throughput test, not a one-million-edge graph claim.
 
 The full gate inventory and artifact contract are documented in
-[READINESS.md](READINESS.md). Every name has one versioned fixed contract. Two
+[READINESS.md](READINESS.md). Every name has one stable fixed contract. Two
 Working Graph checks have strict fixed adapters; other unimplemented semantic
 verifiers are unavailable and capture only as `not-run`. Caller-selected
 commands such as `node --version` are refused. Results bind
@@ -427,7 +427,12 @@ skipped.
 
 Ubuntu Node 24.15 CI runs `pnpm verify:clean-room-consumer`, which packs the
 built package into an owner-private temporary directory and installs that
-tarball offline into a fresh consumer before exercising the public API.
+tarball offline into a fresh consumer. It exercises every public export,
+imports every shipped tool module, validates the installed runtime without a
+source compiler, and runs the Golden, durable, and mixed-durable tools from the
+installed bytes. Revision-bound scale and qualification tools intentionally
+refuse an installed location instead of borrowing the consumer repository's
+Git identity; authoritative evidence still requires the exact source checkout.
 
 Passing these checks proves the package contracts. It does not prove that an
 agent has learned a person, improved its timing, or produced a real-world

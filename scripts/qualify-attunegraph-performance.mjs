@@ -1,10 +1,10 @@
-import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { isAbsolute, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
 
 import { inspectBenchmarkCorpus, createBenchmarkCorpusPlan } from "./benchmark-attunegraph-scale.mjs";
+import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
+import { captureSourceCheckoutProvenance } from "./source-checkout-provenance.mjs";
 
 const POLICY_URL = new URL("../performance-thresholds.json", import.meta.url);
 const ISO_TIMESTAMP = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
@@ -508,13 +508,7 @@ export function qualifyPerformanceReports(input, runtime = {}) {
 }
 
 function currentRepository() {
-  const git = (...args) => execFileSync("git", args, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
-  return {
-    clean: git("status", "--porcelain=v1", "--untracked-files=all") === "",
-    commit: git("rev-parse", "HEAD"),
-    lockfileSha256: hash(readFileSync(new URL("../pnpm-lock.yaml", import.meta.url))),
-    tree: git("rev-parse", "HEAD^{tree}")
-  };
+  return captureSourceCheckoutProvenance().repository;
 }
 
 function loadArtifacts(paths) {
@@ -545,7 +539,7 @@ function main() {
   if (!result.performanceQualified) process.exitCode = 1;
 }
 
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+if (isDirectEntrypoint(import.meta.url, process.argv[1])) {
   try { main(); } catch (cause) {
     process.stderr.write(`${cause instanceof Error ? cause.message : "performance qualification failed"}\n`);
     process.exitCode = 1;

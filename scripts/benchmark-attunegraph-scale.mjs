@@ -1,11 +1,9 @@
 import { createHash } from "node:crypto";
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
 import { chmod, lstat, mkdtemp, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { arch, cpus, platform, tmpdir, totalmem } from "node:os";
-import { dirname, isAbsolute, join, normalize, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, normalize, relative } from "node:path";
 import { performance } from "node:perf_hooks";
-import { pathToFileURL } from "node:url";
 
 import {
   MAX_GRAPH_APPEND_BATCH_ASSERTIONS,
@@ -14,6 +12,8 @@ import {
 import {
   createInMemoryAttuneGraphStore
 } from "@attunegraph/core/testing";
+import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
+import { captureSourceCheckoutProvenance } from "./source-checkout-provenance.mjs";
 
 const SUPPORTED_SCALES = new Set([10_000, 100_000, 1_000_000]);
 const SUPPORTED_PROFILES = new Set([
@@ -297,17 +297,7 @@ export function summarizeBenchmarkSamples(samples) {
 }
 
 function repositoryIdentity() {
-  const git = (...args) => execFileSync("git", args, {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"]
-  }).trim();
-  const lockfile = readFileSync(new URL("../pnpm-lock.yaml", import.meta.url));
-  return Object.freeze({
-    commit: git("rev-parse", "HEAD"),
-    tree: git("rev-parse", "HEAD^{tree}"),
-    clean: git("status", "--porcelain=v1", "--untracked-files=all") === "",
-    lockfileSha256: sha256(lockfile)
-  });
+  return captureSourceCheckoutProvenance().repository;
 }
 
 export function pnpmVersion(userAgent = process.env.npm_config_user_agent) {
@@ -860,7 +850,7 @@ export async function runScaleBenchmark(options, runtime = {}) {
     claimEligible: false,
     measurementOnly: true,
     observedAt: new Date().toISOString(),
-    repository: repositoryIdentity(),
+    repository: runtime.repository ?? repositoryIdentity(),
     host: hostIdentity(),
     configuration: Object.freeze({
       argv: Object.freeze([...(runtime.argv ?? [])]),
@@ -943,7 +933,7 @@ export async function runScaleBenchmark(options, runtime = {}) {
   });
 }
 
-async function validateOutputPath(outputPath) {
+async function validateOutputPath(outputPath, repositoryRoot) {
   if (!isAbsolute(outputPath) || normalize(outputPath) !== outputPath) {
     throw new Error("benchmark output must be an absolute normalized path");
   }
@@ -952,10 +942,6 @@ async function validateOutputPath(outputPath) {
   if (canonicalParent !== parent) {
     throw new Error("benchmark output parent must not traverse a symlink");
   }
-  const repositoryRoot = execFileSync("git", ["rev-parse", "--show-toplevel"], {
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"]
-  }).trim();
   const fromRepository = relative(repositoryRoot, outputPath);
   if (fromRepository === "" || (!fromRepository.startsWith("..") && !isAbsolute(fromRepository))) {
     throw new Error("benchmark output must be outside the repository");
@@ -972,8 +958,14 @@ async function validateOutputPath(outputPath) {
 async function main() {
   const argv = process.argv.slice(2);
   const options = parseBenchmarkArguments(argv);
-  if (options.outputPath !== undefined) await validateOutputPath(options.outputPath);
-  const report = await runScaleBenchmark(options, { argv });
+  const provenance = captureSourceCheckoutProvenance();
+  if (options.outputPath !== undefined) {
+    await validateOutputPath(options.outputPath, provenance.packageRoot);
+  }
+  const report = await runScaleBenchmark(options, {
+    argv,
+    repository: provenance.repository
+  });
   const document = `${JSON.stringify(report, null, 2)}\n`;
   if (options.outputPath === undefined) {
     process.stdout.write(document);
@@ -982,9 +974,7 @@ async function main() {
   await writeFile(options.outputPath, document, { encoding: "utf8", flag: "wx", mode: 0o600 });
 }
 
-const invokedDirectly = process.argv[1] !== undefined
-  && pathToFileURL(resolve(process.argv[1])).href === import.meta.url;
-if (invokedDirectly) {
+if (isDirectEntrypoint(import.meta.url, process.argv[1])) {
   main().catch((cause) => {
     process.stderr.write(`${cause instanceof Error ? cause.message : "benchmark failed"}\n`);
     process.exitCode = 1;
