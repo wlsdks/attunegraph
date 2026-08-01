@@ -709,3 +709,69 @@ Every report remains `measurementOnly: true` and `claimEligible: false`. This
 checkpoint supports a bounded one-host frontier hot-path observation only. It
 does not establish p95/p99 tails, a production SLA, cross-machine behavior,
 SQLite/backend performance, or a general graph-database performance claim.
+
+### Portable decoder admission checkpoint (2026-08-01)
+
+The portable decoder already detached, canonicalized, hashed, and deeply froze
+each projection record before exact Engine admission. The old admission path
+then independently canonicalized the nested stored projection multiple more
+times to recover the same store identity. The candidate passes the first
+canonicalizer's immutable result into semantic normalization, re-mints the
+normalized projection once, and exact-matches its content ID, canonical JSON,
+and byte length before returning the identity. It retains the independent
+stored-projection content hash, canonical observation and assertion checks,
+wire bytes, ordering, budgets, typed corruption behavior, sink reentry and
+abort semantics, and exact terminal convergence.
+
+The base was clean commit
+`5b0e63923215a929d2d401670cad1ada78f48ed5`, tree
+`ef40d3b9d37841a86984bea856bb79fc43531f1c`. The candidate source was clean
+commit `c028ca7974d6a41d75e4f1e3622d4e64d25939ed`, tree
+`f4b2dd129831128aed1c8ae790d0fd0b133b1fc4`. Both used lockfile SHA-256
+`c696e0cdde9b5e21ee598af9101b4611b5e60e4b75b14c5f5a36e47f8a6338c4`.
+
+Five fresh-process pairs ran in AB, BA, AB, BA, AB order. All reports used
+Node 24.16.0 and pnpm 10.18.0 on macOS arm64, Apple M2 Max, 12 logical CPUs,
+and 68,719,476,736 bytes of memory with `--scale=10000 --profile=portable
+--concurrency=1 --warmups=1 --repetitions=3`. Every report bound the same
+10,000-assertion, 313-shard corpus and 10,046,693-byte artifact. All 30 measured
+decodes produced exactly 313 projections, 313 heads, and a matching summary.
+
+Each percentage is the median of five adjacent candidate-versus-base p50
+changes, calculated inside each pair before taking the median.
+
+| Metric | Median report p50, base | Median report p50, candidate | Paired median change |
+| --- | ---: | ---: | ---: |
+| Decode latency | 2,366.14 ms | 1,660.82 ms | 29.89% reduction |
+| Decode throughput | 4,226.29 assertions/s | 6,021.11 assertions/s | 42.64% increase |
+| Encode latency | 1,990.95 ms | 1,986.81 ms | 0.33% regression |
+| Process high-water RSS | 346.7 MiB | 326.8 MiB | 3.36% regression |
+
+The last column is calculated within each adjacent pair before taking its
+median, so it is not the ratio of the two independently listed report-p50
+medians.
+
+Every pair improved decode latency by 28.85% to 31.66% and throughput by
+40.56% to 46.32%. Encode remained near noise. RSS is not classifiable: its
+paired median says the candidate was 3.36% higher, while the independently
+listed report-p50 medians point in the opposite direction. Observed maxima were
+358.9 MiB for the base and 359.0 MiB for the candidate, and the candidate
+sequence did not rise monotonically. A process-lifetime high-water mark is not
+a heap, interval-allocation, or leak measurement, so this checkpoint makes no
+memory-efficiency claim.
+
+The evidence SHA-256 values are:
+
+| Pair order | Base report SHA-256 | Candidate report SHA-256 |
+| --- | --- | --- |
+| AB | `d4a44365738770cc59dbe93c5855abcac33316b5fbdba7b2d0444568daa01147` | `7a83d0c87905d54dfee176306f99d9aba53fef2d7de6cf03fa62a25440506667` |
+| BA | `738fefbd5a596f618df9248147ac30c63c2eaf14874a37f5130c342f800f55d9` | `57ab38336cde48014e79bbb299dd6ab195707ba46afd959f0581a39c054e2165` |
+| AB | `641ef72171698426ee1212a9ddcc5c311076e683c6be334d4ce3269dd82a26bf` | `e588f7faa4dd5c458ba3207b4c5b0ea0de762c6454e32766b29c7f4d5ffaf253` |
+| BA | `f7b42c479b3d68d75420d5ae217eeb1548cd7b38ae216a2101675b20c805dfc5` | `ce28b2c50945fffc45f3ded1649c08eb97fe6b225b1bfa6d51287b0531755b77` |
+| AB | `fb3001b310678e198b73783ae0b47798ddcd5435def3fa86dce4c3563976f8b6` | `debf70a3fa46ee2c17d0cd745dd25a8fea18894aa826b285b7fc3575de5475d9` |
+
+Every report remains `measurementOnly: true` and `claimEligible: false`. Three
+samples per report cannot characterize p95/p99 tails. This checkpoint supports
+one bounded decoder hot-path observation on one host; it does not establish a
+production SLA, cross-machine behavior, memory safety, leak freedom, filesystem
+transfer performance, or a general graph-database performance claim.

@@ -381,6 +381,13 @@ the golden corpus and endpoint-direction regression test; the one-host
 measurement-only checkpoint is recorded in
 [BENCHMARKS.md](BENCHMARKS.md#working-graph-adjacency-checkpoint-2026-08-01).
 
+Portable decoding reuses the canonical store-envelope result it has already
+verified when it performs exact Engine normalization. It does not bypass the
+canonicalization boundary or trust caller-owned bytes. The bounded 10K AB/BA
+checkpoint records a 29.89% paired-median decode-latency reduction while
+disclosing unchanged encode time and unclassified RSS evidence in
+[BENCHMARKS.md](BENCHMARKS.md#portable-decoder-admission-checkpoint-2026-08-01).
+
 Fixture generation is deterministic. Regeneration must reproduce the checked-in
 inputs, `.atgx` artifacts, manifest hashes, byte counts, record identities, and
 state identities exactly.

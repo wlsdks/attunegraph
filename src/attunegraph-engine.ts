@@ -3,7 +3,8 @@ import { types as nodeTypes } from "node:util";
 import {
   CANONICAL_IMMUTABLE_ENVELOPE_LIMITS,
   CanonicalImmutableEnvelopeError,
-  canonicalizeImmutableEnvelope
+  canonicalizeImmutableEnvelope,
+  type CanonicalImmutableEnvelopeResult
 } from "./canonical-immutable-envelope.js";
 import { ACTIVATION_PREDICATES, MAX_ACTIVATION_ESTIMATED_TOKENS } from "./constants.js";
 import { AttuneGraphError } from "./attunegraph-error.js";
@@ -330,27 +331,32 @@ function normalizeExecute(command: AttuneGraphExecuteCommand): { readonly seed: 
   return Object.freeze({ seed: safeRef(input.seed), now: instant(input.now, "execute command.now"), maxEstimatedTokens: input.maxEstimatedTokens as number });
 }
 
-function storeEnvelope(value: unknown): Readonly<Record<string, unknown>> {
+function storeEnvelope(value: unknown): CanonicalImmutableEnvelopeResult {
   const spec = { hashDomain: "attunegraph.store-projection.v1", idField: "storeEnvelopeId", idPrefix: "attunegraph-store:" };
   try {
-    return canonicalizeImmutableEnvelope(value, "external-mutable", spec).envelope;
+    return canonicalizeImmutableEnvelope(value, "external-mutable", spec);
   } catch (cause) {
     if (!(cause instanceof CanonicalImmutableEnvelopeError) || cause.code !== "PROFILE_MISMATCH") {
       throw new AttuneGraphError("CORRUPT_STORE", "Store returned an unsafe projection", { cause });
     }
   }
   try {
-    return canonicalizeImmutableEnvelope(value, "attunegraph-frozen", spec).envelope;
+    return canonicalizeImmutableEnvelope(value, "attunegraph-frozen", spec);
   } catch (cause) {
     throw new AttuneGraphError("CORRUPT_STORE", "Store returned an unsafe projection", { cause });
   }
 }
 
+interface NormalizedStoredProjectionAdmission {
+  readonly projection: AttuneGraphStoredProjection;
+  readonly projectionId: `attunegraph-store:${string}`;
+}
+
 function normalizeStoredProjectionShared(
-  value: unknown,
+  envelope: CanonicalImmutableEnvelopeResult,
   expectedScope: AttuneGraphScope | undefined
-): AttuneGraphStoredProjection {
-  const input = record(storeEnvelope(value), "stored projection", ["schemaVersion", "storeEnvelopeId", "snapshot", "observationId", "canonicalProjection", "projectionFingerprint", "observedAt", "sourceFreshness", "assertions"], ["schemaVersion", "storeEnvelopeId", "snapshot", "observationId", "canonicalProjection", "projectionFingerprint", "observedAt", "sourceFreshness", "assertions"], "CORRUPT_STORE");
+): NormalizedStoredProjectionAdmission {
+  const input = record(envelope.envelope, "stored projection", ["schemaVersion", "storeEnvelopeId", "snapshot", "observationId", "canonicalProjection", "projectionFingerprint", "observedAt", "sourceFreshness", "assertions"], ["schemaVersion", "storeEnvelopeId", "snapshot", "observationId", "canonicalProjection", "projectionFingerprint", "observedAt", "sourceFreshness", "assertions"], "CORRUPT_STORE");
   if (input.schemaVersion !== 1) {
     if (typeof input.schemaVersion === "number" && input.schemaVersion > 1) attuneGraphError("FUTURE_STORE_STATE", "Store projection schema is newer than this engine");
     attuneGraphError("CORRUPT_STORE", "Store projection schema is invalid");
@@ -401,7 +407,7 @@ function normalizeStoredProjectionShared(
   let rawAssertions: readonly GraphAssertion[];
   try { rawAssertions = dedupeAssertions(normalizeGraphAssertionBatch(input.assertions), "CORRUPT_STORE"); } catch (cause) { if (cause instanceof AttuneGraphError) throw cause; throw new AttuneGraphError("CORRUPT_STORE", "stored projection assertions are invalid", { cause }); }
   if (JSON.stringify(rawAssertions) !== observation.assertionFingerprint) attuneGraphError("CORRUPT_STORE", "stored projection assertions do not match its canonical observation");
-  return Object.freeze({
+  const projection = Object.freeze({
     schemaVersion: 1,
     snapshot: freezeSnapshot(storedSnapshot),
     observationId: observation.observationId,
@@ -411,19 +417,26 @@ function normalizeStoredProjectionShared(
     sourceFreshness: Object.freeze({ ...observation.sourceFreshness }),
     assertions: Object.freeze([...observation.assertions])
   });
+  return Object.freeze({
+    projection,
+    projectionId: envelope.contentId as `attunegraph-store:${string}`
+  });
 }
 
 export function normalizeStoredProjection(
   value: unknown,
   expectedScope: AttuneGraphScope
 ): AttuneGraphStoredProjection {
-  return normalizeStoredProjectionShared(value, expectedScope);
+  return normalizeStoredProjectionShared(
+    storeEnvelope(value),
+    expectedScope
+  ).projection;
 }
 
 export function normalizeStoredProjectionForPortableDecoder(
-  value: unknown
-): AttuneGraphStoredProjection {
-  return normalizeStoredProjectionShared(value, undefined);
+  envelope: CanonicalImmutableEnvelopeResult
+): NormalizedStoredProjectionAdmission {
+  return normalizeStoredProjectionShared(envelope, undefined);
 }
 
 function assertionActive(assertion: GraphAssertion, now: string): boolean {

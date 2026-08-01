@@ -83,14 +83,34 @@ export function admitPortableProjectionForDecoder(
       value,
       STORE_ENVELOPE_SPEC
     );
-  const admitted = admitNormalizedPortableProjection(
-    normalizeStoredProjectionForPortableDecoder(minted.envelope)
+  const admitted = normalizeStoredProjectionForPortableDecoder(
+    minted
   );
-  if (admitted.identity.projectionId !== minted.contentId) {
+  const rebound =
+    mintCanonicalImmutableEnvelopeFromFrozenUnsignedForInternalUse(
+      admitted.projection,
+      STORE_ENVELOPE_SPEC
+    );
+  if (
+    admitted.projectionId !== minted.contentId
+    || rebound.contentId !== minted.contentId
+    || rebound.canonicalJson !== minted.canonicalJson
+    || rebound.canonicalByteLength !== minted.canonicalByteLength
+  ) {
     throw new AttuneGraphError(
       "CORRUPT_STORE",
       "Portable decoder projection identity does not match its stored envelope"
     );
   }
-  return admitted;
+  const scope = Object.freeze({
+    sourceId: admitted.projection.snapshot.scope.sourceId,
+    threadId: admitted.projection.snapshot.scope.threadId
+  });
+  const identity = Object.freeze({
+    scope,
+    generation: admitted.projection.snapshot.generation,
+    commitId: admitted.projection.snapshot.commitId,
+    projectionId: rebound.contentId as `attunegraph-store:${string}`
+  });
+  return Object.freeze({ projection: admitted.projection, identity });
 }
