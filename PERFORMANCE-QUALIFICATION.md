@@ -99,6 +99,12 @@ The current harnesses prove less than their largest number may suggest:
 - `generation-churn-8x40@1` is now the first durable SQLite decision vertical:
   16 active plus 24 inactive assertions per head, eight generations, and one
   exact read after a same-process new-Worker graceful reopen;
+- `four-session-mixed-80r20w@1` is now the first real multi-session vertical:
+  four public sessions and Workers share one SQLite file across a deterministic
+  100-operation 80-read/20-write timed window, followed by exact graceful
+  reopen verification and settled DB/WAL/SHM logical-size observations. It is
+  measurement-only and does not prove database execution overlap, contention,
+  tails, cold restart, or long-run growth;
 - the 1M scale workload distributes one million assertions across many bounded
   scopes; it is not a one-million-edge graph query;
 - `agent-decision-read-scale@1` measures in-memory scopes with at most 48
@@ -114,10 +120,10 @@ The 90-level qualification stage targets the workload an AI agent actually
 puts on the engine:
 
 1. Extend the shipped versioned durable decision vertical from its current
-   16-active/24-inactive, generation-8, single-client graceful-reopen cell to
-   48 and 256 active assertions, larger inactive sets, generations 1 and 64,
-   paired in-memory/SQLite profiles, 1/4/16 real sessions, 80/20 read/write
-   phases, and exact cross-process restart/reopen verification.
+   16-active/24-inactive cells and four-session distinct-scope 80/20 schedule to
+   48 and 256 active assertions, larger inactive sets, generation 64, paired
+   in-memory/SQLite profiles, 1/4/16 sessions, same-scope contention, sustained
+   repetitions, and exact cross-process restart/reopen verification.
 2. Bind verified projection and query-index reuse to an exact commit identity,
    or prove an equivalent incremental design, so an unchanged head does not
    require avoidable full admission and index reconstruction.

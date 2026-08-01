@@ -6,6 +6,12 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add `four-session-mixed-80r20w@1`, a runnable measurement-only durable
+  SQLite tracer using four independent public sessions and Workers over one
+  shared file. Its deterministic 80-read/20-write timed window is derived from
+  an operation ledger, exact public results are pinned through graceful reopen,
+  and settled DB/WAL/SHM logical sizes are reported with explicit concurrency,
+  timing, provenance, and qualification non-claims.
 - Add `generation-churn-8x40@1`, a measurement-only durable SQLite agent
   decision tracer using only the public local API. It projects eight
   generation-specific 16-active/24-temporal-decoy heads, gracefully reopens a

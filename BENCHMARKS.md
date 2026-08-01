@@ -469,6 +469,64 @@ contention, 48/256 active assertions, 48 temporal decoys, long-run storage
 growth, tail percentiles, or an SLA. It does not join the performance
 qualification matrix yet.
 
+## Four-session mixed durable tracer
+
+`four-session-mixed-80r20w@1` is the first public-API multi-session SQLite
+vertical. On a reviewed Linux/macOS host with Node 24.15 or newer, run:
+
+```sh
+pnpm --silent benchmark:agent-decision-mixed-durable
+```
+
+The command owns a mode-0700 temporary directory, rejects a pre-existing
+database or DB/WAL/SHM sidecar, opens four independent public sessions and
+Workers over one SQLite file, prints one JSON report, and removes the temporary
+database after output. Each client uses a distinct scope and advances from
+generation 1 to 6 with 16 active assertions plus 24 temporal decoys per head.
+The standalone programmatic function instead receives one caller-owned new
+absolute database path.
+
+The timed window contains exactly 100 public agent data operations: an initial
+four-write wave, 16 waves containing three reads and one rotating writer, then
+eight four-read waves. This is 80 reads and 20 writes in aggregate only. It is
+not a random, steady-state, or per-wave 80/20 workload. Four preparation writes,
+four pre-close verification reads, and four reopen verification reads are
+explicitly excluded, so the complete run performs 88 reads and 24 writes.
+Report counts are recomputed from the operation ledger before emission.
+
+Each operation records monotonic harness-task start and settlement offsets.
+Four outstanding tasks means only four async workload tasks were active from
+one Node main thread; it does not prove that four public-call promises or four
+SQLite operations overlapped. The public API does not expose when SQLite work
+overlaps, so the report does not claim concurrent DB execution, lock
+contention, four processes, four machines, four users, or same-scope conflicts.
+Operation timing includes workload construction, cloning, the public call, and
+exact validation; mixed wall time also includes wave bookkeeping. It is not
+pure SQLite or API latency.
+
+Every read is compared with a complete expected `working-graph@1` result,
+including the current commit, ordered assertions and refs, source provenance,
+freshness timestamp, token estimate, and diagnostics. Generation-6 results are
+also pinned to a versioned golden commit manifest before and after graceful
+close and same-process new-Worker reopen. Existing-but-safe orphan sidecars are
+rejected rather than admitted into a nominal fresh run.
+
+DB, WAL, and shared-memory files are sampled with `lstat` only at settled phase
+boundaries. The report distinguishes absent files from zero-byte files and
+requires owner-only regular files. Values are logical lengths, not allocated
+bytes or continuously observed peaks. Sequential public session closes trigger
+the adapter's PASSIVE checkpoint attempt, but the public API exposes no result;
+therefore checkpoint effectiveness, compaction, monotonic growth, retention,
+true peak size, RSS, and leak slope are not claimed.
+
+Reports remain `measurementOnly: true`, `claimEligible: false`, and
+`unattested-local-process`. They record the runtime/host, harness and workload
+hashes, but intentionally mark repository commit, tree, lockfile, and SQLite
+version as unrecorded or unavailable. A single run is not throughput or latency
+qualification, p95/p99 evidence, an SLA, a production/cross-host result, cold
+disk/process restart, crash/power-loss recovery, or sustained-load evidence.
+Those remain separate qualification work.
+
 ## Agent decision-read active scale
 
 `agent-decision-read-scale@1` is a separate, in-memory public

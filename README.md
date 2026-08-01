@@ -314,6 +314,7 @@ pnpm benchmark:scale -- --scale=10000 --profile=local-session-update-comparison 
 pnpm benchmark:agent-decision-read -- --workload=agent-decision-read@1 --warmups=0 --repetitions=1
 pnpm benchmark:agent-decision-read-scale -- --workload=agent-decision-read-scale@1 --warmups=1 --repetitions=5
 pnpm --silent benchmark:agent-decision-read-durable
+pnpm --silent benchmark:agent-decision-mixed-durable
 pnpm benchmark:performance -- --scale=10000 --profile=local-session-concurrent --concurrency=4 --warmups=1 --repetitions=2
 pnpm benchmark:performance -- --scale=10000 --profile=portable --concurrency=1 --warmups=1 --repetitions=1
 pnpm performance:regression -- --manifest=/absolute/path/performance-regression-manifest.json
@@ -332,13 +333,17 @@ pnpm readiness:score -- --as-of=2026-07-31T00:00:00.000Z \
 
 The benchmark's fixed connected v2 corpus, evidence schema, output safety, and
 claim boundary are documented in [BENCHMARKS.md](BENCHMARKS.md). It includes
-measurement-only in-memory decision workloads and a separate durable SQLite
-tracer. The durable tracer writes eight generations, gracefully closes the
+measurement-only in-memory decision workloads and two durable SQLite tracers.
+The single-session tracer writes eight generations, gracefully closes the
 Store, opens a new Worker in the same process, and verifies one exact decision
-read. It is not a cold-cache, crash-recovery, multi-client, or qualification
-claim. The real 10K lifecycle proof and the 100K/1M runs are separate evidence
-activities, not normal test gates. In particular, the current 1M workload is a
-many-scope throughput test, not a one-million-edge graph claim.
+read. The four-session tracer exercises a deterministic 100-operation timed
+schedule against one shared SQLite file, verifies the final public results
+after a new Worker opens, and records settled DB/WAL/SHM logical sizes. Both are
+permanently claim-ineligible: they do not establish cold-cache, crash recovery,
+database execution overlap, lock contention, tails, SLA, or qualification. The
+real 10K lifecycle proof and the 100K/1M runs are separate evidence activities,
+not normal test gates. In particular, the current 1M workload is a many-scope
+throughput test, not a one-million-edge graph claim.
 
 The full gate inventory and artifact contract are documented in
 [READINESS.md](READINESS.md). Every name has one versioned fixed contract. Two
