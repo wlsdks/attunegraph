@@ -81,3 +81,55 @@ not authenticate who executed it. A hand-authored file that perfectly reproduces
 producer schema can still only establish internal integrity, never independent provenance.
 Release/readiness evidence must ultimately bind these reports to trusted CI artifact provenance or
 an independent evaluator before making a public qualification claim.
+
+## External-product performance roadmap
+
+Performance is part of the public engine contract now that AttuneGraph is a
+standalone project. Optimizations are admitted only when they preserve exact
+semantic, temporal, provenance, authority, abstention, ordering, and budget
+results. A plausible CPU or allocation reduction is not enough: the candidate
+must improve a fixed public workload in paired clean-revision measurements. A
+mixed or noisy result is rejected instead of being merged on intuition.
+
+The current harnesses prove less than their largest number may suggest:
+
+- the 1M scale workload distributes one million assertions across many bounded
+  scopes; it is not a one-million-edge graph query;
+- `agent-decision-read-scale@1` measures in-memory scopes with at most 48
+  active assertions and batches of independent single-seed reads;
+- portable evidence materializes one contiguous artifact and does not prove a
+  bounded-memory filesystem transfer;
+- RSS is a process-lifetime high-water observation, not heap, allocation,
+  Worker process-tree, GC-pause, or leak-slope evidence;
+- p95, p99, SLA, cross-host, and general graph-database claims remain
+  unavailable where the report contract says they are unavailable.
+
+The 90-level qualification stage targets the workload an AI agent actually
+puts on the engine:
+
+1. Add a versioned durable decision workload with 16, 48, and 256 active
+   assertions, large inactive/expired/superseded sets, generations 1, 8, and
+   64, in-memory and SQLite profiles, 1/4/16 clients, 80/20 read/write phases,
+   and exact restart/reopen verification.
+2. Bind verified projection and query-index reuse to an exact commit identity,
+   or prove an equivalent incremental design, so an unchanged head does not
+   require avoidable full admission and index reconstruction.
+3. Record interval memory for the main process and Worker, heap/external/
+   array-buffer peaks, GC pauses where observable, and repeated-run slope.
+4. Measure SQLite database and WAL growth, checkpoint cost, contention,
+   retention, compaction, and reopen latency over generation churn.
+5. Connect the fixed performance checks in the readiness inventory to real
+   versioned evidence producers instead of accepting substitute commands.
+6. Run the full six-report matrix on dedicated runners, calibrate absolute
+   thresholds independently, attest the raw artifacts, and keep ordinary PR
+   CI on short semantic and performance smoke gates.
+7. Add installed-package cold start, import, tarball-size, and public streaming
+   export/import measurements before making external packaging claims.
+
+The later 99-level gate requires enough independent samples for supported tail
+percentiles, reference classes for supported OS/architecture/Node combinations,
+long-running memory and database-growth evidence, one real Muse trace replay,
+and at least one independent non-Muse agent workload. Rust or another native
+component is introduced only when a measured approved workload shows that the
+TypeScript implementation prevents an accepted target; language choice itself
+is not a performance result.

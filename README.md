@@ -44,6 +44,9 @@ Harnesses time the public operations an agent invokes, retain raw samples, bind
 evidence to an unchanged clean revision and host identity, and keep unsupported
 percentiles null. The bounded scale workload is an optimization detector for
 its declared shapes; it is not a general scalability or production-SLA claim.
+The external-product performance priorities, admission rules, and path from
+measurement-only evidence to a qualified public engine are maintained in
+[PERFORMANCE-QUALIFICATION.md](PERFORMANCE-QUALIFICATION.md#external-product-performance-roadmap).
 
 The package is not yet published to a registry and does not provide a hosted
 service. Its API is usable locally from this repository now.
@@ -331,7 +334,8 @@ claim boundary are documented in [BENCHMARKS.md](BENCHMARKS.md). It also fixes
 the measurement-only in-memory agent decision-read workload; that profile is
 not a SQLite/backend claim and is not part of performance qualification. The
 real 10K lifecycle proof and the 100K/1M runs are separate evidence activities,
-not normal test gates.
+not normal test gates. In particular, the current 1M workload is a many-scope
+throughput test, not a one-million-edge graph claim.
 
 The full gate inventory and artifact contract are documented in
 [READINESS.md](READINESS.md). Every name has one versioned fixed contract. Two
