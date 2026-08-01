@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -28,11 +28,21 @@ async function createRepository() {
   return root;
 }
 
+async function directoryIdentity(path) {
+  const stat = await lstat(path, { bigint: true });
+  return {
+    device: stat.dev,
+    inode: stat.ino,
+    isDirectory: stat.isDirectory()
+  };
+}
+
 it("binds revision evidence to the exact clean source-checkout root", async () => {
   const root = await createRepository();
   try {
     const captured = captureSourceCheckoutProvenance({ packageRoot: root });
-    expect(captured.packageRoot).toBe(await realpath(root));
+    expect(await directoryIdentity(captured.packageRoot))
+      .toEqual(await directoryIdentity(root));
     expect(captured.repository).toMatchObject({
       clean: true,
       commit: git(root, "rev-parse", "HEAD"),
