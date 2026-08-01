@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import {
+  READINESS_CHECK_CONTRACTS_V2,
+  READINESS_CONTRACT_SCHEMA_V2,
   readinessCheckContract,
   readinessContractsMatchInventory,
   readinessContractSnapshot,
@@ -16,16 +18,22 @@ import {
 } from "./readiness-check-contracts.mjs";
 import {
   READINESS_MEASUREMENT_PROVENANCE_SCHEMA,
+  READINESS_MEASUREMENT_PROVENANCE_SCHEMA_V2,
   READINESS_MEASUREMENT_RESULT_SCHEMA,
+  READINESS_MEASUREMENT_RESULT_SCHEMA_V2,
   readinessMeasurementContract,
   readinessMeasurementContractSnapshot
 } from "./readiness-measurement-contracts.mjs";
 import {
   createReadinessToolchain,
+  inspectReadinessConsumerSubject,
   parseReadinessArguments,
   READINESS_CHECK_SCHEMA,
+  READINESS_CHECK_SCHEMA_V2,
   READINESS_EVIDENCE_SCHEMA,
+  READINESS_EVIDENCE_SCHEMA_V2,
   READINESS_GATES,
+  READINESS_GATES_V2,
   readReadinessRepositoryRegularFile,
   scoreReadinessEvidence
 } from "./score-attunegraph-readiness.mjs";
@@ -317,8 +325,9 @@ function mixedMeasurementReport() {
 async function createRepositoryFixture() {
   const directory = await mkdtemp(join(tmpdir(), "attunegraph-readiness-protocol-"));
   const attunegraph = join(directory, "attunegraph");
+  const consumer = join(directory, "consumer");
   const muse = join(directory, "muse");
-  await Promise.all([mkdir(attunegraph), mkdir(muse)]);
+  await Promise.all([mkdir(attunegraph), mkdir(consumer), mkdir(muse)]);
   await initializeRepository(attunegraph, "attunegraph.txt");
   await mkdir(join(attunegraph, "scripts"));
   await writeFile(
@@ -332,6 +341,10 @@ async function createRepositoryFixture() {
   git(muse, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", attunegraph, "packages/attunegraph"]);
   git(muse, ["add", ".gitmodules", "packages/attunegraph"]);
   git(muse, ["commit", "-qm", "bind AttuneGraph gitlink"]);
+  await initializeRepository(consumer, "consumer.txt");
+  git(consumer, ["-c", "protocol.file.allow=always", "submodule", "add", "-q", attunegraph, "vendor/attunegraph"]);
+  git(consumer, ["add", ".gitmodules", "vendor/attunegraph"]);
+  git(consumer, ["commit", "-qm", "bind AttuneGraph consumer gitlink"]);
   const subject = {
     attunegraph: attunegraphSubject,
     muse: {
@@ -345,7 +358,7 @@ async function createRepositoryFixture() {
     packageManager: "pnpm/10.18.0",
     platform: "fixture-platform"
   });
-  return { attunegraph, directory, muse, subject, toolchain };
+  return { attunegraph, consumer, directory, muse, subject, toolchain };
 }
 
 async function createFixture() {
@@ -509,6 +522,40 @@ async function syncMeasurementStdout(fixture) {
   await syncMeasurementResult(fixture);
 }
 
+async function upgradeFixtureToV2(fixture) {
+  const inspected = inspectReadinessConsumerSubject({
+    attunegraphRepository: repositoryFixture.attunegraph,
+    consumerGitlinkPath: "vendor/attunegraph",
+    consumerRepository: repositoryFixture.consumer
+  });
+  for (const entry of fixture.evidence.checks) {
+    if (entry.gate === "muse-integration") entry.gate = "consumer-integration";
+    const result = fixture.results.get(entry.name);
+    result.command = structuredClone(readinessContractSnapshot(
+      readinessCheckContract(entry.name, READINESS_CONTRACT_SCHEMA_V2)
+    ));
+    result.cwd = result.command.cwdRole === "consumer"
+      ? inspected.consumerRoot
+      : inspected.attunegraphRoot;
+    result.gate = entry.gate;
+    result.provenance.producer = "capture-attunegraph-readiness@2";
+    result.provenance.schema = "attunegraph-readiness-provenance@2";
+    result.schema = READINESS_CHECK_SCHEMA_V2;
+    result.subject = structuredClone(inspected.subject);
+    await syncResult(fixture, entry.name);
+  }
+  fixture.measurement.result.provenance.producer = "capture-attunegraph-measurement@2";
+  fixture.measurement.result.provenance.schema = READINESS_MEASUREMENT_PROVENANCE_SCHEMA_V2;
+  fixture.measurement.result.schema = READINESS_MEASUREMENT_RESULT_SCHEMA_V2;
+  fixture.measurement.result.subject = structuredClone(inspected.subject);
+  await syncMeasurementResult(fixture);
+  fixture.consumer = repositoryFixture.consumer;
+  fixture.consumerGitlinkPath = "vendor/attunegraph";
+  fixture.evidence.schema = READINESS_EVIDENCE_SCHEMA_V2;
+  fixture.evidence.subject = inspected.subject;
+  return fixture;
+}
+
 function score(fixture, asOf = AS_OF) {
   return scoreReadinessEvidence({
     asOf,
@@ -516,6 +563,17 @@ function score(fixture, asOf = AS_OF) {
     evidence: fixture.evidence,
     evidenceDirectory: fixture.evidenceDirectory,
     museRepository: fixture.muse
+  });
+}
+
+function scoreV2(fixture, asOf = AS_OF) {
+  return scoreReadinessEvidence({
+    asOf,
+    attunegraphRepository: fixture.attunegraph,
+    consumerGitlinkPath: fixture.consumerGitlinkPath,
+    consumerRepository: fixture.consumer,
+    evidence: fixture.evidence,
+    evidenceDirectory: fixture.evidenceDirectory
   });
 }
 
@@ -540,6 +598,55 @@ describe("AttuneGraph readiness evidence protocol", () => {
     expect(REQUIRED_CHECKS).toHaveLength(37);
     expect(new Set(REQUIRED_CHECKS).size).toBe(37);
     expect(readinessContractsMatchInventory(READINESS_GATES)).toBe(true);
+  });
+
+  it("binds the additive V2 inventory to a generic consumer contract", () => {
+    const required = READINESS_GATES_V2.flatMap((gate) => gate.checks);
+    expect(READINESS_GATES_V2).toHaveLength(8);
+    expect(required).toHaveLength(37);
+    expect(READINESS_GATES_V2.find((gate) => gate.name === "consumer-integration"))
+      .toMatchObject({ weight: 20 });
+    expect(READINESS_GATES_V2.some((gate) => gate.name === "muse-integration")).toBe(false);
+    expect(readinessCheckContract("submodule-pinned", READINESS_CONTRACT_SCHEMA_V2))
+      .toMatchObject({
+        cwdRole: "consumer",
+        gate: "consumer-integration",
+        id: "attunegraph-readiness-check-contract@2:submodule-pinned"
+      });
+    expect(readinessCheckContract(
+      "working-graph-golden-corpus",
+      READINESS_CONTRACT_SCHEMA_V2
+    )?.argv).toEqual([
+      "node",
+      "scripts/run-working-graph-readiness.mjs",
+      "--check=working-graph-golden-corpus",
+      `--contract-schema=${READINESS_CONTRACT_SCHEMA_V2}`
+    ]);
+    expect(readinessContractsMatchInventory(READINESS_GATES_V2, READINESS_CHECK_CONTRACTS_V2))
+      .toBe(true);
+  });
+
+  it("inspects a clean generic consumer subject without a Muse field", () => {
+    const inspected = inspectReadinessConsumerSubject({
+      attunegraphRepository: repositoryFixture.attunegraph,
+      consumerGitlinkPath: "vendor/attunegraph",
+      consumerRepository: repositoryFixture.consumer
+    });
+    expect(inspected).toMatchObject({
+      attunegraphRoot: realpathSync(repositoryFixture.attunegraph),
+      consumerRoot: realpathSync(repositoryFixture.consumer),
+      subject: {
+        attunegraph: repositorySubject(repositoryFixture.attunegraph),
+        consumer: {
+          ...repositorySubject(repositoryFixture.consumer),
+          attunegraphGitlink: {
+            path: "vendor/attunegraph",
+            sha: repositorySubject(repositoryFixture.attunegraph).sha
+          }
+        }
+      }
+    });
+    expect(inspected.subject).not.toHaveProperty("muse");
   });
 
   it("pins performance parameters instead of accepting caller-selected measurements", () => {
@@ -596,18 +703,107 @@ describe("AttuneGraph readiness evidence protocol", () => {
     });
   });
 
-  it("rejects pre-release evidence schema and producer identifiers", async () => {
+  it("scores a generic V2 consumer manifest without a Muse subject or gate", async () => {
+    await withFixture(async (fixture) => {
+      await upgradeFixtureToV2(fixture);
+      const scored = scoreV2(fixture);
+      expect(scored).toMatchObject({
+        authenticity: "unattested",
+        eligible: false,
+        schema: "attunegraph-readiness-score@2",
+        score: 0,
+        subject: {
+          attunegraph: expect.any(Object),
+          consumer: expect.any(Object)
+        }
+      });
+      expect(scored.subject).not.toHaveProperty("muse");
+      expect(scored.gates.some((gate) => gate.name === "consumer-integration")).toBe(true);
+      expect(scored.gates.some((gate) => gate.name === "muse-integration")).toBe(false);
+    });
+  });
+
+  it("rejects cross-version evidence arguments, future schemas, and producer identifiers", async () => {
     await withFixture(async (fixture) => {
       fixture.evidence.schema = "attunegraph-readiness-evidence@2";
-      expect(() => score(fixture)).toThrow(/schema must be attunegraph-readiness-evidence@1/u);
+      expect(() => score(fixture)).toThrow(/must not mix V1 Muse and V2 consumer arguments/u);
       fixture.evidence.schema = "attunegraph-readiness-evidence@3";
-      expect(() => score(fixture)).toThrow(/schema must be attunegraph-readiness-evidence@1/u);
+      expect(() => score(fixture)).toThrow(/unsupported readiness evidence schema/u);
 
       fixture.evidence.schema = READINESS_EVIDENCE_SCHEMA;
       fixture.results.get("inspect").provenance.producer = "capture-attunegraph-readiness@2";
       await syncResult(fixture, "inspect");
       expect(() => score(fixture)).toThrow(/provenance.*producer is unsupported/u);
     });
+  });
+
+  it("rejects V1 and V2 descriptor or subject shapes mixed inside one manifest", async () => {
+    await withFixture(async (fixture) => {
+      const v1Subject = structuredClone(fixture.evidence.subject);
+      await upgradeFixtureToV2(fixture);
+      const result = fixture.results.get("inspect");
+      result.schema = READINESS_CHECK_SCHEMA;
+      await syncResult(fixture, "inspect");
+      expect(() => scoreV2(fixture)).toThrow(/result schema must be attunegraph-readiness-check@2/u);
+
+      result.schema = READINESS_CHECK_SCHEMA_V2;
+      result.subject = v1Subject;
+      await syncResult(fixture, "inspect");
+      expect(() => scoreV2(fixture)).toThrow(/subject has unknown or missing fields/u);
+    });
+
+    await withFixture(async (fixture) => {
+      const result = fixture.results.get("inspect");
+      result.schema = READINESS_CHECK_SCHEMA_V2;
+      await syncResult(fixture, "inspect");
+      expect(() => score(fixture)).toThrow(/result schema must be attunegraph-readiness-check@1/u);
+    });
+  });
+
+  it("fails closed for dirty, missing, wrong-pin, traversal, and symlink consumer bindings", async () => {
+    const dirtyPath = join(repositoryFixture.consumer, "dirty.txt");
+    await writeFile(dirtyPath, "dirty\n");
+    try {
+      expect(() => inspectReadinessConsumerSubject({
+        attunegraphRepository: repositoryFixture.attunegraph,
+        consumerGitlinkPath: "vendor/attunegraph",
+        consumerRepository: repositoryFixture.consumer
+      })).toThrow(/Consumer repository is dirty/u);
+    } finally {
+      await rm(dirtyPath, { force: true });
+    }
+
+    expect(() => inspectReadinessConsumerSubject({
+      attunegraphRepository: repositoryFixture.attunegraph,
+      consumerGitlinkPath: "vendor/missing",
+      consumerRepository: repositoryFixture.consumer
+    })).toThrow(/Consumer gitlink is missing/u);
+    expect(() => inspectReadinessConsumerSubject({
+      attunegraphRepository: repositoryFixture.attunegraph,
+      consumerGitlinkPath: "../attunegraph",
+      consumerRepository: repositoryFixture.consumer
+    })).toThrow(/relative without traversal/u);
+
+    const directory = await mkdtemp(join(tmpdir(), "attunegraph-wrong-pin-"));
+    const wrong = join(directory, "wrong");
+    const linked = join(directory, "linked-consumer");
+    await mkdir(wrong);
+    await initializeRepository(wrong, "wrong.txt");
+    try {
+      expect(() => inspectReadinessConsumerSubject({
+        attunegraphRepository: wrong,
+        consumerGitlinkPath: "vendor/attunegraph",
+        consumerRepository: repositoryFixture.consumer
+      })).toThrow(/gitlink does not equal the AttuneGraph subject SHA/u);
+      await symlink(repositoryFixture.consumer, linked, process.platform === "win32" ? "junction" : "dir");
+      expect(() => inspectReadinessConsumerSubject({
+        attunegraphRepository: repositoryFixture.attunegraph,
+        consumerGitlinkPath: "vendor/attunegraph",
+        consumerRepository: linked
+      })).toThrow(/repository path must not be a symlink/u);
+    } finally {
+      await rm(directory, { force: true, recursive: true });
+    }
   });
 
   it("reports one unscored measurement without changing any gate or score", async () => {
@@ -843,5 +1039,50 @@ describe("AttuneGraph readiness evidence protocol", () => {
       "--attunegraph-repository=.",
       "--muse-repository=../muse"
     ])).toThrow(/--as-of/u);
+  });
+
+  it("parses the explicit host-neutral consumer scorer profile without accepting V1 arguments", () => {
+    const v1Arguments = [
+      "--as-of=2026-07-31T00:00:00.000Z",
+      "--evidence=evidence.json",
+      "--attunegraph-repository=/tmp/attunegraph",
+      "--muse-repository=/tmp/muse"
+    ];
+    expect(parseReadinessArguments([
+      ...v1Arguments,
+      "--evidence-schema=attunegraph-readiness-evidence@1"
+    ])).toEqual(parseReadinessArguments(v1Arguments));
+    expect(parseReadinessArguments([
+      "--as-of=2026-07-31T00:00:00.000Z",
+      "--evidence=evidence.json",
+      "--attunegraph-repository=/tmp/attunegraph",
+      "--evidence-schema=attunegraph-readiness-evidence@2",
+      "--consumer-repository=/tmp/consumer",
+      "--consumer-gitlink=vendor/attunegraph"
+    ])).toEqual({
+      asOf: "2026-07-31T00:00:00.000Z",
+      attunegraphRepository: "/tmp/attunegraph",
+      consumerGitlinkPath: "vendor/attunegraph",
+      consumerRepository: "/tmp/consumer",
+      evidencePath: "evidence.json",
+      evidenceSchema: "attunegraph-readiness-evidence@2"
+    });
+    expect(() => parseReadinessArguments([
+      "--as-of=2026-07-31T00:00:00.000Z",
+      "--evidence=evidence.json",
+      "--attunegraph-repository=/tmp/attunegraph",
+      "--evidence-schema=attunegraph-readiness-evidence@2",
+      "--consumer-repository=/tmp/consumer",
+      "--consumer-gitlink=vendor/attunegraph",
+      "--muse-repository=/tmp/muse"
+    ])).toThrow(/must not mix V1 Muse and V2 consumer arguments/u);
+    expect(() => parseReadinessArguments([
+      "--as-of=2026-07-31T00:00:00.000Z",
+      "--evidence=evidence.json",
+      "--attunegraph-repository=/tmp/attunegraph",
+      "--evidence-schema=attunegraph-readiness-evidence@3",
+      "--consumer-repository=/tmp/consumer",
+      "--consumer-gitlink=vendor/attunegraph"
+    ])).toThrow(/unsupported readiness evidence schema/u);
   });
 });

@@ -6,15 +6,21 @@ import { fileURLToPath } from "node:url";
 
 import {
   READINESS_MEASUREMENT_CAPTURE_SCHEMA,
+  READINESS_MEASUREMENT_CAPTURE_SCHEMA_V2,
   READINESS_MEASUREMENT_PROVENANCE_SCHEMA,
+  READINESS_MEASUREMENT_PROVENANCE_SCHEMA_V2,
   READINESS_MEASUREMENT_RESULT_SCHEMA,
+  READINESS_MEASUREMENT_RESULT_SCHEMA_V2,
   readinessMeasurementContract,
   readinessMeasurementContractSnapshot,
   validateReadinessMeasurementOutput
 } from "./readiness-measurement-contracts.mjs";
 import {
   createReadinessToolchain,
+  inspectReadinessConsumerSubject,
   inspectReadinessSubject,
+  READINESS_EVIDENCE_SCHEMA,
+  READINESS_EVIDENCE_SCHEMA_V2,
   sha256
 } from "./score-attunegraph-readiness.mjs";
 import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
@@ -28,14 +34,35 @@ const REQUIRED_ARGUMENTS = Object.freeze([
   "name",
   "output-directory",
   "attunegraph-repository",
-  "muse-repository",
   "cwd"
 ]);
 const CAPTURE_ARGUMENTS = new Set([
   ...REQUIRED_ARGUMENTS,
+  "consumer-gitlink",
+  "consumer-repository",
+  "evidence-schema",
   "muse-gitlink",
+  "muse-repository",
   "producer-mode"
 ]);
+const CAPTURE_PROFILES = Object.freeze({
+  [READINESS_EVIDENCE_SCHEMA]: Object.freeze({
+    captureSchema: READINESS_MEASUREMENT_CAPTURE_SCHEMA,
+    inspector: inspectReadinessSubject,
+    producer: "capture-attunegraph-measurement@1",
+    provenanceSchema: READINESS_MEASUREMENT_PROVENANCE_SCHEMA,
+    resultSchema: READINESS_MEASUREMENT_RESULT_SCHEMA,
+    version: 1
+  }),
+  [READINESS_EVIDENCE_SCHEMA_V2]: Object.freeze({
+    captureSchema: READINESS_MEASUREMENT_CAPTURE_SCHEMA_V2,
+    inspector: inspectReadinessConsumerSubject,
+    producer: "capture-attunegraph-measurement@2",
+    provenanceSchema: READINESS_MEASUREMENT_PROVENANCE_SCHEMA_V2,
+    resultSchema: READINESS_MEASUREMENT_RESULT_SCHEMA_V2,
+    version: 2
+  })
+});
 
 function captureError(message) {
   throw new Error(`readiness measurement capture refused: ${message}`);
@@ -57,6 +84,22 @@ export function parseReadinessMeasurementCaptureArguments(args) {
   for (const required of REQUIRED_ARGUMENTS) {
     if (!values.has(required)) captureError(`--${required} is required`);
   }
+  const evidenceSchema = values.get("evidence-schema") ?? READINESS_EVIDENCE_SCHEMA;
+  const profile = CAPTURE_PROFILES[evidenceSchema];
+  if (!profile) captureError(`unsupported readiness evidence schema: ${evidenceSchema}`);
+  if (profile.version === 1) {
+    if (values.has("consumer-repository") || values.has("consumer-gitlink")) {
+      captureError("must not mix V1 Muse and V2 consumer arguments");
+    }
+    if (!values.has("muse-repository")) captureError("--muse-repository is required");
+  } else {
+    if (values.has("muse-repository") || values.has("muse-gitlink")) {
+      captureError("must not mix V1 Muse and V2 consumer arguments");
+    }
+    for (const required of ["consumer-repository", "consumer-gitlink"]) {
+      if (!values.has(required)) captureError(`--${required} is required`);
+    }
+  }
   const name = values.get("name");
   const contract = readinessMeasurementContract(name);
   if (!contract) captureError(`unknown measurement contract: ${name}`);
@@ -71,16 +114,55 @@ export function parseReadinessMeasurementCaptureArguments(args) {
   if (producerMode !== "local-unattested") {
     captureError("only local-unattested measurement production is supported");
   }
-  return Object.freeze({
+  const common = {
     argv: Object.freeze(argv),
     attunegraphRepository: values.get("attunegraph-repository"),
     cwd: values.get("cwd"),
-    museGitlinkPath: values.get("muse-gitlink") ?? "packages/attunegraph",
-    museRepository: values.get("muse-repository"),
     name,
     outputDirectory: values.get("output-directory"),
     producerMode
+  };
+  return Object.freeze(profile.version === 1 ? {
+    argv: common.argv,
+    attunegraphRepository: common.attunegraphRepository,
+    cwd: common.cwd,
+    museGitlinkPath: values.get("muse-gitlink") ?? "packages/attunegraph",
+    museRepository: values.get("muse-repository"),
+    name: common.name,
+    outputDirectory: common.outputDirectory,
+    producerMode: common.producerMode
+  } : {
+    ...common,
+    consumerGitlinkPath: values.get("consumer-gitlink"),
+    consumerRepository: values.get("consumer-repository"),
+    evidenceSchema
   });
+}
+
+function captureProfile(options) {
+  const evidenceSchema = options.evidenceSchema ?? READINESS_EVIDENCE_SCHEMA;
+  const profile = CAPTURE_PROFILES[evidenceSchema];
+  if (!profile) captureError(`unsupported readiness evidence schema: ${evidenceSchema}`);
+  if (
+    (profile.version === 1 && (
+      options.consumerRepository !== undefined || options.consumerGitlinkPath !== undefined
+    ))
+    || (profile.version === 2 && (
+      options.museRepository !== undefined || options.museGitlinkPath !== undefined
+    ))
+  ) {
+    captureError("must not mix V1 Muse and V2 consumer arguments");
+  }
+  if (profile.version === 1 && options.museRepository === undefined) {
+    captureError("V1 measurement capture requires a Muse repository");
+  }
+  if (
+    profile.version === 2
+    && (options.consumerRepository === undefined || options.consumerGitlinkPath === undefined)
+  ) {
+    captureError("V2 measurement capture requires a consumer repository and gitlink");
+  }
+  return profile;
 }
 
 function sanitizedEnvironment(executablePath) {
@@ -205,7 +287,8 @@ async function ensurePrivateOutputRoot(path) {
 }
 
 export async function captureReadinessMeasurement(options) {
-  const before = inspectReadinessSubject(options);
+  const profile = captureProfile(options);
+  const before = profile.inspector(options);
   const contract = readinessMeasurementContract(options.name);
   if (!contract) captureError(`unknown measurement contract: ${options.name}`);
   const lexicalCwd = resolve(options.cwd);
@@ -254,7 +337,7 @@ export async function captureReadinessMeasurement(options) {
     writeFile(stdoutPath, outcome.stdout, { flag: "wx", mode: 0o600 }),
     writeFile(stderrPath, outcome.stderr, { flag: "wx", mode: 0o600 })
   ]);
-  const after = inspectReadinessSubject(options);
+  const after = profile.inspector(options);
   if (!sameSubject(before.subject, after.subject)) {
     captureError("repository subjects changed while the measurement was running");
   }
@@ -290,10 +373,10 @@ export async function captureReadinessMeasurement(options) {
     provenance: {
       captureScriptSha256: sha256(readFileSync(fileURLToPath(import.meta.url))),
       kind: "local-unattested",
-      producer: "capture-attunegraph-measurement@1",
-      schema: READINESS_MEASUREMENT_PROVENANCE_SCHEMA
+      producer: profile.producer,
+      schema: profile.provenanceSchema
     },
-    schema: READINESS_MEASUREMENT_RESULT_SCHEMA,
+    schema: profile.resultSchema,
     signal: outcome.signal,
     spawnError: semanticError === null ? outcome.spawnError : `INVALID_OUTPUT: ${semanticError}`,
     startedAt: outcome.startedAt,
@@ -319,7 +402,7 @@ export async function captureReadinessMeasurement(options) {
         sha256: sha256(resultBody)
       })
     }),
-    schema: READINESS_MEASUREMENT_CAPTURE_SCHEMA,
+    schema: profile.captureSchema,
     subject: before.subject
   });
 }

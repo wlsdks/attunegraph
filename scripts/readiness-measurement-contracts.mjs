@@ -2,6 +2,9 @@ export const READINESS_MEASUREMENT_CONTRACT_SCHEMA = "attunegraph-readiness-meas
 export const READINESS_MEASUREMENT_CAPTURE_SCHEMA = "attunegraph-readiness-measurement-capture@1";
 export const READINESS_MEASUREMENT_RESULT_SCHEMA = "attunegraph-readiness-measurement@1";
 export const READINESS_MEASUREMENT_PROVENANCE_SCHEMA = "attunegraph-readiness-measurement-provenance@1";
+export const READINESS_MEASUREMENT_CAPTURE_SCHEMA_V2 = "attunegraph-readiness-measurement-capture@2";
+export const READINESS_MEASUREMENT_RESULT_SCHEMA_V2 = "attunegraph-readiness-measurement@2";
+export const READINESS_MEASUREMENT_PROVENANCE_SCHEMA_V2 = "attunegraph-readiness-measurement-provenance@2";
 
 const NAME = "mixed-durable-agent-decision-observation";
 const COMMIT_PATTERN = /^attunegraph-commit:attunegraph-observation:[0-9a-f]{64}$/u;

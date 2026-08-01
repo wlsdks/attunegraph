@@ -4,6 +4,10 @@ import { lstatSync, readFileSync, realpathSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 import {
+  READINESS_CHECK_CONTRACTS,
+  READINESS_CHECK_CONTRACTS_V2,
+  READINESS_CONTRACT_SCHEMA,
+  READINESS_CONTRACT_SCHEMA_V2,
   readinessCheckContract,
   readinessContractsMatchInventory,
   readinessContractSnapshot,
@@ -12,7 +16,9 @@ import {
 import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
 import {
   READINESS_MEASUREMENT_PROVENANCE_SCHEMA,
+  READINESS_MEASUREMENT_PROVENANCE_SCHEMA_V2,
   READINESS_MEASUREMENT_RESULT_SCHEMA,
+  READINESS_MEASUREMENT_RESULT_SCHEMA_V2,
   readinessMeasurementContract,
   readinessMeasurementContractSnapshot,
   validateReadinessMeasurementOutput
@@ -22,6 +28,10 @@ export const READINESS_EVIDENCE_SCHEMA = "attunegraph-readiness-evidence@1";
 export const READINESS_CHECK_SCHEMA = "attunegraph-readiness-check@1";
 export const READINESS_SCORE_SCHEMA = "attunegraph-readiness-score@1";
 export const READINESS_CAPTURE_SCHEMA = "attunegraph-readiness-capture@1";
+export const READINESS_EVIDENCE_SCHEMA_V2 = "attunegraph-readiness-evidence@2";
+export const READINESS_CHECK_SCHEMA_V2 = "attunegraph-readiness-check@2";
+export const READINESS_SCORE_SCHEMA_V2 = "attunegraph-readiness-score@2";
+export const READINESS_CAPTURE_SCHEMA_V2 = "attunegraph-readiness-capture@2";
 export const MAX_EVIDENCE_AGE_MILLISECONDS = 168 * 60 * 60 * 1_000;
 
 export const READINESS_GATES = Object.freeze([
@@ -90,10 +100,57 @@ export const READINESS_GATES = Object.freeze([
   })
 ]);
 
+export const READINESS_GATES_V2 = Object.freeze(READINESS_GATES.map((gate) => Object.freeze({
+  ...gate,
+  name: gate.name === "muse-integration" ? "consumer-integration" : gate.name
+})));
+
 const GATES_BY_NAME = new Map(READINESS_GATES.map((gate) => [gate.name, gate]));
 const CHECKS_BY_NAME = new Map(
   READINESS_GATES.flatMap((gate) => gate.checks.map((name) => [name, gate.name]))
 );
+const GATES_BY_NAME_V2 = new Map(READINESS_GATES_V2.map((gate) => [gate.name, gate]));
+const CHECKS_BY_NAME_V2 = new Map(
+  READINESS_GATES_V2.flatMap((gate) => gate.checks.map((name) => [name, gate.name]))
+);
+const READINESS_PROFILE_V1 = Object.freeze({
+  checkSchema: READINESS_CHECK_SCHEMA,
+  checksByName: CHECKS_BY_NAME,
+  consumerGate: "muse-integration",
+  consumerRole: "muse",
+  consumerRoot: "museRoot",
+  contractSchema: READINESS_CONTRACT_SCHEMA,
+  contracts: READINESS_CHECK_CONTRACTS,
+  evidenceSchema: READINESS_EVIDENCE_SCHEMA,
+  gates: READINESS_GATES,
+  gatesByName: GATES_BY_NAME,
+  measurementProducer: "capture-attunegraph-measurement@1",
+  measurementProvenanceSchema: READINESS_MEASUREMENT_PROVENANCE_SCHEMA,
+  measurementResultSchema: READINESS_MEASUREMENT_RESULT_SCHEMA,
+  provenanceSchema: "attunegraph-readiness-provenance@1",
+  readinessProducer: "capture-attunegraph-readiness@1",
+  scoreSchema: READINESS_SCORE_SCHEMA,
+  version: 1
+});
+const READINESS_PROFILE_V2 = Object.freeze({
+  checkSchema: READINESS_CHECK_SCHEMA_V2,
+  checksByName: CHECKS_BY_NAME_V2,
+  consumerGate: "consumer-integration",
+  consumerRole: "consumer",
+  consumerRoot: "consumerRoot",
+  contractSchema: READINESS_CONTRACT_SCHEMA_V2,
+  contracts: READINESS_CHECK_CONTRACTS_V2,
+  evidenceSchema: READINESS_EVIDENCE_SCHEMA_V2,
+  gates: READINESS_GATES_V2,
+  gatesByName: GATES_BY_NAME_V2,
+  measurementProducer: "capture-attunegraph-measurement@2",
+  measurementProvenanceSchema: READINESS_MEASUREMENT_PROVENANCE_SCHEMA_V2,
+  measurementResultSchema: READINESS_MEASUREMENT_RESULT_SCHEMA_V2,
+  provenanceSchema: "attunegraph-readiness-provenance@2",
+  readinessProducer: "capture-attunegraph-readiness@2",
+  scoreSchema: READINESS_SCORE_SCHEMA_V2,
+  version: 2
+});
 const SHA_PATTERN = /^[a-f0-9]{40}$/u;
 const SHA256_PATTERN = /^sha256:[a-f0-9]{64}$/u;
 const ISO_TIMESTAMP_PATTERN = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u;
@@ -101,7 +158,10 @@ const CHECK_STATES = new Set(["pass", "fail", "not-run"]);
 const CLI_ARGUMENTS = new Set([
   "as-of",
   "attunegraph-repository",
+  "consumer-gitlink",
+  "consumer-repository",
   "evidence",
+  "evidence-schema",
   "muse-repository"
 ]);
 
@@ -203,7 +263,7 @@ function validateGitlink(gitlink, name) {
   assertSha(gitlink.sha, `${name}.sha`);
 }
 
-function validateSubject(subject, name) {
+function validateSubjectV1(subject, name) {
   assertExactKeys(subject, ["attunegraph", "muse"], name);
   assertExactKeys(subject.attunegraph, ["clean", "sha", "tree"], `${name}.attunegraph`);
   assertExactKeys(subject.muse, ["attunegraphGitlink", "clean", "sha", "tree"], `${name}.muse`);
@@ -213,6 +273,23 @@ function validateSubject(subject, name) {
     if (repository.clean !== true) invalid(`${name} requires clean repository subjects`);
   }
   validateGitlink(subject.muse.attunegraphGitlink, `${name}.muse.attunegraphGitlink`);
+}
+
+function validateSubjectV2(subject, name) {
+  assertExactKeys(subject, ["attunegraph", "consumer"], name);
+  assertExactKeys(subject.attunegraph, ["clean", "sha", "tree"], `${name}.attunegraph`);
+  assertExactKeys(subject.consumer, ["attunegraphGitlink", "clean", "sha", "tree"], `${name}.consumer`);
+  for (const repository of [subject.attunegraph, subject.consumer]) {
+    assertSha(repository.sha, `${name} repository SHA`);
+    assertSha(repository.tree, `${name} repository tree SHA`);
+    if (repository.clean !== true) invalid(`${name} requires clean repository subjects`);
+  }
+  validateGitlink(subject.consumer.attunegraphGitlink, `${name}.consumer.attunegraphGitlink`);
+}
+
+function validateSubject(subject, name, profile) {
+  if (profile.version === 1) validateSubjectV1(subject, name);
+  else validateSubjectV2(subject, name);
 }
 
 function sameSubject(left, right) {
@@ -268,6 +345,13 @@ function readGitlink(museRepository, museTree, path, failure = invalid) {
   return match[1];
 }
 
+function readConsumerGitlink(consumerRepository, consumerTree, path, failure = invalid) {
+  const entry = git(consumerRepository, ["ls-tree", consumerTree, "--", path], failure);
+  const match = /^160000 commit ([a-f0-9]{40})\t/u.exec(entry);
+  if (!match) failure(`Consumer gitlink is missing at ${path}`);
+  return match[1];
+}
+
 export function inspectReadinessSubject({
   attunegraphRepository,
   museGitlinkPath = "packages/attunegraph",
@@ -296,11 +380,64 @@ export function inspectReadinessSubject({
   });
 }
 
+export function inspectReadinessConsumerSubject({
+  attunegraphRepository,
+  consumerGitlinkPath = "packages/attunegraph",
+  consumerRepository
+}) {
+  const failure = (message) => { throw new Error(`readiness capture refused: ${message}`); };
+  if (isAbsolute(consumerGitlinkPath) || consumerGitlinkPath.split(/[\\/]/u).includes("..")) {
+    failure("Consumer gitlink path must be relative without traversal");
+  }
+  const attunegraph = inspectRepository(attunegraphRepository, "AttuneGraph", failure);
+  const consumer = inspectRepository(consumerRepository, "Consumer", failure);
+  const gitlinkSha = readConsumerGitlink(
+    consumer.repository,
+    consumer.identity.tree,
+    consumerGitlinkPath,
+    failure
+  );
+  if (gitlinkSha !== attunegraph.identity.sha) {
+    failure("Consumer gitlink does not equal the AttuneGraph subject SHA");
+  }
+  return Object.freeze({
+    attunegraphRoot: attunegraph.repository,
+    consumerRoot: consumer.repository,
+    subject: Object.freeze({
+      attunegraph: Object.freeze(attunegraph.identity),
+      consumer: Object.freeze({
+        ...consumer.identity,
+        attunegraphGitlink: Object.freeze({ path: consumerGitlinkPath, sha: gitlinkSha })
+      })
+    })
+  });
+}
+
 function assertRepositoryBinding(attunegraphPath, musePath, expected) {
   const actual = inspectReadinessSubject({
     attunegraphRepository: attunegraphPath,
     museGitlinkPath: expected.muse.attunegraphGitlink.path,
     museRepository: musePath
+  });
+  if (!sameSubject(actual.subject, expected)) {
+    invalid("repositories do not match the clean exact SHA/tree/gitlink subject");
+  }
+  return actual;
+}
+
+function assertConsumerRepositoryBinding(
+  attunegraphPath,
+  consumerPath,
+  consumerGitlinkPath,
+  expected
+) {
+  if (consumerGitlinkPath !== expected.consumer.attunegraphGitlink.path) {
+    invalid("consumer gitlink argument does not match the evidence subject");
+  }
+  const actual = inspectReadinessConsumerSubject({
+    attunegraphRepository: attunegraphPath,
+    consumerGitlinkPath,
+    consumerRepository: consumerPath
   });
   if (!sameSubject(actual.subject, expected)) {
     invalid("repositories do not match the clean exact SHA/tree/gitlink subject");
@@ -399,19 +536,19 @@ function validateExecutionState(result, name) {
   }
 }
 
-function validateProvenance(provenance, name) {
+function validateProvenance(provenance, name, profile) {
   assertExactKeys(
     provenance,
     ["captureScriptSha256", "kind", "producer", "schema"],
     name
   );
-  if (provenance.schema !== "attunegraph-readiness-provenance@1") {
+  if (provenance.schema !== profile.provenanceSchema) {
     invalid(`${name}.schema is unsupported`);
   }
   if (provenance.kind !== "local-unattested") {
     invalid(`${name}.kind cannot claim attestation without live cryptographic verification`);
   }
-  if (provenance.producer !== "capture-attunegraph-readiness@1") {
+  if (provenance.producer !== profile.readinessProducer) {
     invalid(`${name}.producer is unsupported`);
   }
   if (!SHA256_PATTERN.test(provenance.captureScriptSha256)) {
@@ -419,8 +556,8 @@ function validateProvenance(provenance, name) {
   }
 }
 
-function validateCommand(command, checkName, gate, name) {
-  const contract = readinessCheckContract(checkName);
+function validateCommand(command, checkName, gate, name, profile) {
+  const contract = readinessCheckContract(checkName, profile.contractSchema);
   if (!contract || contract.gate !== gate) invalid(`${name} has no fixed check contract`);
   assertExactKeys(
     command,
@@ -451,7 +588,8 @@ function validateCheckResult(
   artifactPaths,
   evidenceSubject,
   asOfMilliseconds,
-  repositoryRoots
+  repositoryRoots,
+  profile
 ) {
   const resultBytes = assertArtifact(
     check.result,
@@ -484,8 +622,8 @@ function validateCheckResult(
     "subject",
     "toolchain"
   ], `check ${check.name}.result content`);
-  if (result.schema !== READINESS_CHECK_SCHEMA) {
-    invalid(`check ${check.name}.result schema must be ${READINESS_CHECK_SCHEMA}`);
+  if (result.schema !== profile.checkSchema) {
+    invalid(`check ${check.name}.result schema must be ${profile.checkSchema}`);
   }
   if (result.name !== check.name || result.gate !== check.gate) {
     invalid(`check ${check.name}.result name/gate does not match its manifest entry`);
@@ -494,13 +632,14 @@ function validateCheckResult(
     result.command,
     check.name,
     check.gate,
-    `check ${check.name}.result command`
+    `check ${check.name}.result command`,
+    profile
   );
   validateExecutable(result.executable, contract, result.state, `check ${check.name}.result executable`);
-  validateProvenance(result.provenance, `check ${check.name}.result provenance`);
+  validateProvenance(result.provenance, `check ${check.name}.result provenance`, profile);
   assertNonEmptyString(result.cwd, `check ${check.name}.result cwd`);
-  const expectedCwd = contract.cwdRole === "muse"
-    ? repositoryRoots.museRoot
+  const expectedCwd = contract.cwdRole === profile.consumerRole
+    ? repositoryRoots[profile.consumerRoot]
     : repositoryRoots.attunegraphRoot;
   if (result.cwd !== expectedCwd) {
     invalid(`check ${check.name}.result cwd does not match the canonical ${contract.cwdRole} repository root`);
@@ -513,7 +652,7 @@ function validateCheckResult(
   const endedAt = parseTimestamp(result.endedAt, `check ${check.name}.result endedAt`);
   if (endedAt < startedAt) invalid(`check ${check.name}.result endedAt precedes startedAt`);
   if (endedAt > asOfMilliseconds) invalid(`check ${check.name}.result endedAt is after --as-of`);
-  validateSubject(result.subject, `check ${check.name}.result subject`);
+  validateSubject(result.subject, `check ${check.name}.result subject`, profile);
   if (!sameSubject(result.subject, evidenceSubject)) {
     invalid(`check ${check.name}.result subject does not match the evidence subject`);
   }
@@ -535,16 +674,16 @@ function validateCheckResult(
   };
 }
 
-function validateMeasurementProvenance(provenance, name) {
+function validateMeasurementProvenance(provenance, name, profile) {
   assertExactKeys(
     provenance,
     ["captureScriptSha256", "kind", "producer", "schema"],
     name
   );
   if (
-    provenance.schema !== READINESS_MEASUREMENT_PROVENANCE_SCHEMA
+    provenance.schema !== profile.measurementProvenanceSchema
     || provenance.kind !== "local-unattested"
-    || provenance.producer !== "capture-attunegraph-measurement@1"
+    || provenance.producer !== profile.measurementProducer
     || !SHA256_PATTERN.test(provenance.captureScriptSha256)
   ) {
     invalid(`${name} does not match the local-unattested measurement producer`);
@@ -596,7 +735,8 @@ function validateMeasurementResult(
   artifactPaths,
   evidenceSubject,
   asOfMilliseconds,
-  repositoryRoots
+  repositoryRoots,
+  profile
 ) {
   const resultBytes = assertArtifact(
     measurement.result,
@@ -629,8 +769,8 @@ function validateMeasurementResult(
     "subject",
     "toolchain"
   ], `measurement ${measurement.name}.result content`);
-  if (result.schema !== READINESS_MEASUREMENT_RESULT_SCHEMA) {
-    invalid(`measurement ${measurement.name}.result schema must be ${READINESS_MEASUREMENT_RESULT_SCHEMA}`);
+  if (result.schema !== profile.measurementResultSchema) {
+    invalid(`measurement ${measurement.name}.result schema must be ${profile.measurementResultSchema}`);
   }
   if (result.measurement !== measurement.name) {
     invalid(`measurement ${measurement.name}.result name does not match its manifest entry`);
@@ -657,7 +797,8 @@ function validateMeasurementResult(
   );
   validateMeasurementProvenance(
     result.provenance,
-    `measurement ${measurement.name}.result provenance`
+    `measurement ${measurement.name}.result provenance`,
+    profile
   );
   validateMeasurementLimits(result.limits, `measurement ${measurement.name}.result limits`);
   if (result.cwd !== repositoryRoots.attunegraphRoot) {
@@ -671,7 +812,7 @@ function validateMeasurementResult(
   const endedAt = parseTimestamp(result.endedAt, `measurement ${measurement.name}.result endedAt`);
   if (endedAt < startedAt) invalid(`measurement ${measurement.name}.result endedAt precedes startedAt`);
   if (endedAt > asOfMilliseconds) invalid(`measurement ${measurement.name}.result endedAt is after --as-of`);
-  validateSubject(result.subject, `measurement ${measurement.name}.result subject`);
+  validateSubject(result.subject, `measurement ${measurement.name}.result subject`, profile);
   if (!sameSubject(result.subject, evidenceSubject)) {
     invalid(`measurement ${measurement.name}.result subject does not match the evidence subject`);
   }
@@ -722,18 +863,18 @@ function validateMeasurementResult(
   };
 }
 
-function validateEvidence(evidence, evidenceDirectory, asOfMilliseconds, repositoryRoots) {
+function validateEvidence(evidence, evidenceDirectory, asOfMilliseconds, repositoryRoots, profile) {
   assertExactKeys(
     evidence,
     ["checks", "measurements", "schema", "subject"],
     "evidence"
   );
-  if (evidence.schema !== READINESS_EVIDENCE_SCHEMA) {
-    invalid(`schema must be ${READINESS_EVIDENCE_SCHEMA}`);
+  if (evidence.schema !== profile.evidenceSchema) {
+    invalid(`schema must be ${profile.evidenceSchema}`);
   }
-  validateSubject(evidence.subject, "subject");
+  validateSubject(evidence.subject, "subject", profile);
   if (!Array.isArray(evidence.checks)) invalid("checks must be an array");
-  if (evidence.checks.length !== CHECKS_BY_NAME.size) {
+  if (evidence.checks.length !== profile.checksByName.size) {
     invalid("checks must contain every required check exactly once");
   }
   let evidenceRoot;
@@ -754,7 +895,7 @@ function validateEvidence(evidence, evidenceDirectory, asOfMilliseconds, reposit
     assertNonEmptyString(check.gate, `check ${check.name}.gate`);
     if (names.has(check.name)) invalid(`duplicate check name: ${check.name}`);
     names.add(check.name);
-    if (CHECKS_BY_NAME.get(check.name) !== check.gate || !GATES_BY_NAME.has(check.gate)) {
+    if (profile.checksByName.get(check.name) !== check.gate || !profile.gatesByName.has(check.gate)) {
       invalid(`check ${check.name} is not a required check for its gate`);
     }
     const result = validateCheckResult(
@@ -763,11 +904,12 @@ function validateEvidence(evidence, evidenceDirectory, asOfMilliseconds, reposit
       artifactPaths,
       evidence.subject,
       asOfMilliseconds,
-      repositoryRoots
+      repositoryRoots,
+      profile
     );
     states.set(check, result.state);
   }
-  for (const requiredName of CHECKS_BY_NAME.keys()) {
+  for (const requiredName of profile.checksByName.keys()) {
     if (!names.has(requiredName)) invalid(`missing required check: ${requiredName}`);
   }
   const measurements = [];
@@ -788,7 +930,8 @@ function validateEvidence(evidence, evidenceDirectory, asOfMilliseconds, reposit
       artifactPaths,
       evidence.subject,
       asOfMilliseconds,
-      repositoryRoots
+      repositoryRoots,
+      profile
     );
     measurements.push(Object.freeze({
       claimEligible: observed.claimEligible,
@@ -821,41 +964,94 @@ export function parseReadinessArguments(args) {
     if (values.has(match[1])) throw new Error(`duplicate readiness scorer argument: --${match[1]}`);
     values.set(match[1], match[2]);
   }
-  for (const required of CLI_ARGUMENTS) {
+  for (const required of ["as-of", "attunegraph-repository", "evidence"]) {
     if (!values.has(required)) throw new Error(`--${required} is required`);
   }
   parseTimestamp(values.get("as-of"), "--as-of");
+  const evidenceSchema = values.get("evidence-schema");
+  if (evidenceSchema === undefined || evidenceSchema === READINESS_EVIDENCE_SCHEMA) {
+    if (values.has("consumer-repository") || values.has("consumer-gitlink")) {
+      throw new Error("V1 readiness arguments must not include V2 consumer arguments");
+    }
+    if (!values.has("muse-repository")) throw new Error("--muse-repository is required");
+    return Object.freeze({
+      asOf: values.get("as-of"),
+      attunegraphRepository: values.get("attunegraph-repository"),
+      evidencePath: values.get("evidence"),
+      museRepository: values.get("muse-repository")
+    });
+  }
+  if (evidenceSchema !== READINESS_EVIDENCE_SCHEMA_V2) {
+    throw new Error(`unsupported readiness evidence schema: ${evidenceSchema}`);
+  }
+  if (values.has("muse-repository")) {
+    throw new Error("must not mix V1 Muse and V2 consumer arguments");
+  }
+  for (const required of ["consumer-repository", "consumer-gitlink"]) {
+    if (!values.has(required)) throw new Error(`--${required} is required`);
+  }
   return Object.freeze({
     asOf: values.get("as-of"),
     attunegraphRepository: values.get("attunegraph-repository"),
+    consumerGitlinkPath: values.get("consumer-gitlink"),
+    consumerRepository: values.get("consumer-repository"),
     evidencePath: values.get("evidence"),
-    museRepository: values.get("muse-repository")
+    evidenceSchema
   });
 }
 
 export function scoreReadinessEvidence({
   asOf,
   attunegraphRepository,
+  consumerGitlinkPath,
+  consumerRepository,
   evidence,
   evidenceDirectory,
   museRepository
 }) {
   const asOfMilliseconds = parseTimestamp(asOf, "--as-of");
-  if (!readinessContractsMatchInventory(READINESS_GATES)) {
+  const profile = evidence.schema === READINESS_EVIDENCE_SCHEMA
+    ? READINESS_PROFILE_V1
+    : evidence.schema === READINESS_EVIDENCE_SCHEMA_V2
+      ? READINESS_PROFILE_V2
+      : null;
+  if (profile === null) {
+    invalid(`unsupported readiness evidence schema: ${evidence.schema}`);
+  }
+  if (
+    (profile.version === 1 && (consumerRepository !== undefined || consumerGitlinkPath !== undefined))
+    || (profile.version === 2 && museRepository !== undefined)
+  ) {
+    invalid("must not mix V1 Muse and V2 consumer arguments");
+  }
+  if (profile.version === 1 && museRepository === undefined) {
+    invalid("V1 evidence requires a Muse repository");
+  }
+  if (
+    profile.version === 2
+    && (consumerRepository === undefined || consumerGitlinkPath === undefined)
+  ) {
+    invalid("V2 evidence requires a consumer repository and gitlink");
+  }
+  if (!readinessContractsMatchInventory(profile.gates, profile.contracts)) {
     invalid("fixed check-contract registry does not match the readiness inventory");
   }
-  const repositoryRoots = assertRepositoryBinding(
-    attunegraphRepository,
-    museRepository,
-    evidence.subject
-  );
+  const repositoryRoots = profile.version === 1
+    ? assertRepositoryBinding(attunegraphRepository, museRepository, evidence.subject)
+    : assertConsumerRepositoryBinding(
+      attunegraphRepository,
+      consumerRepository,
+      consumerGitlinkPath,
+      evidence.subject
+    );
   const validation = validateEvidence(
     evidence,
     evidenceDirectory,
     asOfMilliseconds,
-    repositoryRoots
+    repositoryRoots,
+    profile
   );
-  const gates = READINESS_GATES.map((gate) => {
+  const gates = profile.gates.map((gate) => {
     const checks = evidence.checks.filter((check) => check.gate === gate.name);
     const state = gateState(checks, validation.states);
     return Object.freeze({
@@ -872,7 +1068,7 @@ export function scoreReadinessEvidence({
   const score = gates.reduce((total, gate) => total + gate.score, 0);
   const byName = new Map(gates.map((gate) => [gate.name, gate]));
   const integrityThresholdMet = score >= 90
-    && byName.get("muse-integration").state === "pass"
+    && byName.get(profile.consumerGate).state === "pass"
     && byName.get("semantic-safety").state === "pass"
     && byName.get("persistence-portable").state === "pass";
   const common = {
@@ -888,7 +1084,7 @@ export function scoreReadinessEvidence({
   return Object.freeze({
     ...common,
     measurements: Object.freeze(validation.measurements),
-    schema: READINESS_SCORE_SCHEMA
+    schema: profile.scoreSchema
   });
 }
 

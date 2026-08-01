@@ -143,8 +143,10 @@ puts on the engine:
 
 The later 99-level gate requires enough independent samples for supported tail
 percentiles, reference classes for supported OS/architecture/Node combinations,
-long-running memory and database-growth evidence, one real Muse trace replay,
-and at least one independent non-Muse agent workload. Rust or another native
+long-running memory and database-growth evidence, at least one named host-agent
+dogfood trace replay, and at least one independent host-neutral agent workload.
+Muse may be one optional dogfood source; it is not a readiness prerequisite.
+Rust or another native
 component is introduced only when a measured approved workload shows that the
 TypeScript implementation prevents an accepted target; language choice itself
 is not a performance result.
