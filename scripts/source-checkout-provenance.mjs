@@ -23,6 +23,15 @@ function sha256(value) {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
+function isSameDirectory(left, right) {
+  const leftStat = lstatSync(left, { bigint: true });
+  const rightStat = lstatSync(right, { bigint: true });
+  return leftStat.isDirectory()
+    && rightStat.isDirectory()
+    && leftStat.dev === rightStat.dev
+    && leftStat.ino === rightStat.ino;
+}
+
 export function captureSourceCheckoutProvenance({ packageRoot = DEFAULT_PACKAGE_ROOT } = {}) {
   let canonicalRoot;
   let repositoryRoot;
@@ -33,10 +42,12 @@ export function captureSourceCheckoutProvenance({ packageRoot = DEFAULT_PACKAGE_
   try {
     canonicalRoot = realpathSync(packageRoot);
     repositoryRoot = realpathSync(git("rev-parse", "--show-toplevel"));
+    // Windows may spell the same checkout with a differently-cased drive or
+    // separator form. Bind to the canonical directory identity, not its text.
+    if (!isSameDirectory(canonicalRoot, repositoryRoot)) throw sourceCheckoutError();
   } catch {
     throw sourceCheckoutError();
   }
-  if (canonicalRoot !== repositoryRoot) throw sourceCheckoutError();
 
   const lockfilePath = join(canonicalRoot, "pnpm-lock.yaml");
   let lockfile;
