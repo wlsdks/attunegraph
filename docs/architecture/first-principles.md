@@ -126,7 +126,7 @@ gate.
 
 ## The agent-native contract
 
-The intended public operator is a Decision Context Compiler:
+The target public boundary is a Decision Context Compiler:
 
 ```text
 authoritative sources
@@ -143,6 +143,12 @@ authoritative sources
 `DecisionContext` should contain only the evidence the current decision may
 use. `ContextReceipt` should make that selection replayable and explain why
 material candidates were selected, rejected, truncated, or caused abstention.
+
+The first shipped step is narrower: `decision-query@1` compiles one exact-head,
+fresh, bounded evidence frontier through either a canonical object or a fixed
+AttuneQL grammar. Its content-addressed receipt explicitly labels authority and
+conflict evaluation as `not-performed`. It is therefore evidence for a host
+decision, not a claim that the full Decision Context contract is complete.
 
 This is the wedge over a general graph query. A general database can implement
 the same behaviour with sufficient application code. AttuneGraph makes the
@@ -205,9 +211,12 @@ Shipped in the current core:
 - validity, recording, supersession, freshness, provenance, and abstention
   semantics;
 - deterministic bounded Working Graph compilation;
+- fixed-profile `decision-query@1` through canonical objects or bounded
+  AttuneQL, with exact-head and freshness fail-close behavior, honest terminal
+  states, and a content-addressed evidence-only receipt;
 - in-memory and worker-isolated local SQLite profiles;
 - canonical portable artifacts and a read-only offline Admin;
-- head-pinned prepared plans with fail-closed snapshot mismatch handling.
+- head-pinned prepared plans with fail-closed snapshot mismatch handling;
 - exact-head `revocation-impact@1` planning with normalized bounded selectors,
   deterministic dependency witnesses, partiality, and content-addressed
   receipts; and `revocation-transition@1`, a one-CAS source-authoritative V2
@@ -221,8 +230,8 @@ Directional, not yet shipped as a complete public contract:
 - receipt-pin persistence, historical receipt lookup, retention, journal
   pruning, physical compaction, and any retry ergonomics that would require a
   persisted predecessor proof;
-- an arbitrary AttuneQL parser (structured operators are the shipped query
-  surface);
+- arbitrary general-purpose AttuneQL traversal, caller-selected relationship
+  families, joins, analytics, and writes;
 - multi-source snapshot vectors;
 - Agent Experience Graph and outcome-linked evaluation;
 - normalized 10M/50M decision indexes and any Rust acceleration.

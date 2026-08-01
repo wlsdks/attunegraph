@@ -16,6 +16,8 @@ import { AttuneGraphError } from "./attunegraph-error.js";
 import type { AttuneGraphStoredProjection } from "./attunegraph-backend.js";
 import type {
   AttuneGraph,
+  AttuneGraphDecisionQuery,
+  AttuneGraphDecisionQueryResult,
   AttuneGraphExecuteCommand,
   AttuneGraphOperatorResult,
   AttuneGraphProjectAgainstHeadCommand,
@@ -31,6 +33,10 @@ import type {
   AttuneGraphSourceObservationV2,
   OpenAttuneGraphOptions
 } from "./attunegraph-contracts.js";
+import {
+  normalizeDecisionQuery,
+  sealDecisionQueryReceipt
+} from "./decision-query.js";
 import {
   admitRevocationImpactReceiptCanonicalJson,
   compileRevocationImpact,
@@ -617,6 +623,15 @@ function compareAssertions(left: GraphAssertion, right: GraphAssertion): number 
   return left.predicate.localeCompare(right.predicate) || left.id.localeCompare(right.id);
 }
 
+function compareCodeUnits(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function compareDecisionAssertions(left: GraphAssertion, right: GraphAssertion): number {
+  return compareCodeUnits(left.predicate, right.predicate)
+    || compareCodeUnits(left.id, right.id);
+}
+
 const WORKING_GRAPH_ASSERTIONS_PREFIX_BYTES = Buffer.byteLength("{\"assertions\":[", "utf8");
 const WORKING_GRAPH_SEED_PREFIX_BYTES = Buffer.byteLength("],\"seed\":", "utf8");
 
@@ -679,7 +694,11 @@ function prepareWorkingGraph(projection: AttuneGraphStoredProjection): PreparedW
   };
 }
 
-function compileWorkingGraph(prepared: PreparedWorkingGraph, command: ReturnType<typeof normalizeExecute>): AttuneGraphOperatorResult["workingGraph"] & { readonly status: AttuneGraphOperatorResult["status"] } {
+function compileWorkingGraph(
+  prepared: PreparedWorkingGraph,
+  command: ReturnType<typeof normalizeExecute>,
+  ordering: "legacy-locale" | "decision-code-unit" = "legacy-locale"
+): AttuneGraphOperatorResult["workingGraph"] & { readonly status: AttuneGraphOperatorResult["status"] } {
   const eligible = (assertion: GraphAssertion): boolean => {
     const eligibility = prepared.eligibility.get(assertion.id);
     if (eligibility === undefined) attuneGraphError("CORRUPT_STORE", "Working Graph assertion eligibility is unavailable");
@@ -700,7 +719,10 @@ function compileWorkingGraph(prepared: PreparedWorkingGraph, command: ReturnType
     if (!current) break;
     maxDepthReached = Math.max(maxDepthReached, current.depth);
     const currentKey = graphRefKey(current.ref);
-    const reachable = prepared.adjacency.get(currentKey) ?? [];
+    const storedReachable = prepared.adjacency.get(currentKey) ?? [];
+    const reachable = ordering === "decision-code-unit"
+      ? [...storedReachable].sort(compareDecisionAssertions)
+      : storedReachable;
     if (current.depth >= MAX_WORKING_DEPTH) {
       if (reachable.some((assertion) => eligible(assertion) && !selectedIds.has(assertion.id))) traversalTruncated = true;
       continue;
@@ -726,10 +748,62 @@ function compileWorkingGraph(prepared: PreparedWorkingGraph, command: ReturnType
       }
     }
   }
-  const refs = [...new Map([command.seed, ...selected.flatMap((assertion) => [assertion.subject, assertion.object])].map((ref) => [graphRefKey(ref), Object.freeze({ ...ref })])).values()].sort((left, right) => graphRefKey(left).localeCompare(graphRefKey(right)));
+  const refs = [...new Map([command.seed, ...selected.flatMap((assertion) => [assertion.subject, assertion.object])].map((ref) => [graphRefKey(ref), Object.freeze({ ...ref })])).values()].sort((left, right) => ordering === "decision-code-unit"
+    ? compareCodeUnits(graphRefKey(left), graphRefKey(right))
+    : graphRefKey(left).localeCompare(graphRefKey(right)));
   const truncationReasons = Object.freeze([...(tokenTruncated ? ["token-budget" as const] : []), ...(traversalTruncated ? ["traversal-budget" as const] : [])]);
   const graph = Object.freeze({ assertions: Object.freeze([...selected]), refs: Object.freeze(refs), seed: Object.freeze({ ...command.seed }), diagnostics: Object.freeze({ consideredAssertions: considered, estimatedTokens: estimateWorkingGraphTokens(selectedAssertionBytes, selected.length, seedBytes), maxDepthReached, visitedRefs: visited.size, truncationReasons }) });
   return Object.freeze({ ...graph, status: truncationReasons.length > 0 ? "partial" as const : selected.length === 0 ? "abstained" as const : "complete" as const });
+}
+
+function emptyWorkingGraph(seed: GraphRef): AttuneGraphOperatorResult["workingGraph"] {
+  const frozenSeed = Object.freeze({ ...seed });
+  const estimatedTokens = estimateWorkingGraphTokens(0, 0, jsonBytes(frozenSeed));
+  return Object.freeze({
+    assertions: Object.freeze([]),
+    refs: Object.freeze([frozenSeed]),
+    seed: frozenSeed,
+    diagnostics: Object.freeze({
+      consideredAssertions: 0,
+      estimatedTokens,
+      maxDepthReached: 0,
+      visitedRefs: 1,
+      truncationReasons: Object.freeze([])
+    })
+  });
+}
+
+function decisionQueryResult(input: Readonly<{
+  readonly query: AttuneGraphDecisionQuery;
+  readonly status: AttuneGraphDecisionQueryResult["status"];
+  readonly snapshot?: AttuneGraphSnapshot;
+  readonly sourceFreshness?: AttuneGraphSourceFreshness;
+  readonly workingGraph: AttuneGraphOperatorResult["workingGraph"];
+  readonly abstentionReasons: readonly (
+    | "no-head"
+    | "source-not-fresh"
+    | "no-eligible-evidence"
+  )[];
+}>): AttuneGraphDecisionQueryResult {
+  const receipt = sealDecisionQueryReceipt({
+    query: input.query,
+    snapshot: input.snapshot ?? null,
+    sourceFreshness: input.sourceFreshness ?? null,
+    status: input.status,
+    workingGraph: input.workingGraph,
+    abstentionReasons: input.abstentionReasons
+  });
+  return Object.freeze({
+    operator: "decision-query@1" as const,
+    use: "evidence-only" as const,
+    status: input.status,
+    ...(input.snapshot ? { snapshot: freezeSnapshot(input.snapshot) } : {}),
+    ...(input.sourceFreshness
+      ? { sourceFreshness: Object.freeze({ ...input.sourceFreshness }) }
+      : {}),
+    workingGraph: input.workingGraph,
+    receipt
+  });
 }
 
 function sameSnapshot(left: AttuneGraphSnapshot | undefined, right: AttuneGraphSnapshot | undefined): boolean {
@@ -970,6 +1044,65 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
         if (!prepared) attuneGraphError("SNAPSHOT_CONFLICT", "scope has no committed projection");
         const compiled = compileWorkingGraph(prepared, normalized);
         return Object.freeze({ operator: "working-graph@1" as const, status: compiled.status, snapshot: freezeSnapshot(prepared.snapshot), sourceFreshness: Object.freeze({ ...prepared.sourceFreshness }), workingGraph: Object.freeze({ assertions: compiled.assertions, refs: compiled.refs, seed: compiled.seed, diagnostics: compiled.diagnostics }) });
+      });
+    },
+    query(command: AttuneGraphDecisionQuery): Promise<AttuneGraphDecisionQueryResult> {
+      return begin(async () => {
+        const normalized = normalizeDecisionQuery(command);
+        if (!sameScope(normalized.scope, openedScope)) {
+          attuneGraphError("INVALID_SCOPE", "decision query scope does not match the opened scope");
+        }
+        const prepared = await workingGraphPlan();
+        if (!prepared) {
+          if (normalized.head.mode === "exact") {
+            attuneGraphError("SNAPSHOT_CONFLICT", "decision query exact head does not exist");
+          }
+          return decisionQueryResult({
+            query: normalized,
+            status: "abstained",
+            workingGraph: emptyWorkingGraph(normalized.seed),
+            abstentionReasons: Object.freeze(["no-head"])
+          });
+        }
+        if (
+          normalized.head.mode === "exact"
+          && (
+            normalized.head.generation !== prepared.snapshot.generation
+            || normalized.head.commitId !== prepared.snapshot.commitId
+          )
+        ) {
+          attuneGraphError("SNAPSHOT_CONFLICT", "decision query exact head does not match the current head");
+        }
+        if (prepared.sourceFreshness.state !== "fresh") {
+          return decisionQueryResult({
+            query: normalized,
+            status: "abstained",
+            snapshot: prepared.snapshot,
+            sourceFreshness: prepared.sourceFreshness,
+            workingGraph: emptyWorkingGraph(normalized.seed),
+            abstentionReasons: Object.freeze(["source-not-fresh"])
+          });
+        }
+        const compiled = compileWorkingGraph(prepared, {
+          seed: normalized.seed,
+          nowEpoch: instantEpoch(normalized.asOf),
+          maxEstimatedTokens: normalized.budget.maxEstimatedTokens
+        }, "decision-code-unit");
+        return decisionQueryResult({
+          query: normalized,
+          status: compiled.status,
+          snapshot: prepared.snapshot,
+          sourceFreshness: prepared.sourceFreshness,
+          workingGraph: Object.freeze({
+            assertions: compiled.assertions,
+            refs: compiled.refs,
+            seed: compiled.seed,
+            diagnostics: compiled.diagnostics
+          }),
+          abstentionReasons: compiled.status === "abstained"
+            ? Object.freeze(["no-eligible-evidence"])
+            : Object.freeze([])
+        });
       });
     },
     planRevocationImpact(

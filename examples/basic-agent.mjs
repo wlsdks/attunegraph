@@ -1,5 +1,6 @@
 import {
-  openAttuneGraph
+  openAttuneGraph,
+  parseAttuneQL
 } from "@attunegraph/core";
 import {
   createInMemoryAttuneGraphStore
@@ -37,12 +38,18 @@ await graph.project({
   }
 });
 
-const result = await graph.execute({
-  operator: "working-graph@1",
-  seed: threadRoot,
-  now,
-  maxEstimatedTokens: 500
-});
+const result = await graph.query(parseAttuneQL(`
+  EVIDENCE FOR thread("thread:incident-42")
+  IN SCOPE("support-desk", "incident-42")
+  AS OF "${now}"
+  AT CURRENT HEAD
+  REQUIRE FRESH
+  BUDGET 500 TOKENS;
+`));
 
-console.log(JSON.stringify({ status: result.status, workingGraph: result.workingGraph }, null, 2));
+console.log(JSON.stringify({
+  status: result.status,
+  workingGraph: result.workingGraph,
+  receiptId: result.receipt.receiptId
+}, null, 2));
 await graph.close();
