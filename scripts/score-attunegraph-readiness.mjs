@@ -1,7 +1,7 @@
 import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { lstatSync, readFileSync, realpathSync } from "node:fs";
-import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import {
@@ -10,11 +10,18 @@ import {
   readinessContractSnapshot,
   validateReadinessCommandOutput
 } from "./readiness-check-contracts.mjs";
+import {
+  READINESS_MEASUREMENT_PROVENANCE_SCHEMA,
+  READINESS_MEASUREMENT_RESULT_SCHEMA,
+  readinessMeasurementContract,
+  readinessMeasurementContractSnapshot,
+  validateReadinessMeasurementOutput
+} from "./readiness-measurement-contracts.mjs";
 
-export const READINESS_EVIDENCE_SCHEMA = "attunegraph-readiness-evidence@2";
-export const READINESS_CHECK_SCHEMA = "attunegraph-readiness-check@2";
-export const READINESS_SCORE_SCHEMA = "attunegraph-readiness-score@2";
-export const READINESS_CAPTURE_SCHEMA = "attunegraph-readiness-capture@2";
+export const READINESS_EVIDENCE_SCHEMA = "attunegraph-readiness-evidence@1";
+export const READINESS_CHECK_SCHEMA = "attunegraph-readiness-check@1";
+export const READINESS_SCORE_SCHEMA = "attunegraph-readiness-score@1";
+export const READINESS_CAPTURE_SCHEMA = "attunegraph-readiness-capture@1";
 export const MAX_EVIDENCE_AGE_MILLISECONDS = 168 * 60 * 60 * 1_000;
 
 export const READINESS_GATES = Object.freeze([
@@ -308,6 +315,28 @@ function escapesRoot(relativePath) {
     || isAbsolute(relativePath);
 }
 
+export function readReadinessRepositoryRegularFile(repositoryRoot, pathSegments) {
+  const lexical = join(repositoryRoot, ...pathSegments);
+  if (escapesRoot(relative(repositoryRoot, lexical))) {
+    invalid("repository artifact path escapes its repository");
+  }
+  let stat;
+  let realPath;
+  try {
+    stat = lstatSync(lexical);
+    realPath = realpathSync(lexical);
+  } catch {
+    invalid("repository artifact does not exist");
+  }
+  if (!stat.isFile() || stat.isSymbolicLink()) {
+    invalid("repository artifact must be a regular non-symlink file");
+  }
+  if (escapesRoot(relative(repositoryRoot, realPath))) {
+    invalid("repository artifact escapes its repository through a symlink");
+  }
+  return readFileSync(realPath);
+}
+
 function assertArtifact(artifact, evidenceRoot, name, artifactPaths) {
   assertExactKeys(artifact, ["path", "sha256"], name);
   assertNonEmptyString(artifact.path, `${name}.path`);
@@ -382,7 +411,7 @@ function validateProvenance(provenance, name) {
   if (provenance.kind !== "local-unattested") {
     invalid(`${name}.kind cannot claim attestation without live cryptographic verification`);
   }
-  if (provenance.producer !== "capture-attunegraph-readiness@2") {
+  if (provenance.producer !== "capture-attunegraph-readiness@1") {
     invalid(`${name}.producer is unsupported`);
   }
   if (!SHA256_PATTERN.test(provenance.captureScriptSha256)) {
@@ -506,8 +535,199 @@ function validateCheckResult(
   };
 }
 
+function validateMeasurementProvenance(provenance, name) {
+  assertExactKeys(
+    provenance,
+    ["captureScriptSha256", "kind", "producer", "schema"],
+    name
+  );
+  if (
+    provenance.schema !== READINESS_MEASUREMENT_PROVENANCE_SCHEMA
+    || provenance.kind !== "local-unattested"
+    || provenance.producer !== "capture-attunegraph-measurement@1"
+    || !SHA256_PATTERN.test(provenance.captureScriptSha256)
+  ) {
+    invalid(`${name} does not match the local-unattested measurement producer`);
+  }
+}
+
+function validateMeasurementExecutionState(result, name) {
+  if (!new Set(["observed", "failed"]).has(result.state)) {
+    invalid(`${name}.state is unsupported`);
+  }
+  if (result.exitCode !== null && (!Number.isInteger(result.exitCode) || result.exitCode < 0)) {
+    invalid(`${name}.exitCode must be a non-negative integer or null`);
+  }
+  nullableString(result.signal, `${name}.signal`);
+  nullableString(result.spawnError, `${name}.spawnError`);
+  if (result.state === "observed") {
+    if (result.exitCode !== 0 || result.signal !== null || result.spawnError !== null) {
+      invalid(`${name} observed requires exitCode 0 without signal or spawn error`);
+    }
+  } else if (
+    (result.exitCode === null || result.exitCode === 0)
+    && result.signal === null
+    && result.spawnError === null
+  ) {
+    invalid(`${name} failed requires a nonzero exit, signal, or spawn error`);
+  }
+}
+
+function validateMeasurementLimits(limits, name) {
+  assertExactKeys(limits, [
+    "environment",
+    "maxStderrBytes",
+    "maxStdoutBytes",
+    "timeoutMilliseconds"
+  ], name);
+  if (
+    limits.environment !== "sanitized-minimal"
+    || limits.maxStderrBytes !== 65_536
+    || limits.maxStdoutBytes !== 2_097_152
+    || limits.timeoutMilliseconds !== 30_000
+  ) {
+    invalid(`${name} does not match the fixed bounded execution contract`);
+  }
+}
+
+function validateMeasurementResult(
+  measurement,
+  evidenceRoot,
+  artifactPaths,
+  evidenceSubject,
+  asOfMilliseconds,
+  repositoryRoots
+) {
+  const resultBytes = assertArtifact(
+    measurement.result,
+    evidenceRoot,
+    `measurement ${measurement.name}.result`,
+    artifactPaths
+  );
+  let result;
+  try {
+    result = JSON.parse(resultBytes.toString("utf8"));
+  } catch {
+    invalid(`measurement ${measurement.name}.result must contain valid JSON`);
+  }
+  assertExactKeys(result, [
+    "command",
+    "cwd",
+    "endedAt",
+    "executable",
+    "exitCode",
+    "limits",
+    "measurement",
+    "provenance",
+    "schema",
+    "signal",
+    "spawnError",
+    "startedAt",
+    "state",
+    "stderr",
+    "stdout",
+    "subject",
+    "toolchain"
+  ], `measurement ${measurement.name}.result content`);
+  if (result.schema !== READINESS_MEASUREMENT_RESULT_SCHEMA) {
+    invalid(`measurement ${measurement.name}.result schema must be ${READINESS_MEASUREMENT_RESULT_SCHEMA}`);
+  }
+  if (result.measurement !== measurement.name) {
+    invalid(`measurement ${measurement.name}.result name does not match its manifest entry`);
+  }
+  const contract = readinessMeasurementContract(measurement.name);
+  if (!contract) invalid(`measurement ${measurement.name} has no fixed measurement contract`);
+  assertExactKeys(result.command, [
+    "argv",
+    "authority",
+    "cwdRole",
+    "id",
+    "output",
+    "parameters",
+    "scoring"
+  ], `measurement ${measurement.name}.result command`);
+  if (!sameValue(result.command, readinessMeasurementContractSnapshot(contract))) {
+    invalid(`measurement ${measurement.name}.result does not match the fixed registry contract`);
+  }
+  validateExecutable(
+    result.executable,
+    { availability: "available" },
+    result.state,
+    `measurement ${measurement.name}.result executable`
+  );
+  validateMeasurementProvenance(
+    result.provenance,
+    `measurement ${measurement.name}.result provenance`
+  );
+  validateMeasurementLimits(result.limits, `measurement ${measurement.name}.result limits`);
+  if (result.cwd !== repositoryRoots.attunegraphRoot) {
+    invalid(`measurement ${measurement.name}.result cwd does not match the canonical attunegraph repository root`);
+  }
+  validateMeasurementExecutionState(result, `measurement ${measurement.name}.result`);
+  const startedAt = parseTimestamp(
+    result.startedAt,
+    `measurement ${measurement.name}.result startedAt`
+  );
+  const endedAt = parseTimestamp(result.endedAt, `measurement ${measurement.name}.result endedAt`);
+  if (endedAt < startedAt) invalid(`measurement ${measurement.name}.result endedAt precedes startedAt`);
+  if (endedAt > asOfMilliseconds) invalid(`measurement ${measurement.name}.result endedAt is after --as-of`);
+  validateSubject(result.subject, `measurement ${measurement.name}.result subject`);
+  if (!sameSubject(result.subject, evidenceSubject)) {
+    invalid(`measurement ${measurement.name}.result subject does not match the evidence subject`);
+  }
+  validateToolchain(result.toolchain, `measurement ${measurement.name}.result toolchain`);
+  const stdout = assertArtifact(
+    result.stdout,
+    evidenceRoot,
+    `measurement ${measurement.name}.stdout`,
+    artifactPaths
+  );
+  assertArtifact(
+    result.stderr,
+    evidenceRoot,
+    `measurement ${measurement.name}.stderr`,
+    artifactPaths
+  );
+  if (result.state === "observed") {
+    let report;
+    try {
+      report = validateReadinessMeasurementOutput(stdout, contract);
+    } catch (error) {
+      invalid(`measurement ${measurement.name}.stdout ${error.message}`);
+    }
+    const reportCapturedAt = Date.parse(report.provenance.capturedAt);
+    if (reportCapturedAt < startedAt || reportCapturedAt > endedAt) {
+      invalid(`measurement ${measurement.name}.stdout capture time is outside the process interval`);
+    }
+    if (
+      report.provenance.runtime.node !== result.toolchain.node
+      || report.provenance.runtime.platform !== result.toolchain.platform
+      || report.provenance.runtime.arch !== result.toolchain.arch
+    ) {
+      invalid(`measurement ${measurement.name}.stdout runtime does not match the outer toolchain`);
+    }
+    const tracerBytes = readReadinessRepositoryRegularFile(
+      repositoryRoots.attunegraphRoot,
+      ["scripts", "benchmark-attunegraph-agent-decision-mixed-durable.mjs"]
+    );
+    if (report.provenance.harness.sha256 !== sha256(tracerBytes)) {
+      invalid(`measurement ${measurement.name}.stdout harness hash does not match the checked-out tracer`);
+    }
+  }
+  return {
+    claimEligible: false,
+    state: asOfMilliseconds - endedAt > MAX_EVIDENCE_AGE_MILLISECONDS
+      ? "stale"
+      : result.state
+  };
+}
+
 function validateEvidence(evidence, evidenceDirectory, asOfMilliseconds, repositoryRoots) {
-  assertExactKeys(evidence, ["checks", "schema", "subject"], "evidence");
+  assertExactKeys(
+    evidence,
+    ["checks", "measurements", "schema", "subject"],
+    "evidence"
+  );
   if (evidence.schema !== READINESS_EVIDENCE_SCHEMA) {
     invalid(`schema must be ${READINESS_EVIDENCE_SCHEMA}`);
   }
@@ -550,7 +770,36 @@ function validateEvidence(evidence, evidenceDirectory, asOfMilliseconds, reposit
   for (const requiredName of CHECKS_BY_NAME.keys()) {
     if (!names.has(requiredName)) invalid(`missing required check: ${requiredName}`);
   }
-  return states;
+  const measurements = [];
+  if (!Array.isArray(evidence.measurements) || evidence.measurements.length !== 1) {
+    invalid("measurements must contain every required measurement exactly once");
+  }
+  const measurementNames = new Set();
+  for (const measurement of evidence.measurements) {
+    assertExactKeys(measurement, ["name", "result"], "measurement");
+    assertNonEmptyString(measurement.name, "measurement.name");
+    if (measurementNames.has(measurement.name)) {
+      invalid(`duplicate measurement name: ${measurement.name}`);
+    }
+    measurementNames.add(measurement.name);
+    const observed = validateMeasurementResult(
+      measurement,
+      evidenceRoot,
+      artifactPaths,
+      evidence.subject,
+      asOfMilliseconds,
+      repositoryRoots
+    );
+    measurements.push(Object.freeze({
+      claimEligible: observed.claimEligible,
+      name: measurement.name,
+      state: observed.state
+    }));
+  }
+  if (!measurementNames.has("mixed-durable-agent-decision-observation")) {
+    invalid("missing required measurement: mixed-durable-agent-decision-observation");
+  }
+  return { measurements, states };
 }
 
 function gateState(checks, states) {
@@ -600,14 +849,19 @@ export function scoreReadinessEvidence({
     museRepository,
     evidence.subject
   );
-  const states = validateEvidence(evidence, evidenceDirectory, asOfMilliseconds, repositoryRoots);
+  const validation = validateEvidence(
+    evidence,
+    evidenceDirectory,
+    asOfMilliseconds,
+    repositoryRoots
+  );
   const gates = READINESS_GATES.map((gate) => {
     const checks = evidence.checks.filter((check) => check.gate === gate.name);
-    const state = gateState(checks, states);
+    const state = gateState(checks, validation.states);
     return Object.freeze({
       checks: Object.freeze(checks.map((check) => Object.freeze({
         name: check.name,
-        state: states.get(check)
+        state: validation.states.get(check)
       }))),
       name: gate.name,
       score: state === "pass" ? gate.weight : 0,
@@ -621,16 +875,20 @@ export function scoreReadinessEvidence({
     && byName.get("muse-integration").state === "pass"
     && byName.get("semantic-safety").state === "pass"
     && byName.get("persistence-portable").state === "pass";
-  return Object.freeze({
+  const common = {
     asOf,
     authenticity: "unattested",
     eligible: false,
     gates: Object.freeze(gates),
     integrityThresholdMet,
     note: "This is an integrity-only local coverage report. It is not execution-authentic qualification evidence.",
-    schema: READINESS_SCORE_SCHEMA,
     score,
     subject: evidence.subject
+  };
+  return Object.freeze({
+    ...common,
+    measurements: Object.freeze(validation.measurements),
+    schema: READINESS_SCORE_SCHEMA
   });
 }
 

@@ -6,6 +6,12 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add the first public readiness evidence contract with a separate fail-closed, unscored measurement
+  registry and bounded producer for the four-session durable tracer. The
+  scorer validates the raw 80-read/20-write ledger, full 88-read/24-write run,
+  golden reopen results, provenance, runtime, checked-out harness bytes,
+  artifact uniqueness, and freshness while preserving all eight gates, 37
+  checks, weights, and qualification closure.
 - Add `four-session-mixed-80r20w@1`, a runnable measurement-only durable
   SQLite tracer using four independent public sessions and Workers over one
   shared file. Its deterministic 80-read/20-write timed window is derived from
@@ -70,9 +76,9 @@ All notable changes to AttuneGraph are recorded here.
 - Add a revision-bound readiness-integrity scorer with eight gates, 37
   registry-bound checks, exact Muse gitlink verification, fixed performance
   parameters, and local-unattested eligibility closure.
-- Add readiness evidence v2 with immutable hashed artifacts, strict unavailable
-  check handling, substitute-command rejection, provenance boundaries, v1
-  rejection, Ubuntu/Windows Node 24.15 tests, and a GitHub producer-contract
+- Add readiness evidence with immutable hashed artifacts, strict unavailable
+  check handling, substitute-command rejection, provenance boundaries,
+  Ubuntu/Windows Node 24.15 tests, and a GitHub producer-contract
   attestation skeleton.
 - Add a deterministic connected-v2 10K/100K/1M scale benchmark with fixed
   shards, revision/toolchain/corpus binding, raw latency and RSS samples,

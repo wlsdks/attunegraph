@@ -16,6 +16,10 @@ import {
   runMixedDurableAgentDecisionTracer,
   runMixedDurableAgentDecisionTracerCommand
 } from "./benchmark-attunegraph-agent-decision-mixed-durable.mjs";
+import {
+  readinessMeasurementContract,
+  validateReadinessMeasurementOutput
+} from "./readiness-measurement-contracts.mjs";
 
 const temporaryDirectories = [];
 
@@ -249,6 +253,19 @@ it("runs an exact 80-read/20-write schedule through four public SQLite sessions"
   }
   expect(lstatSync(databasePath).isFile()).toBe(true);
   expect(Object.isFrozen(report)).toBe(true);
+  const measurementContract = readinessMeasurementContract(
+    "mixed-durable-agent-decision-observation"
+  );
+  expect(validateReadinessMeasurementOutput(JSON.stringify(report), measurementContract))
+    .toEqual(report);
+  expect(() => validateReadinessMeasurementOutput(JSON.stringify({
+    ...report,
+    claimEligible: true
+  }), measurementContract)).toThrow(/claim-ineligible/u);
+  const drifted = structuredClone(report);
+  drifted.operationLedger[0].kind = "read";
+  expect(() => validateReadinessMeasurementOutput(JSON.stringify(drifted), measurementContract))
+    .toThrow(/operation ledger/u);
 });
 
 it("rejects pre-existing SQLite sidecars before opening the fresh-store workload", async () => {

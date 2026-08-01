@@ -234,7 +234,7 @@ export async function captureReadinessCheck(options) {
     provenance: {
       captureScriptSha256,
       kind: "local-unattested",
-      producer: "capture-attunegraph-readiness@2",
+      producer: "capture-attunegraph-readiness@1",
       schema: "attunegraph-readiness-provenance@1"
     },
     schema: READINESS_CHECK_SCHEMA,
