@@ -6,6 +6,12 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add `attunegraph-sqlite-generation-growth@1`, a compiler-free packed local
+  diagnostic that isolates 32 fixed-width single-scope generations and records
+  DB/WAL/SHM logical sizes at 15 exact public-API boundaries. It pins the final
+  head, decision, commit, workload, reopen, and two close resolutions while
+  keeping PASSIVE counters private and making no allocated-byte, checkpoint,
+  compaction, retention, slope, SLA, or qualification claim.
 - Add `worker-resource-lifecycle@1`, a packed measurement-only diagnostic that
   performs one excluded preparation write followed by four identical read-only
   public session/Worker reopen cycles. It separates whole-process RSS,

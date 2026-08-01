@@ -315,6 +315,18 @@ try {
   assert.equal(workerLifecycle.claimEligible, false);
   assert.equal(workerLifecycle.correctness.cyclesCompleted, 4);
   assert.equal(workerLifecycle.correctness.workerHeapSamples, 12);
+  const generationGrowth = runJsonCommand(
+    npm,
+    ["run", "benchmark:sqlite-generation-growth", "--silent"],
+    "attunegraph-sqlite-generation-growth@1",
+    { cwd: installedRoot },
+    128 * 1_024
+  );
+  assert.equal(generationGrowth.measurementOnly, true);
+  assert.equal(generationGrowth.claimEligible, false);
+  assert.equal(generationGrowth.correctness.finalGeneration, 32);
+  assert.equal(generationGrowth.correctness.successfulSessionCloseResolutions, 2);
+  assert.equal(generationGrowth.storage.phases.length, 15);
   const installedAlias = join(cleanRoom, "installed-alias");
   symlinkSync(installedRoot, installedAlias, process.platform === "win32" ? "junction" : "dir");
   runJsonCommand(
