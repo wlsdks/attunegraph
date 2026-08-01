@@ -148,6 +148,41 @@ it("persists and reopens byte-identical Engine snapshots and results", async () 
   await expect(reopened.execute(execute())).rejects.toMatchObject({ code: "CLOSED" });
 });
 
+it("uses exact SQLite head reads to reuse one Working Graph plan per open handle", async () => {
+  const databasePath = await temporaryDatabase();
+  const requests: string[] = [];
+  const session = await openLocalAttuneGraphSessionForTesting({
+    databasePath,
+    testHooks: {
+      requestSent: (type) => { requests.push(type); }
+    }
+  });
+  const graph = await session.open({ scope: SCOPE });
+  await graph.project(command("head-pinned-plan"));
+  requests.length = 0;
+
+  const first = await graph.execute(execute());
+  const second = await graph.execute(execute());
+
+  expect(JSON.stringify(second)).toBe(JSON.stringify(first));
+  expect(requests).toEqual(["readHead", "read", "readHead"]);
+  const writer = await session.open({ scope: SCOPE });
+  await writer.project({
+    ...command("head-pinned-plan-external-update"),
+    expectedSnapshot: first.snapshot
+  });
+  requests.length = 0;
+
+  const updated = await graph.execute(execute());
+  expect(updated).toMatchObject({ snapshot: { generation: 2 } });
+  expect(updated.workingGraph.assertions.map((item) => item.id)).toEqual([
+    "assertion-head-pinned-plan-external-update"
+  ]);
+  expect(requests).toEqual(["readHead", "read"]);
+  await Promise.all([graph.close(), writer.close()]);
+  await session.close();
+});
+
 it("opens independent scope-bound handles through one local session", async () => {
   const databasePath = await temporaryDatabase();
   let workerStarts = 0;

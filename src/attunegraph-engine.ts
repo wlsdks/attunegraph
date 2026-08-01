@@ -473,9 +473,18 @@ function estimateWorkingGraphTokens(
   return Math.ceil(bytes / 4);
 }
 
-function compileWorkingGraph(projection: AttuneGraphStoredProjection, command: ReturnType<typeof normalizeExecute>): AttuneGraphOperatorResult["workingGraph"] & { readonly status: AttuneGraphOperatorResult["status"] } {
+interface PreparedWorkingGraph {
+  /** Only execution metadata is retained; canonical/source projection text stays in the Store. */
+  readonly snapshot: AttuneGraphSnapshot;
+  readonly sourceFreshness: AttuneGraphSourceFreshness;
+  readonly assertions: readonly GraphAssertion[];
+  readonly assertionBytes: ReadonlyMap<string, number>;
+  readonly adjacency: ReadonlyMap<string, readonly GraphAssertion[]>;
+}
+
+function prepareWorkingGraph(projection: AttuneGraphStoredProjection): PreparedWorkingGraph {
   const usable = dedupeAssertions(projection.assertions, "CORRUPT_STORE")
-    .filter((assertion) => ACTIVATION_PREDICATES.includes(assertion.predicate) && assertionActive(assertion, command.now))
+    .filter((assertion) => ACTIVATION_PREDICATES.includes(assertion.predicate))
     .sort(compareAssertions);
   const assertionBytes = new Map(usable.map((assertion) => [assertion.id, jsonBytes(assertion)]));
   const adjacency = new Map<string, GraphAssertion[]>();
@@ -491,6 +500,21 @@ function compileWorkingGraph(projection: AttuneGraphStoredProjection, command: R
       else adjacency.set(objectKey, [assertion]);
     }
   }
+  return {
+    snapshot: freezeSnapshot(projection.snapshot),
+    sourceFreshness: Object.freeze({ ...projection.sourceFreshness }),
+    assertions: usable,
+    assertionBytes,
+    adjacency
+  };
+}
+
+function compileWorkingGraph(prepared: PreparedWorkingGraph, command: ReturnType<typeof normalizeExecute>): AttuneGraphOperatorResult["workingGraph"] & { readonly status: AttuneGraphOperatorResult["status"] } {
+  const activeIds = new Set(
+    prepared.assertions
+      .filter((assertion) => assertionActive(assertion, command.now))
+      .map((assertion) => assertion.id)
+  );
   const seedBytes = jsonBytes(command.seed);
   const queue: Array<{ ref: GraphRef; depth: number }> = [{ ref: command.seed, depth: 0 }];
   const visited = new Set<string>([graphRefKey(command.seed)]);
@@ -506,16 +530,17 @@ function compileWorkingGraph(projection: AttuneGraphStoredProjection, command: R
     if (!current) break;
     maxDepthReached = Math.max(maxDepthReached, current.depth);
     const currentKey = graphRefKey(current.ref);
-    const reachable = adjacency.get(currentKey) ?? [];
+    const reachable = prepared.adjacency.get(currentKey) ?? [];
     if (current.depth >= MAX_WORKING_DEPTH) {
-      if (reachable.some((assertion) => !selectedIds.has(assertion.id))) traversalTruncated = true;
+      if (reachable.some((assertion) => activeIds.has(assertion.id) && !selectedIds.has(assertion.id))) traversalTruncated = true;
       continue;
     }
     for (const assertion of reachable) {
+      if (!activeIds.has(assertion.id)) continue;
       if (selectedIds.has(assertion.id)) continue;
       if (considered >= MAX_WORKING_CONSIDERED || selected.length >= MAX_WORKING_ASSERTIONS) { traversalTruncated = true; break; }
       considered += 1;
-      const candidateBytes = assertionBytes.get(assertion.id);
+      const candidateBytes = prepared.assertionBytes.get(assertion.id);
       if (candidateBytes === undefined) attuneGraphError("CORRUPT_STORE", "Working Graph assertion bytes are unavailable");
       if (estimateWorkingGraphTokens(selectedAssertionBytes + candidateBytes, selected.length + 1, seedBytes) > command.maxEstimatedTokens) { tokenTruncated = true; continue; }
       selected.push(assertion);
@@ -550,9 +575,22 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
   let inFlight = 0;
   let closePromise: Promise<void> | undefined;
   let resolveClose: (() => void) | undefined;
+  let preparedWorkingGraph: PreparedWorkingGraph | undefined;
+  let preparingWorkingGraph: Promise<PreparedWorkingGraph | undefined> | undefined;
+  let workingGraphPlanEpoch = 0;
+  const invalidateWorkingGraphPlan = (): void => {
+    preparedWorkingGraph = undefined;
+    workingGraphPlanEpoch += 1;
+  };
+  const finishClose = (): void => {
+    invalidateWorkingGraphPlan();
+    preparingWorkingGraph = undefined;
+    lifecycle = "closed";
+    resolveClose?.();
+  };
   const release = (): void => {
     inFlight -= 1;
-    if (inFlight === 0 && lifecycle === "closing") { lifecycle = "closed"; resolveClose?.(); }
+    if (inFlight === 0 && lifecycle === "closing") finishClose();
   };
   const begin = <T>(operation: () => Promise<T>): Promise<T> => {
     if (lifecycle !== "open") return Promise.reject(new AttuneGraphError("CLOSED", "AttuneGraph instance is closing or closed"));
@@ -567,6 +605,59 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
       if (cause instanceof AttuneGraphError) throw cause;
       throw new AttuneGraphError("STORE_FAILURE", "store read failed", { cause });
     }
+  };
+  const readHead = backend.readHead === undefined
+    ? undefined
+    : async (): Promise<AttuneGraphSnapshot | undefined> => {
+      try {
+        const raw = await backend.readHead?.(openedScope);
+        if (raw === undefined) return undefined;
+        const admitted = snapshot(raw, "store head", "CORRUPT_STORE");
+        if (!sameScope(admitted.scope, openedScope)) {
+          attuneGraphError("CORRUPT_STORE", "Store head belongs to another scope");
+        }
+        return freezeSnapshot(admitted);
+      } catch (cause) {
+        if (cause instanceof AttuneGraphError) throw cause;
+        throw new AttuneGraphError("STORE_FAILURE", "store head read failed", { cause });
+      }
+    };
+  const prepareHeadPinnedWorkingGraph = async (): Promise<PreparedWorkingGraph | undefined> => {
+    if (readHead === undefined) {
+      const current = await read();
+      return current === undefined ? undefined : prepareWorkingGraph(current);
+    }
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const head = await readHead();
+      if (head !== undefined && sameSnapshot(preparedWorkingGraph?.snapshot, head)) {
+        return preparedWorkingGraph;
+      }
+      preparedWorkingGraph = undefined;
+      const admissionEpoch = workingGraphPlanEpoch;
+      const current = await read();
+      if (admissionEpoch !== workingGraphPlanEpoch) continue;
+      if (head === undefined && current === undefined) return undefined;
+      if (head !== undefined && current !== undefined && sameSnapshot(head, current.snapshot)) {
+        preparedWorkingGraph = prepareWorkingGraph(current);
+        return preparedWorkingGraph;
+      }
+    }
+    attuneGraphError("SNAPSHOT_CONFLICT", "Store head changed while preparing the Working Graph");
+  };
+  const workingGraphPlan = (): Promise<PreparedWorkingGraph | undefined> => {
+    if (readHead === undefined) return prepareHeadPinnedWorkingGraph();
+    if (preparingWorkingGraph) return preparingWorkingGraph;
+    const pending = prepareHeadPinnedWorkingGraph();
+    preparingWorkingGraph = pending;
+    void pending.then(
+      () => {
+        if (preparingWorkingGraph === pending) preparingWorkingGraph = undefined;
+      },
+      () => {
+        if (preparingWorkingGraph === pending) preparingWorkingGraph = undefined;
+      }
+    );
+    return pending;
   };
   const projectObservation = async (
     observation: NormalizedObservation,
@@ -663,6 +754,7 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
       }
       attuneGraphError("SNAPSHOT_CONFLICT", "projection compare-and-swap failed");
     }
+    invalidateWorkingGraphPlan();
     return freezeSnapshot(nextSnapshot);
   };
   return Object.freeze({
@@ -694,17 +786,17 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
     execute(command: AttuneGraphExecuteCommand): Promise<AttuneGraphOperatorResult> {
       return begin(async () => {
         const normalized = normalizeExecute(command);
-        const current = await read();
-        if (!current) attuneGraphError("SNAPSHOT_CONFLICT", "scope has no committed projection");
-        const compiled = compileWorkingGraph(current, normalized);
-        return Object.freeze({ operator: "working-graph@1" as const, status: compiled.status, snapshot: freezeSnapshot(current.snapshot), sourceFreshness: Object.freeze({ ...current.sourceFreshness }), workingGraph: Object.freeze({ assertions: compiled.assertions, refs: compiled.refs, seed: compiled.seed, diagnostics: compiled.diagnostics }) });
+        const prepared = await workingGraphPlan();
+        if (!prepared) attuneGraphError("SNAPSHOT_CONFLICT", "scope has no committed projection");
+        const compiled = compileWorkingGraph(prepared, normalized);
+        return Object.freeze({ operator: "working-graph@1" as const, status: compiled.status, snapshot: freezeSnapshot(prepared.snapshot), sourceFreshness: Object.freeze({ ...prepared.sourceFreshness }), workingGraph: Object.freeze({ assertions: compiled.assertions, refs: compiled.refs, seed: compiled.seed, diagnostics: compiled.diagnostics }) });
       });
     },
     close(): Promise<void> {
       if (closePromise) return closePromise;
       lifecycle = "closing";
       closePromise = new Promise<void>((resolve) => { resolveClose = resolve; });
-      if (inFlight === 0) { lifecycle = "closed"; resolveClose?.(); }
+      if (inFlight === 0) finishClose();
       return closePromise;
     }
   });

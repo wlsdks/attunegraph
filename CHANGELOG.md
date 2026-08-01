@@ -109,6 +109,14 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Changed
 
+- Reuse one bounded prepared Working Graph plan per open Engine handle when an
+  optional Store Adapter exact-head read matches the same scope, generation,
+  and commit ID. The SQLite and in-memory adapters implement the capability;
+  custom adapters without it retain full-read behavior. Time validity, seed
+  traversal, token budgets, diagnostics, and final results are recomputed on
+  every execute, while successful local CAS and observed external writes
+  invalidate the plan. Persistent head/projection mismatch retries once and
+  fails closed rather than mixing generations.
 - Reuse the decoder's already verified canonical store-envelope result during
   semantic normalization instead of independently re-admitting the same
   projection twice more. Wire bytes, content identities, validation outcomes,

@@ -21,6 +21,38 @@ fall back to a weaker store.
 | Local SQLite (`./local`) | Node.js >=24.15 | Linux, macOS |
 | Offline Admin (`./admin`) | Node.js >=24.15 | Linux, macOS |
 
+## Why AttuneGraph for an agent
+
+AttuneGraph is not a smaller Neo4j. It is a deterministic, embedded context
+compiler for one agent decision. Use a general graph database when an
+application needs arbitrary graph queries, analytics, clustering, vector
+search, multi-user administration, or a database server. Use AttuneGraph when
+a local agent needs to turn source-linked observations into one small,
+explainable Working Graph without operating a graph service.
+
+The agent-native wedge is the complete decision boundary rather than generic
+graph-query throughput:
+
+- the engine applies observation time, validity, supersession, freshness,
+  provenance, and abstention semantics before returning context;
+- traversal and output are deterministic and token-bounded, with explicit
+  `partial` and `abstained` terminal states instead of an unbounded
+  neighbourhood;
+- graph proximity never becomes truth, permission, feedback, or action
+  authority;
+- the local profile is an in-process Node API backed by one worker-isolated
+  SQLite file, with no required port, credential, or daemon;
+- repeated decisions on one exact committed head reuse one bounded prepared
+  Working Graph plan while re-evaluating `now`, seed, and budgets for every
+  call.
+
+These are defaults AttuneGraph owns, not capabilities claimed to be impossible
+in Neo4j. A fair comparison must give the Neo4j/application baseline equivalent
+temporal, provenance, authority, and budget policy, then report both runtime
+cost and the integration code and operations needed to maintain that parity.
+See [BENCHMARKS.md](BENCHMARKS.md) for the measurement boundary and explicit
+non-claims.
+
 ## Package boundary
 
 This is a standalone, publishable package boundary. It has:
@@ -257,6 +289,17 @@ The local adapter keeps SQLite, SQL, worker lifecycle, and physical schema
 private. It validates the runtime, filesystem, ownership, file mode, exact
 physical identity, schema, and safety pragmas before serving data. Unsupported,
 future, corrupt, and incompatible stores fail closed.
+
+The built-in SQLite and in-memory adapters implement the optional expert
+Store Adapter `readHead(scope)` capability. On the first `execute` for an exact
+head, the Engine performs the normal full projection read, semantic admission,
+ordering, byte accounting, and adjacency preparation. Later executes on that
+same open handle perform an exact head read and reuse at most one prepared plan.
+Temporal validity, traversal, token budgeting, diagnostics, and result assembly
+still run for every command. A successful local compare-and-swap or an observed
+external head change invalidates the plan; a head/projection mismatch retries
+once and then fails closed. Custom Store Adapters that omit `readHead` keep the
+original full-read-per-execute behavior.
 
 ## Read-only Admin
 

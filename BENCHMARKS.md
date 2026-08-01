@@ -683,6 +683,36 @@ grant an action any authority. Its active maximum is 48 assertions and 32
 single-seed reads; larger scale claims belong to the separate revision-bound
 10K/100K/1M harness.
 
+### Head-pinned Working Graph plan contract (2026-08-01)
+
+The Engine may reuse one prepared Working Graph plan per open handle only when
+an optional Store Adapter exact-head read returns the same scope, generation,
+and commit ID. The cached work is limited to semantically admitted activation
+assertions, their exact JSON byte counts, and ordered endpoint adjacency. It
+does not cache command time, active-at-time selection, seed traversal, token
+budget decisions, diagnostics, or final results.
+
+The deterministic acceptance surface requires:
+
+- unchanged-head sequential reads perform one full projection admission and
+  one cheap exact-head check per execute;
+- a successful local write and a different handle's committed write both force
+  the next execute to reload and rebuild exactly once;
+- the same prepared head produces different correct results across validity
+  boundaries and token budgets;
+- a head that never matches the admitted projection retries once and returns
+  `SNAPSHOT_CONFLICT` without a mixed-generation result;
+- adapters without the optional capability preserve full-read behavior;
+- every existing semantic, authority, projection, and workload anchor remains
+  byte-identical.
+
+The relevant performance cell is a batch of agent decisions against one
+unchanged head. Cold and warm results are reported separately. A single-seed
+speedup does not establish large-graph scalability, and a batch speedup does
+not establish Neo4j superiority or inferiority. General database comparison
+also requires equivalent semantics, durability, warm-up, process-tree memory,
+and operational boundaries.
+
 ### Incremental Working Graph token-byte checkpoint (2026-08-01)
 
 The Working Graph compiler previously serialized the complete candidate
