@@ -16,6 +16,15 @@ export { AttuneQLSyntaxError, parseAttuneQL } from "./attuneql.js";
 export { createAttuneGraphEngine, openAttuneGraph } from "./attunegraph-engine.js";
 export type {
   AttuneGraph,
+  AttuneGraphAuthorityConflict,
+  AttuneGraphAuthorityDiagnostics,
+  AttuneGraphAuthorityExclusion,
+  AttuneGraphAuthorityQuery,
+  AttuneGraphAuthorityQueryReceipt,
+  AttuneGraphAuthorityQueryResult,
+  AttuneGraphAuthorityTerminalReason,
+  AttuneGraphAuthorityTruncationReason,
+  AttuneGraphAuthorityWitness,
   AttuneGraphDecisionHead,
   AttuneGraphDecisionQuery,
   AttuneGraphDecisionQueryReceipt,

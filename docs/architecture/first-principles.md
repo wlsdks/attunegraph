@@ -150,6 +150,15 @@ AttuneQL grammar. Its content-addressed receipt explicitly labels authority and
 conflict evaluation as `not-performed`. It is therefore evidence for a host
 decision, not a claim that the full Decision Context contract is complete.
 
+The typed `authority-query@1` operator is a second narrow step. It answers only
+whether one exact action is currently authorized for one exact V2 thread root.
+It requires the fixed outgoing chains `action GOVERNED_BY policy`,
+`policy SCOPED_TO thread`, `action AUTHORIZED_BY evidence`, and
+`evidence OBSERVED_DURING thread`; every granting edge must be temporally
+eligible and non-hypothesis. A `GOVERNED_BY` conflict abstains, and any result
+or work cut remains `partial/undetermined`. This is not general policy
+evaluation, historical-head retention, or authority to execute the action.
+
 This is the wedge over a general graph query. A general database can implement
 the same behaviour with sufficient application code. AttuneGraph makes the
 behaviour the database contract and fail-closed default.
@@ -214,6 +223,10 @@ Shipped in the current core:
 - fixed-profile `decision-query@1` through canonical objects or bounded
   AttuneQL, with exact-head and freshness fail-close behavior, honest terminal
   states, and a content-addressed evidence-only receipt;
+- typed `authority-query@1` with exact V2 embedded-root verification,
+  bitemporal/freshness posture, a fixed four-edge non-hypothesis authority
+  proof, query-local governance conflict closure, explicit
+  `authorized | undetermined`, and a content-addressed result-bounded receipt;
 - in-memory and worker-isolated local SQLite profiles;
 - canonical portable artifacts and a read-only offline Admin;
 - head-pinned prepared plans with fail-closed snapshot mismatch handling;
@@ -225,7 +238,8 @@ Shipped in the current core:
 Directional, not yet shipped as a complete public contract:
 
 - `DecisionContext` and `ContextReceipt` named public interfaces;
-- proof-closed conflict and authority selection;
+- general proof-closed conflict and authority selection beyond the fixed
+  `authority-query@1` profile;
 - non-destructive temporal identity resolution;
 - receipt-pin persistence, historical receipt lookup, retention, journal
   pruning, physical compaction, and any retry ergonomics that would require a

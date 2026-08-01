@@ -16,6 +16,8 @@ import { AttuneGraphError } from "./attunegraph-error.js";
 import type { AttuneGraphStoredProjection } from "./attunegraph-backend.js";
 import type {
   AttuneGraph,
+  AttuneGraphAuthorityQuery,
+  AttuneGraphAuthorityQueryResult,
   AttuneGraphDecisionQuery,
   AttuneGraphDecisionQueryResult,
   AttuneGraphExecuteCommand,
@@ -33,6 +35,10 @@ import type {
   AttuneGraphSourceObservationV2,
   OpenAttuneGraphOptions
 } from "./attunegraph-contracts.js";
+import {
+  compileAuthorityQuery,
+  normalizeAuthorityQuery
+} from "./authority-query.js";
 import {
   normalizeDecisionQuery,
   sealDecisionQueryReceipt
@@ -1103,6 +1109,29 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
             ? Object.freeze(["no-eligible-evidence"])
             : Object.freeze([])
         });
+      });
+    },
+    queryAuthority(command: AttuneGraphAuthorityQuery): Promise<AttuneGraphAuthorityQueryResult> {
+      return begin(async () => {
+        const normalized = normalizeAuthorityQuery(command);
+        if (!sameScope(normalized.scope, openedScope)) {
+          attuneGraphError("INVALID_SCOPE", "authority query scope does not match the opened scope");
+        }
+        const projection = await readHeadPinnedProjection();
+        if (projection === undefined && normalized.head.mode === "exact") {
+          attuneGraphError("SNAPSHOT_CONFLICT", "authority query exact head does not exist");
+        }
+        if (
+          projection !== undefined
+          && normalized.head.mode === "exact"
+          && (
+            normalized.head.generation !== projection.snapshot.generation
+            || normalized.head.commitId !== projection.snapshot.commitId
+          )
+        ) {
+          attuneGraphError("SNAPSHOT_CONFLICT", "authority query exact head does not match the current head");
+        }
+        return compileAuthorityQuery(projection, normalized);
       });
     },
     planRevocationImpact(

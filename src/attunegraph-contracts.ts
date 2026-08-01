@@ -177,6 +177,106 @@ export interface AttuneGraphDecisionQueryResult {
   readonly receipt: AttuneGraphDecisionQueryReceipt;
 }
 
+export type AttuneGraphAuthorityTerminalReason =
+  | "no-head"
+  | "root-unverified"
+  | "root-mismatch"
+  | "projection-from-future"
+  | "freshness-from-future"
+  | "source-not-fresh"
+  | "authority-conflict"
+  | "missing-governance-chain"
+  | "missing-evidence-chain";
+
+export type AttuneGraphAuthorityTruncationReason =
+  | "work-budget"
+  | "token-budget";
+
+export interface AttuneGraphAuthorityQuery {
+  readonly operator: "authority-query@1";
+  readonly scope: AttuneGraphScope;
+  readonly action: GraphRef & Readonly<{ readonly kind: "action" }>;
+  readonly threadRoot: GraphRef & Readonly<{ readonly kind: "thread" }>;
+  readonly asOf: string;
+  readonly head: AttuneGraphDecisionHead;
+  readonly freshness: Readonly<{ readonly require: "fresh" }>;
+  readonly budget: Readonly<{ readonly maxEstimatedTokens: number }>;
+}
+
+export interface AttuneGraphAuthorityConflict {
+  readonly predicate: "GOVERNED_BY";
+  readonly subject: GraphRef & Readonly<{ readonly kind: "action" }>;
+  readonly assertionIds: readonly string[];
+  readonly objectRefs: readonly (GraphRef & Readonly<{ readonly kind: "policy" }>)[];
+  readonly sourceRefs: readonly GraphEvidenceRef[];
+}
+
+export interface AttuneGraphAuthorityWitness {
+  readonly assertionIds: readonly string[];
+  readonly sourceRefs: readonly GraphEvidenceRef[];
+}
+
+export interface AttuneGraphAuthorityExclusion {
+  readonly assertionId: string;
+  readonly reason:
+    | "temporally-ineligible"
+    | "model-hypothesis"
+    | "invalid-endpoint-kind"
+    | "thread-root-mismatch";
+}
+
+export interface AttuneGraphAuthorityDiagnostics {
+  readonly consideredAssertions: number;
+  readonly eligibleFrontierAssertions: number;
+  readonly rejectedFrontierAssertions: number;
+  readonly estimatedTokens: number;
+  readonly maxConsideredAssertions: 32;
+  readonly truncationReasons: readonly AttuneGraphAuthorityTruncationReason[];
+  readonly terminalReasons: readonly AttuneGraphAuthorityTerminalReason[];
+  readonly authorityClosure: "complete" | "incomplete";
+  readonly conflictClosure: "complete" | "conflict" | "incomplete";
+}
+
+export interface AttuneGraphAuthorityQueryReceipt {
+  readonly contractRevision: 1;
+  readonly receiptId: string;
+  readonly canonicalJson: string;
+  readonly use: "current-world-action-authority";
+  readonly query: AttuneGraphAuthorityQuery;
+  readonly snapshot: AttuneGraphSnapshot | null;
+  readonly projection: Readonly<{
+    readonly observationId: string;
+    readonly observedAt: string;
+    readonly threadRoot: GraphRef | null;
+  }> | null;
+  readonly sourceFreshness: AttuneGraphSourceFreshness | null;
+  readonly status: "complete" | "partial" | "abstained";
+  readonly authority: "authorized" | "undetermined";
+  readonly witness: AttuneGraphAuthorityWitness;
+  readonly conflicts: readonly AttuneGraphAuthorityConflict[];
+  readonly exclusions: readonly AttuneGraphAuthorityExclusion[];
+  readonly diagnostics: AttuneGraphAuthorityDiagnostics;
+}
+
+export interface AttuneGraphAuthorityQueryResult {
+  readonly operator: "authority-query@1";
+  readonly use: "current-world-action-authority";
+  readonly status: "complete" | "partial" | "abstained";
+  readonly authority: "authorized" | "undetermined";
+  readonly snapshot?: AttuneGraphSnapshot;
+  readonly projection?: Readonly<{
+    readonly observationId: string;
+    readonly observedAt: string;
+    readonly threadRoot: GraphRef | null;
+  }>;
+  readonly sourceFreshness?: AttuneGraphSourceFreshness;
+  readonly witness: AttuneGraphAuthorityWitness;
+  readonly conflicts: readonly AttuneGraphAuthorityConflict[];
+  readonly exclusions: readonly AttuneGraphAuthorityExclusion[];
+  readonly diagnostics: AttuneGraphAuthorityDiagnostics;
+  readonly receipt: AttuneGraphAuthorityQueryReceipt;
+}
+
 export interface AttuneGraphRevocationSelector {
   readonly assertionIds?: readonly string[];
   readonly graphRefs?: readonly GraphRef[];
@@ -287,6 +387,8 @@ export interface AttuneGraph {
   execute(command: AttuneGraphExecuteCommand): Promise<AttuneGraphOperatorResult>;
   /** Compiles one fixed-profile, evidence-only context against the current exact head. */
   query(command: AttuneGraphDecisionQuery): Promise<AttuneGraphDecisionQueryResult>;
+  /** Proves current action authority from one fixed, exact, fail-closed frontier. */
+  queryAuthority(command: AttuneGraphAuthorityQuery): Promise<AttuneGraphAuthorityQueryResult>;
   /** Read-only revocation planning. Apply, retention, and compaction remain separate operations. */
   planRevocationImpact(
     command: AttuneGraphRevocationImpactCommand

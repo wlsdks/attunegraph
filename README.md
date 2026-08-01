@@ -22,7 +22,7 @@ fail because the relationships around that fact have changed.
 | Uses a fact after it was revised | Valid time, recorded time, and supersession remain distinct |
 | Treats a nearby edge as truth or permission | Proximity never becomes evidence class, policy, feedback, or authority |
 | Hides uncertainty after a budget cut | Incomplete work returns `partial` or `abstained`, never a false `complete` |
-| Cannot explain which state informed an action | Exact heads, canonical ordering, and content-addressed receipts support replay |
+| Cannot explain which state informed an action | Exact heads, canonical ordering, and content-addressed receipts support repeatable current-head reads |
 | Cannot tell what a revoked source affected | Revocation Impact returns deterministic dependency witnesses before mutation |
 
 The database preserves only relationships whose loss would force reconstruction
@@ -54,6 +54,7 @@ flowchart LR
 | Area | Available now | Not claimed |
 | --- | --- | --- |
 | Decision evidence | Fixed-profile `decision-query@1`, bounded AttuneQL, exact-head token-bounded Working Graph, evidence-only receipt | A proof-closed `DecisionContext` / `ContextReceipt` with completed authority and conflict evaluation |
+| Action authority | Typed `authority-query@1` with V2 exact-root proof, bitemporal filtering, fixed four-edge authority closure, `GOVERNED_BY` conflict abstention, and a result-bounded receipt | General policy evaluation, action execution, historical-head reads, or AttuneQL authority syntax |
 | Time and source | Validity, recording, supersession, freshness, exact source refs | Independent verification that an external source is true or current |
 | Storage | In-memory oracle and worker-isolated local SQLite | Distributed, multi-tenant, or hosted database |
 | Failure semantics | `complete`, `partial`, `abstained` | Universal relevance or answer correctness |
@@ -69,8 +70,8 @@ directional boundary.
 
 ## Quick start from source
 
-Requires Node.js 22.12 or newer. Node.js 24 LTS is recommended and is required
-for the local SQLite and Admin profiles.
+Requires Node.js 22.12 or newer. Node.js 24.15 or newer is required for the
+local SQLite and Admin profiles and their checked release gate.
 
 ```sh
 git clone https://github.com/wlsdks/attunegraph.git
@@ -139,6 +140,32 @@ Store I/O. AttuneQL is parsed into the same canonical query object used by the
 typed API; the parser never executes text directly. See
 [`examples/basic-agent.mjs`](examples/basic-agent.mjs).
 
+For an action-permission decision, use the typed authority operator. It has no
+text grammar and never executes an action:
+
+```ts
+const authority = await graph.queryAuthority({
+  operator: "authority-query@1",
+  scope,
+  action: { kind: "action", id: "action:publish" },
+  threadRoot,
+  asOf: now,
+  head: { mode: "current" },
+  freshness: { require: "fresh" },
+  budget: { maxEstimatedTokens: 4000 }
+});
+
+if (authority.status === "complete" && authority.authority === "authorized") {
+  console.log(authority.witness, authority.receipt.receiptId);
+}
+```
+
+`authorized` requires eligible, non-hypothesis witnesses for
+`action GOVERNED_BY policy`, `policy SCOPED_TO threadRoot`,
+`action AUTHORIZED_BY evidence`, and `evidence OBSERVED_DURING threadRoot`.
+Any missing closure, root uncertainty, stale/future posture, conflict, or work
+cut remains `undetermined`; the host still owns action execution.
+
 ## When to choose AttuneGraph
 
 | Need | Best fit |
@@ -150,6 +177,9 @@ typed API; the parser never executes text directly. See
 
 A general database can reproduce these behaviors with application code.
 AttuneGraph makes them one fail-closed decision-evidence contract.
+
+The mechanism and benchmark decisions behind this boundary are recorded in
+[agent-native graph positioning](docs/decisions/agent-native-graph-positioning.md).
 
 ## Source adapters
 
