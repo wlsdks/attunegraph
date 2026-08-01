@@ -1,6 +1,9 @@
 import { types as nodeTypes } from "node:util";
 
-import { mintCanonicalImmutableEnvelopeFromFrozenUnsignedForInternalUse } from "./canonical-immutable-envelope.js";
+import {
+  canonicalizeImmutableEnvelope,
+  mintCanonicalImmutableEnvelopeFromFrozenUnsignedForInternalUse
+} from "./canonical-immutable-envelope.js";
 import { GRAPH_ASSERTION_SOURCE_NAMESPACE } from "./constants.js";
 import { AttuneGraphError } from "./attunegraph-error.js";
 import type { AttuneGraphStoredProjection } from "./attunegraph-backend.js";
@@ -131,10 +134,105 @@ function freezeSnapshot(snapshot: AttuneGraphSnapshot): AttuneGraphSnapshot {
   return Object.freeze({ schemaVersion: 1, scope: Object.freeze({ ...snapshot.scope }), generation: snapshot.generation, commitId: snapshot.commitId });
 }
 
-function matches(selector: AttuneGraphRevocationSelector, assertion: GraphAssertion): boolean {
+export function matchesRevocationSelector(selector: AttuneGraphRevocationSelector, assertion: GraphAssertion): boolean {
   if (selector.assertionIds?.includes(assertion.id)) return true;
   if (selector.graphRefs?.some((ref) => graphKey(ref) === graphKey(assertion.subject) || graphKey(ref) === graphKey(assertion.object))) return true;
   return selector.sourceRefs?.some((wanted) => assertion.sourceRefs.some((actual) => sourceBaseKey(actual) === sourceBaseKey(wanted) && (wanted.version === undefined || actual.version === wanted.version))) ?? false;
+}
+
+function receiptSnapshot(value: unknown): AttuneGraphSnapshot | null {
+  if (value === null) return null;
+  const input = record(value, "revocation impact receipt.snapshot", ["schemaVersion", "scope", "generation", "commitId"], ["schemaVersion", "scope", "generation", "commitId"]);
+  if (input.schemaVersion !== 1 || !Number.isSafeInteger(input.generation) || (input.generation as number) < 1) fail("revocation impact receipt.snapshot is invalid");
+  const scope = record(input.scope, "revocation impact receipt.snapshot.scope", ["sourceId", "threadId"], ["sourceId", "threadId"]);
+  return Object.freeze({
+    schemaVersion: 1,
+    scope: Object.freeze({ sourceId: text(scope.sourceId, "revocation impact receipt.snapshot.scope.sourceId"), threadId: text(scope.threadId, "revocation impact receipt.snapshot.scope.threadId") }),
+    generation: input.generation as number,
+    commitId: text(input.commitId, "revocation impact receipt.snapshot.commitId")
+  });
+}
+
+/**
+ * Re-admits an untrusted public receipt. Its canonical JSON is an integrity
+ * witness, not an authority token: callers must still re-plan against a head.
+ */
+export function admitRevocationImpactReceipt(value: unknown): AttuneGraphRevocationImpactReceipt {
+  const fields = ["contractRevision", "receiptId", "canonicalJson", "snapshot", "selector", "impacts", "diagnostics", "status"] as const;
+  const supplied = record(value, "revocation impact receipt", fields, fields);
+  if (typeof supplied.canonicalJson !== "string" || supplied.canonicalJson.length === 0 || supplied.canonicalJson.length > 1_048_576) fail("revocation impact receipt.canonicalJson is invalid");
+  const unsigned = Object.fromEntries(fields.filter((field) => field !== "canonicalJson").map((field) => [field, supplied[field]]));
+  let canonicalFromFields: ReturnType<typeof canonicalizeImmutableEnvelope>;
+  let canonicalFromJson: ReturnType<typeof canonicalizeImmutableEnvelope>;
+  try {
+    canonicalFromFields = canonicalizeImmutableEnvelope(unsigned, "external-mutable", receiptSpec);
+    canonicalFromJson = canonicalizeImmutableEnvelope(JSON.parse(supplied.canonicalJson), "external-mutable", receiptSpec);
+  } catch (cause) {
+    throw new AttuneGraphError("INVALID_INPUT", "revocation impact receipt is not a safe canonical envelope", { cause });
+  }
+  if (
+    canonicalFromFields.canonicalJson !== supplied.canonicalJson
+    || canonicalFromJson.canonicalJson !== supplied.canonicalJson
+    || canonicalFromFields.contentId !== canonicalFromJson.contentId
+  ) {
+    fail("revocation impact receipt canonicalJson does not exactly admit its public fields");
+  }
+  const input = record(canonicalFromJson.envelope, "revocation impact receipt", fields.filter((field) => field !== "canonicalJson"), fields.filter((field) => field !== "canonicalJson"));
+  if (input.contractRevision !== 1 || input.receiptId !== canonicalFromJson.contentId) fail("revocation impact receipt is invalid");
+  const selector = normalizeSelector(input.selector);
+  const impacts = array(input.impacts, "revocation impact receipt.impacts", MAX_REVOCATION_ASSERTIONS).map((value, index) => {
+    const impact = record(value, `revocation impact receipt.impacts[${index.toString()}]`, ["assertionId", "reason", "witnessAssertionIds"], ["assertionId", "reason", "witnessAssertionIds"]);
+    if (impact.reason !== "direct" && impact.reason !== "dependency") fail(`revocation impact receipt.impacts[${index.toString()}].reason is invalid`);
+    const witnesses = array(impact.witnessAssertionIds, `revocation impact receipt.impacts[${index.toString()}].witnessAssertionIds`, MAX_REVOCATION_ASSERTIONS + 1)
+      .map((witness, witnessIndex) => text(witness, `revocation impact receipt.impacts[${index.toString()}].witnessAssertionIds[${witnessIndex.toString()}]`));
+    if (witnesses.length === 0 || new Set(witnesses).size !== witnesses.length) fail(`revocation impact receipt.impacts[${index.toString()}].witnessAssertionIds is invalid`);
+    return Object.freeze({ assertionId: text(impact.assertionId, `revocation impact receipt.impacts[${index.toString()}].assertionId`), reason: impact.reason, witnessAssertionIds: Object.freeze(witnesses) });
+  });
+  if (new Set(impacts.map((impact) => impact.assertionId)).size !== impacts.length) fail("revocation impact receipt.impacts must not contain duplicates");
+  const diagnosticsInput = record(input.diagnostics, "revocation impact receipt.diagnostics", ["consideredAssertions", "directMatches", "truncationReasons"], ["consideredAssertions", "directMatches", "truncationReasons"]);
+  if (!Number.isSafeInteger(diagnosticsInput.consideredAssertions) || (diagnosticsInput.consideredAssertions as number) < 0 || (diagnosticsInput.consideredAssertions as number) > MAX_REVOCATION_CONSIDERED_ASSERTIONS || !Number.isSafeInteger(diagnosticsInput.directMatches) || (diagnosticsInput.directMatches as number) < 0 || (diagnosticsInput.directMatches as number) > MAX_REVOCATION_ASSERTIONS) fail("revocation impact receipt.diagnostics is invalid");
+  const truncationReasons = array(diagnosticsInput.truncationReasons, "revocation impact receipt.diagnostics.truncationReasons", 2).map((reason) => {
+    if (reason !== "assertion-budget" && reason !== "considered-budget") fail("revocation impact receipt.diagnostics.truncationReasons is invalid");
+    return reason;
+  });
+  if (new Set(truncationReasons).size !== truncationReasons.length) fail("revocation impact receipt.diagnostics.truncationReasons must not contain duplicates");
+  if (input.status !== "complete" && input.status !== "partial" && input.status !== "abstained") fail("revocation impact receipt.status is invalid");
+  if (
+    (input.status === "complete" && (impacts.length === 0 || truncationReasons.length !== 0))
+    || (input.status === "partial" && truncationReasons.length === 0)
+    || (input.status === "abstained" && (impacts.length !== 0 || truncationReasons.length !== 0))
+  ) {
+    fail("revocation impact receipt status is inconsistent with impacts or truncation");
+  }
+  // Structural admission above is deliberately independent of Store state.
+  void selector;
+  void impacts;
+  void receiptSnapshot(input.snapshot);
+  return deepFreeze({ ...canonicalFromJson.envelope, canonicalJson: supplied.canonicalJson }) as AttuneGraphRevocationImpactReceipt;
+}
+
+/** Admits a receipt transported solely as exact canonical JSON. */
+export function admitRevocationImpactReceiptCanonicalJson(value: unknown): AttuneGraphRevocationImpactReceipt {
+  if (typeof value !== "string" || value.length === 0 || value.length > 1_048_576) {
+    fail("revocation impact receipt canonical JSON is invalid");
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch (cause) {
+    throw new AttuneGraphError("INVALID_INPUT", "revocation impact receipt canonical JSON is invalid", { cause });
+  }
+  let canonical: ReturnType<typeof canonicalizeImmutableEnvelope>;
+  try {
+    canonical = canonicalizeImmutableEnvelope(parsed, "external-mutable", receiptSpec);
+  } catch (cause) {
+    throw new AttuneGraphError("INVALID_INPUT", "revocation impact receipt canonical JSON is unsafe", { cause });
+  }
+  if (canonical.canonicalJson !== value) fail("revocation impact receipt canonical JSON is not canonical");
+  // Re-admit the mutable JSON parse so the public-field validator exercises
+  // the external-input profile instead of treating its own frozen detachment
+  // as caller input.
+  return admitRevocationImpactReceipt({ ...(parsed as Record<string, unknown>), canonicalJson: value });
 }
 
 function pathCompare(left: readonly string[], right: readonly string[]): number {
@@ -182,7 +280,7 @@ export function compileRevocationImpact(
   const assertions = [...projection.assertions].sort((left, right) => compareText(left.id, right.id));
   const inspected = assertions.slice(0, command.maxConsideredAssertions);
   const consideredTruncated = inspected.length !== assertions.length;
-  const direct = inspected.filter((assertion) => matches(command.selector, assertion)).map((assertion) => assertion.id);
+  const direct = inspected.filter((assertion) => matchesRevocationSelector(command.selector, assertion)).map((assertion) => assertion.id);
   const dependents = new Map<string, string[]>();
   for (const assertion of inspected) {
     for (const source of assertion.sourceRefs) {

@@ -119,7 +119,7 @@
     "test:performance": "pnpm build && vitest run scripts/benchmark-attunegraph-agent-decision-read.test.mjs scripts/benchmark-attunegraph-agent-decision-read-scale.test.mjs scripts/benchmark-attunegraph-performance.test.mjs scripts/qualify-attunegraph-performance.test.mjs scripts/verify-attunegraph-performance-regression.test.mjs",
     "test:readiness": "vitest run --no-file-parallelism scripts/capture-attunegraph-readiness.test.mjs scripts/capture-attunegraph-measurement.test.mjs scripts/readiness-measurement-contracts.test.mjs scripts/score-attunegraph-readiness.test.mjs",
     "test:supported": "pnpm build && vitest run",
-    "test:focused": "pnpm build && vitest run src/attunegraph-engine.test.ts src/revocation-impact.test.ts",
+    "test:focused": "pnpm build && vitest run src/attunegraph-engine.test.ts src/revocation-impact.test.ts src/revocation-transition.test.ts",
     "example": "pnpm build && node examples/basic-agent.mjs",
     "example:source-adapter": "pnpm build && node examples/source-adapter-agent.mjs",
     "pack:dry-run": "pnpm build && npm pack --dry-run --json",

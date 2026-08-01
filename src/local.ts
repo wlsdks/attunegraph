@@ -8,6 +8,8 @@ import type {
   AttuneGraphProjectCommand,
   AttuneGraphRevocationImpactCommand,
   AttuneGraphRevocationImpactResult,
+  AttuneGraphRevocationTransitionCommand,
+  AttuneGraphRevocationTransitionResult,
   AttuneGraphScope,
   AttuneGraphSnapshot
 } from "./attunegraph-contracts.js";
@@ -182,6 +184,11 @@ export async function openLocalAttuneGraph(options: OpenLocalAttuneGraphOptions)
       return lifecycle === "open"
         ? engine.planRevocationImpact(command)
         : rejectClosed<AttuneGraphRevocationImpactResult>();
+    },
+    applyRevocationTransition(command: AttuneGraphRevocationTransitionCommand) {
+      return lifecycle === "open"
+        ? engine.applyRevocationTransition(command)
+        : rejectClosed<AttuneGraphRevocationTransitionResult>();
     },
     close() {
       if (closePromise) return closePromise;

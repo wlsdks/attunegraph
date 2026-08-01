@@ -55,7 +55,7 @@ flowchart LR
 | Time and source | Validity, recording, supersession, freshness, exact source refs | Independent verification that an external source is true or current |
 | Storage | In-memory oracle and worker-isolated local SQLite | Distributed, multi-tenant, or hosted database |
 | Failure semantics | `complete`, `partial`, `abstained` | Universal relevance or answer correctness |
-| Revocation | Read-only impact plan with shortest dependency witnesses | Revocation apply, persisted receipt pins, pruning, or compaction |
+| Revocation | Exact-head impact plan and guarded source-authoritative transition | Persisted receipt pins, retention, pruning, or compaction |
 | Portability | Canonical `.atgx` NDJSON and checked-in fixtures | Compatibility aliases for superseded identities |
 | Operations | Offline, read-only Admin inspection | Online repair or write administration |
 | Scale | Revision-bound measurement harnesses | Qualified 10M/50M production performance or an SLA |
@@ -181,7 +181,7 @@ For many scopes in one database lifecycle, use
 `openLocalAttuneGraphSession()`. One session owns one SQLite worker; closing a
 scope handle leaves the other handles and session alive.
 
-## Revocation Impact
+## Revocation Impact and transition
 
 Plan the current and transitive derived assertions affected by a future
 revocation without changing the graph:
@@ -202,10 +202,46 @@ source refs match exactly; versionless refs match every version with the same
 namespace and ID. Dependency cycles terminate, equal shortest witnesses settle
 lexicographically, and either work cap produces `partial`.
 
-This operation is read-only. It does **not** apply a revocation, persist a
-retention pin, prune history, or compact SQLite. The legacy process-local
+An impact receipt is not authority to delete. Its only guarded write path asks
+the source owner for a newer complete `canonical-projection@2` observation and
+proves exact survivor subtraction against the current V2 head:
+
+```text
+current V2 head --plan--> complete impact receipt
+       |                         |
+       +--authoritative fresh V2 replacement, same thread root
+                                 |
+  replacement assertions = current assertions - planned impact assertions
+                                 |
+                    one exact-head CAS --> transition receipt
+```
+
+```ts
+const transition = await graph.applyRevocationTransition({
+  operator: "revocation-transition@1",
+  receiptCanonicalJson: plan.receipt.canonicalJson,
+  replacement: {
+    operator: "canonical-projection@2",
+    observation: sourceOwnerFreshReplacement
+  }
+});
+```
+
+The replacement must be fresh at its observation time, strictly newer than the
+predecessor, preserve its exact V2 thread root, and contain neither additions,
+edits, nor extra deletions. A stale plan fails closed. One CAS may commit; a
+concurrent identical winner can return `converged`. A later retry fails rather
+than claiming predecessor proof without a persisted receipt pin.
+
+This is not graph-owned delete: source systems remain authoritative, and the
+transition receipt binds the source observation that they supplied. Persisted
+receipt pins, historical receipt lookup, retention, pruning, and SQLite
+compaction remain explicitly unshipped. The legacy process-local
 `InMemoryAttuneGraphDataStore.forget()` remains a physical-delete utility, not
-the durable plan/apply protocol.
+this durable protocol.
+
+Structured operators are the current query surface. An arbitrary `AttuneQL`
+parser remains a future direction.
 
 ## Admin and portable artifacts
 
