@@ -7,6 +7,8 @@ import type {
   AttuneGraphOperatorResult,
   AttuneGraphProjectAgainstHeadCommand,
   AttuneGraphProjectCommand,
+  AttuneGraphRevocationImpactCommand,
+  AttuneGraphRevocationImpactResult,
   AttuneGraphScope,
   AttuneGraphSnapshot
 } from "./attunegraph-contracts.js";
@@ -203,6 +205,11 @@ async function openLocalAttuneGraphSessionWithStoreOptions(
     },
     execute(command: AttuneGraphExecuteCommand): Promise<AttuneGraphOperatorResult> {
       return begin(() => engine.execute(command));
+    },
+    planRevocationImpact(
+      command: AttuneGraphRevocationImpactCommand
+    ): Promise<AttuneGraphRevocationImpactResult> {
+      return begin(() => engine.planRevocationImpact(command));
     },
     close(): Promise<void> {
       return engine.close();

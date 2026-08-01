@@ -6,6 +6,14 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add the provider-neutral `revocation-impact@1` exact-head, read-only plan on
+  the durable `AttuneGraph` handle. It normalizes bounded assertion, graph,
+  and source selectors before Store I/O; expands immutable assertion-source
+  dependencies with deterministic shortest witnesses; returns honest partial
+  results under work/output caps; and seals an immutable snapshot-bound
+  receipt. Applying a revocation, receipt retention, journal pruning, and
+  physical compaction remain directional and unshipped. The legacy in-memory
+  `forget()` physical-delete utility is unchanged.
 - Add the first-principles architecture contract defining long-lived agent
   discontinuity, the evidence-admissibility purpose of the graph, the
   Decision Context direction, graph inclusion and exclusion rules, honest

@@ -15,11 +15,14 @@ import type {
   AttuneGraphOperatorResult,
   AttuneGraphProjectAgainstHeadCommand,
   AttuneGraphProjectCommand,
+  AttuneGraphRevocationImpactCommand,
+  AttuneGraphRevocationImpactResult,
   AttuneGraphScope,
   AttuneGraphSnapshot,
   AttuneGraphSourceFreshness,
   OpenAttuneGraphOptions
 } from "./attunegraph-contracts.js";
+import { compileRevocationImpact, normalizeRevocationImpactCommand } from "./revocation-impact.js";
 import { registeredAttuneGraphStoreBackend } from "./attunegraph-store-internal.js";
 import { graphRefKey, instantEpoch, normalizeGraphAssertionBatch } from "./validation.js";
 import type { GraphAssertion, GraphRef } from "./types.js";
@@ -643,6 +646,16 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
         throw new AttuneGraphError("STORE_FAILURE", "store head read failed", { cause });
       }
     };
+  const readHeadPinnedProjection = async (): Promise<AttuneGraphStoredProjection | undefined> => {
+    if (readHead === undefined) return read();
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const head = await readHead();
+      const current = await read();
+      if (head === undefined && current === undefined) return undefined;
+      if (head !== undefined && current !== undefined && sameSnapshot(head, current.snapshot)) return current;
+    }
+    attuneGraphError("SNAPSHOT_CONFLICT", "Store head changed while preparing the revocation impact plan");
+  };
   const prepareHeadPinnedWorkingGraph = async (): Promise<PreparedWorkingGraph | undefined> => {
     if (readHead === undefined) {
       const current = await read();
@@ -811,6 +824,14 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
         if (!prepared) attuneGraphError("SNAPSHOT_CONFLICT", "scope has no committed projection");
         const compiled = compileWorkingGraph(prepared, normalized);
         return Object.freeze({ operator: "working-graph@1" as const, status: compiled.status, snapshot: freezeSnapshot(prepared.snapshot), sourceFreshness: Object.freeze({ ...prepared.sourceFreshness }), workingGraph: Object.freeze({ assertions: compiled.assertions, refs: compiled.refs, seed: compiled.seed, diagnostics: compiled.diagnostics }) });
+      });
+    },
+    planRevocationImpact(
+      command: AttuneGraphRevocationImpactCommand
+    ): Promise<AttuneGraphRevocationImpactResult> {
+      return begin(async () => {
+        const normalized = normalizeRevocationImpactCommand(command);
+        return compileRevocationImpact(await readHeadPinnedProjection(), normalized);
       });
     },
     close(): Promise<void> {
