@@ -17,6 +17,7 @@
   "files": [
     "dist",
     "README.md",
+    "docs/architecture/first-principles.md",
     "BENCHMARKS.md",
     "PERFORMANCE-QUALIFICATION.md",
     "READINESS.md",

@@ -6,6 +6,11 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add the first-principles architecture contract defining long-lived agent
+  discontinuity, the evidence-admissibility purpose of the graph, the
+  Decision Context direction, graph inclusion and exclusion rules, honest
+  shipped-versus-directional boundaries, and the scale-gated TypeScript,
+  SQLite, and optional Rust data-plane path.
 - Add `attunegraph-sqlite-generation-growth@1`, a compiler-free packed local
   diagnostic that isolates 32 fixed-width single-scope generations and records
   DB/WAL/SHM logical sizes at 15 exact public-API boundaries. It pins the final
@@ -109,6 +114,12 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Changed
 
+- Precompute exact current-decision eligibility intervals while preparing a
+  Working Graph, remove the retained flat assertion list, and evaluate time
+  only for adjacency postings reached by bounded traversal. Repeated decisions
+  no longer parse or scan the whole scope's temporal metadata; public ordering,
+  budgets, diagnostics, temporal boundaries, and persisted formats are
+  unchanged.
 - Reuse one bounded prepared Working Graph plan per open Engine handle when an
   optional Store Adapter exact-head read matches the same scope, generation,
   and commit ID. The SQLite and in-memory adapters implement the capability;

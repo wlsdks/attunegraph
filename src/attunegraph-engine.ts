@@ -324,11 +324,12 @@ function safeRef(value: unknown): GraphRef {
   return Object.freeze({ id: text(input.id, "working graph seed.id"), kind: input.kind as GraphRef["kind"] });
 }
 
-function normalizeExecute(command: AttuneGraphExecuteCommand): { readonly seed: GraphRef; readonly now: string; readonly maxEstimatedTokens: number } {
+function normalizeExecute(command: AttuneGraphExecuteCommand): { readonly seed: GraphRef; readonly nowEpoch: number; readonly maxEstimatedTokens: number } {
   const input = record(command, "execute command", ["operator", "seed", "now", "maxEstimatedTokens"], ["operator", "seed", "now", "maxEstimatedTokens"]);
   if (input.operator !== "working-graph@1") attuneGraphError("UNSUPPORTED_OPERATOR", "execute supports only working-graph@1");
   if (!Number.isSafeInteger(input.maxEstimatedTokens) || (input.maxEstimatedTokens as number) < 1 || (input.maxEstimatedTokens as number) > MAX_ACTIVATION_ESTIMATED_TOKENS) attuneGraphError("INVALID_INPUT", "execute command.maxEstimatedTokens is invalid");
-  return Object.freeze({ seed: safeRef(input.seed), now: instant(input.now, "execute command.now"), maxEstimatedTokens: input.maxEstimatedTokens as number });
+  const now = instant(input.now, "execute command.now");
+  return Object.freeze({ seed: safeRef(input.seed), nowEpoch: instantEpoch(now), maxEstimatedTokens: input.maxEstimatedTokens as number });
 }
 
 function storeEnvelope(value: unknown): CanonicalImmutableEnvelopeResult {
@@ -439,12 +440,28 @@ export function normalizeStoredProjectionForPortableDecoder(
   return normalizeStoredProjectionShared(envelope, undefined);
 }
 
-function assertionActive(assertion: GraphAssertion, now: string): boolean {
-  const epoch = instantEpoch(now);
-  return (!assertion.validFrom || instantEpoch(assertion.validFrom) <= epoch)
-    && (!assertion.validTo || epoch < instantEpoch(assertion.validTo))
-    && instantEpoch(assertion.recordedAt) <= epoch
-    && (!assertion.supersededAt || epoch < instantEpoch(assertion.supersededAt));
+interface PreparedDecisionEligibility {
+  /** Fast same-now interval: max(recordedAt, validFrom) <= now < min(supersededAt, validTo). */
+  readonly eligibleFrom: number;
+  readonly eligibleTo: number;
+}
+
+function prepareDecisionEligibility(assertion: GraphAssertion): PreparedDecisionEligibility {
+  const recordedAt = instantEpoch(assertion.recordedAt);
+  const supersededAt = assertion.supersededAt ? instantEpoch(assertion.supersededAt) : Infinity;
+  const validFrom = assertion.validFrom ? instantEpoch(assertion.validFrom) : -Infinity;
+  const validTo = assertion.validTo ? instantEpoch(assertion.validTo) : Infinity;
+  return Object.freeze({
+    eligibleFrom: Math.max(recordedAt, validFrom),
+    eligibleTo: Math.min(supersededAt, validTo)
+  });
+}
+
+function assertionEligible(
+  eligibility: PreparedDecisionEligibility,
+  validAt: number
+): boolean {
+  return eligibility.eligibleFrom <= validAt && validAt < eligibility.eligibleTo;
 }
 
 function compareAssertions(left: GraphAssertion, right: GraphAssertion): number {
@@ -477,8 +494,8 @@ interface PreparedWorkingGraph {
   /** Only execution metadata is retained; canonical/source projection text stays in the Store. */
   readonly snapshot: AttuneGraphSnapshot;
   readonly sourceFreshness: AttuneGraphSourceFreshness;
-  readonly assertions: readonly GraphAssertion[];
   readonly assertionBytes: ReadonlyMap<string, number>;
+  readonly eligibility: ReadonlyMap<string, PreparedDecisionEligibility>;
   readonly adjacency: ReadonlyMap<string, readonly GraphAssertion[]>;
 }
 
@@ -487,6 +504,10 @@ function prepareWorkingGraph(projection: AttuneGraphStoredProjection): PreparedW
     .filter((assertion) => ACTIVATION_PREDICATES.includes(assertion.predicate))
     .sort(compareAssertions);
   const assertionBytes = new Map(usable.map((assertion) => [assertion.id, jsonBytes(assertion)]));
+  const eligibility = new Map(usable.map((assertion) => [
+    assertion.id,
+    prepareDecisionEligibility(assertion)
+  ]));
   const adjacency = new Map<string, GraphAssertion[]>();
   for (const assertion of usable) {
     const subjectKey = graphRefKey(assertion.subject);
@@ -503,18 +524,18 @@ function prepareWorkingGraph(projection: AttuneGraphStoredProjection): PreparedW
   return {
     snapshot: freezeSnapshot(projection.snapshot),
     sourceFreshness: Object.freeze({ ...projection.sourceFreshness }),
-    assertions: usable,
     assertionBytes,
+    eligibility,
     adjacency
   };
 }
 
 function compileWorkingGraph(prepared: PreparedWorkingGraph, command: ReturnType<typeof normalizeExecute>): AttuneGraphOperatorResult["workingGraph"] & { readonly status: AttuneGraphOperatorResult["status"] } {
-  const activeIds = new Set(
-    prepared.assertions
-      .filter((assertion) => assertionActive(assertion, command.now))
-      .map((assertion) => assertion.id)
-  );
+  const eligible = (assertion: GraphAssertion): boolean => {
+    const eligibility = prepared.eligibility.get(assertion.id);
+    if (eligibility === undefined) attuneGraphError("CORRUPT_STORE", "Working Graph assertion eligibility is unavailable");
+    return assertionEligible(eligibility, command.nowEpoch);
+  };
   const seedBytes = jsonBytes(command.seed);
   const queue: Array<{ ref: GraphRef; depth: number }> = [{ ref: command.seed, depth: 0 }];
   const visited = new Set<string>([graphRefKey(command.seed)]);
@@ -532,12 +553,12 @@ function compileWorkingGraph(prepared: PreparedWorkingGraph, command: ReturnType
     const currentKey = graphRefKey(current.ref);
     const reachable = prepared.adjacency.get(currentKey) ?? [];
     if (current.depth >= MAX_WORKING_DEPTH) {
-      if (reachable.some((assertion) => activeIds.has(assertion.id) && !selectedIds.has(assertion.id))) traversalTruncated = true;
+      if (reachable.some((assertion) => eligible(assertion) && !selectedIds.has(assertion.id))) traversalTruncated = true;
       continue;
     }
     for (const assertion of reachable) {
-      if (!activeIds.has(assertion.id)) continue;
       if (selectedIds.has(assertion.id)) continue;
+      if (!eligible(assertion)) continue;
       if (considered >= MAX_WORKING_CONSIDERED || selected.length >= MAX_WORKING_ASSERTIONS) { traversalTruncated = true; break; }
       considered += 1;
       const candidateBytes = prepared.assertionBytes.get(assertion.id);

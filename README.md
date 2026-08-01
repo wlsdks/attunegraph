@@ -53,6 +53,13 @@ cost and the integration code and operations needed to maintain that parity.
 See [BENCHMARKS.md](BENCHMARKS.md) for the measurement boundary and explicit
 non-claims.
 
+The first-principles product and architecture contract is maintained in
+[`docs/architecture/first-principles.md`](docs/architecture/first-principles.md).
+It defines the long-lived agent discontinuity problem, why a graph is required,
+what must and must not be persisted, the Decision Context direction, the
+10M-50M scale boundary, and the distinction between shipped and directional
+capabilities.
+
 ## Package boundary
 
 This is a standalone, publishable package boundary. It has:

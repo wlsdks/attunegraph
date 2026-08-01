@@ -1,6 +1,6 @@
 import { Buffer } from "node:buffer";
 
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 
 import { AttuneGraphError, openAttuneGraph } from "./index.js";
 import { createAttuneGraphStore, type AttuneGraphStoreBackend } from "./attunegraph-backend.js";
@@ -837,6 +837,106 @@ it("re-evaluates temporal validity for every execute while reusing the same prep
   expect(after).toMatchObject({ status: "complete" });
   expect(after.workingGraph.assertions.map((item) => item.id)).toEqual(["future-validity"]);
   expect({ headReads, projectionReads }).toEqual({ headReads: 2, projectionReads: 1 });
+  await graph.close();
+});
+
+it("keeps Working Graph temporal boundaries exact after preparation", async () => {
+  const graph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createInMemoryAttuneGraphStore()
+  });
+  const at = (id: string, time: string, field: "recordedAt" | "supersededAt" | "validFrom" | "validTo"): GraphAssertion => ({
+    ...assertion(id),
+    [field]: time
+  });
+  await graph.project(command("temporal-boundaries", {
+    assertions: [
+      at("valid-from", "2026-07-30T00:00:01.000Z", "validFrom"),
+      at("valid-to", "2026-07-30T00:00:01.000Z", "validTo"),
+      at("recorded-at", "2026-07-30T00:00:01.000Z", "recordedAt"),
+      at("superseded-at", "2026-07-30T00:00:01.000Z", "supersededAt"),
+      {
+        ...assertion("intersection"),
+        recordedAt: "2026-07-30T00:00:01.000Z",
+        validFrom: "2026-07-30T00:00:00.000Z",
+        validTo: "2026-07-30T00:00:03.000Z",
+        supersededAt: "2026-07-30T00:00:02.000Z"
+      },
+      {
+        ...assertion("empty-intersection"),
+        recordedAt: "2026-07-30T00:00:02.000Z",
+        validTo: "2026-07-30T00:00:01.000Z"
+      }
+    ]
+  }));
+  const execute = (now: string) => graph.execute({
+    operator: "working-graph@1",
+    seed: { id: SCOPE.threadId, kind: "thread" },
+    now,
+    maxEstimatedTokens: 4_000
+  });
+
+  const beforeBoundary = await execute(NOW);
+  expect(beforeBoundary.workingGraph.assertions.map((item) => item.id)).toEqual([
+    "superseded-at",
+    "valid-to"
+  ]);
+  const atActivationBoundary = await execute("2026-07-30T00:00:01.000Z");
+  expect(atActivationBoundary.workingGraph.assertions.map((item) => item.id)).toEqual([
+    "intersection",
+    "recorded-at",
+    "valid-from"
+  ]);
+  const atSupersededBoundary = await execute("2026-07-30T00:00:02.000Z");
+  expect(atSupersededBoundary.workingGraph.assertions.map((item) => item.id)).toEqual([
+    "recorded-at",
+    "valid-from"
+  ]);
+  const atValidToBoundary = await execute("2026-07-30T00:00:03.000Z");
+  expect(atValidToBoundary.workingGraph.assertions.map((item) => item.id)).toEqual([
+    "recorded-at",
+    "valid-from"
+  ]);
+  await graph.close();
+});
+
+it("does not reparse unreachable temporal metadata on each prepared execution", async () => {
+  const graph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createInMemoryAttuneGraphStore()
+  });
+  const unreachable = Array.from({ length: 24 }, (_, index): GraphAssertion => ({
+    ...assertion(`unreachable-${index.toString().padStart(3, "0")}`),
+    subject: { id: `unreachable-artifact-${index.toString()}`, kind: "artifact" },
+    object: { id: `unreachable-evidence-${index.toString()}`, kind: "evidence" },
+    predicate: "DERIVED_FROM",
+    validFrom: "2026-07-31T00:00:00.000Z"
+  }));
+  await graph.project(command("unreachable-temporal-work", {
+    assertions: [assertion("reachable"), ...unreachable]
+  }));
+  await graph.execute({
+    operator: "working-graph@1",
+    seed: { id: SCOPE.threadId, kind: "thread" },
+    now: NOW,
+    maxEstimatedTokens: 4_000
+  });
+  const NativeDate = Date;
+  let dateConstructions = 0;
+  vi.stubGlobal("Date", new Proxy(NativeDate, {
+    construct(target, argumentsList, newTarget) {
+      dateConstructions += 1;
+      return Reflect.construct(target, argumentsList, newTarget);
+    }
+  }));
+  await graph.execute({
+    operator: "working-graph@1",
+    seed: { id: SCOPE.threadId, kind: "thread" },
+    now: NOW,
+    maxEstimatedTokens: 4_000
+  });
+  expect(dateConstructions).toBeLessThan(4);
+  vi.unstubAllGlobals();
   await graph.close();
 });
 
