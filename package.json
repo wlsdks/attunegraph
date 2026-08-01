@@ -33,6 +33,7 @@
     "scripts/benchmark-attunegraph-agent-decision-durable.mjs",
     "scripts/benchmark-attunegraph-agent-decision-mixed-durable.mjs",
     "scripts/benchmark-attunegraph-worker-resource-lifecycle.mjs",
+    "scripts/benchmark-attunegraph-sqlite-generation-growth.mjs",
     "scripts/benchmark-attunegraph-performance.mjs",
     "scripts/benchmark-attunegraph-scale.mjs",
     "scripts/qualify-attunegraph-performance.mjs",
@@ -44,6 +45,7 @@
     "scripts/prepare-attunegraph-runtime.mjs",
     "scripts/direct-entrypoint.mjs",
     "scripts/source-checkout-provenance.mjs",
+    "scripts/sqlite-measurement-path.mjs",
     "scripts/capture-attunegraph-readiness.mjs",
     "scripts/capture-attunegraph-measurement.mjs",
     "scripts/score-attunegraph-readiness.mjs"
@@ -103,6 +105,7 @@
     "benchmark:agent-decision-read-durable": "node scripts/prepare-attunegraph-runtime.mjs && node scripts/benchmark-attunegraph-agent-decision-durable.mjs",
     "benchmark:agent-decision-mixed-durable": "node scripts/prepare-attunegraph-runtime.mjs && node scripts/benchmark-attunegraph-agent-decision-mixed-durable.mjs",
     "benchmark:worker-resource-lifecycle": "node scripts/prepare-attunegraph-runtime.mjs && node scripts/benchmark-attunegraph-worker-resource-lifecycle.mjs",
+    "benchmark:sqlite-generation-growth": "node scripts/prepare-attunegraph-runtime.mjs && node scripts/benchmark-attunegraph-sqlite-generation-growth.mjs",
     "benchmark:scale": "node scripts/prepare-attunegraph-runtime.mjs && node scripts/benchmark-attunegraph-scale.mjs",
     "benchmark:performance": "node scripts/prepare-attunegraph-runtime.mjs && node scripts/benchmark-attunegraph-performance.mjs",
     "build": "node scripts/prepare-attunegraph-runtime.mjs",

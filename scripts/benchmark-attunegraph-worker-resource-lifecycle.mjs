@@ -2,23 +2,22 @@ import { Buffer } from "node:buffer";
 import { createHash } from "node:crypto";
 import {
   chmodSync,
-  lstatSync,
   mkdtempSync,
   readFileSync,
   realpathSync,
   rmSync
 } from "node:fs";
 import { arch, platform, tmpdir } from "node:os";
-import { dirname, isAbsolute, join, normalize } from "node:path";
+import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
-import { types as nodeTypes } from "node:util";
 
 import { openLocalAttuneGraphSession } from "../dist/local.js";
 import {
   inspectLocalSessionWorkerHeapStatisticsForMeasurement
 } from "../dist/local-session-internal.js";
 import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
+import { parseNewSqliteMeasurementDatabasePath } from "./sqlite-measurement-path.mjs";
 
 const CYCLES = 4;
 const MAX_REPORT_BYTES = 128 * 1_024;
@@ -45,59 +44,13 @@ function sha256(value) {
   return `sha256:${createHash("sha256").update(value).digest("hex")}`;
 }
 
-function assertPathAbsent(path) {
-  try {
-    lstatSync(path);
-  } catch (cause) {
-    if (cause?.code === "ENOENT") return;
-    throw cause;
-  }
-  throw new Error("worker resource lifecycle tracer requires a new databasePath and sidecars");
-}
-
 function optionsRecord(value) {
-  if (
-    value === null
-    || typeof value !== "object"
-    || Array.isArray(value)
-    || nodeTypes.isProxy(value)
-    || (Object.getPrototypeOf(value) !== Object.prototype
-      && Object.getPrototypeOf(value) !== null)
-  ) {
-    throw new Error("worker resource lifecycle tracer requires one new canonical absolute databasePath");
-  }
-  const keys = Reflect.ownKeys(value);
-  const descriptor = Object.getOwnPropertyDescriptor(value, "databasePath");
-  if (
-    keys.length !== 1
-    || keys[0] !== "databasePath"
-    || descriptor === undefined
-    || !("value" in descriptor)
-    || typeof descriptor.value !== "string"
-    || !isAbsolute(descriptor.value)
-    || normalize(descriptor.value) !== descriptor.value
-  ) {
-    throw new Error("worker resource lifecycle tracer requires one new canonical absolute databasePath");
-  }
-  const databasePath = descriptor.value;
-  const parent = dirname(databasePath);
-  let parentMetadata;
-  try {
-    parentMetadata = lstatSync(parent);
-  } catch {
-    throw new Error("worker resource lifecycle tracer database parent must be an existing canonical directory");
-  }
-  if (
-    !parentMetadata.isDirectory()
-    || parentMetadata.isSymbolicLink()
-    || realpathSync(parent) !== parent
-  ) {
-    throw new Error("worker resource lifecycle tracer database parent must be an existing canonical directory");
-  }
-  for (const path of [databasePath, `${databasePath}-wal`, `${databasePath}-shm`]) {
-    assertPathAbsent(path);
-  }
-  return Object.freeze({ databasePath });
+  return Object.freeze({
+    databasePath: parseNewSqliteMeasurementDatabasePath(
+      value,
+      "worker resource lifecycle tracer"
+    )
+  });
 }
 
 function processMemorySnapshot() {

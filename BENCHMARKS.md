@@ -581,6 +581,47 @@ effects, leak slope, cold-process behavior, sustained load, production hosts,
 latency/throughput qualification, tails, or an SLA. It is intentionally not a
 readiness score input yet.
 
+## SQLite generation-growth tracer
+
+`attunegraph-sqlite-generation-growth@1` isolates the file-level effect of
+bounded single-scope generation churn from the four-session mixed workload. On
+a reviewed Linux/macOS host with Node 24.15 or newer, run:
+
+```sh
+pnpm --silent benchmark:sqlite-generation-growth
+```
+
+The command owns a mode-0700 temporary directory and refuses a non-canonical
+path or any pre-existing DB/WAL/SHM entry. It uses one public writer session and
+one later public verifier session. The writer commits 32 exact generations of
+40 assertions each: 16 active and 24 expired. Fixed-width generation IDs keep
+the six sampled observation envelopes at the same 13,957 JSON bytes. Samples
+are taken after generations 1, 2, 4, 8, 16, and 32, then across pre-close
+verification, handle close, session close, reopen verification, and verifier
+close. The full report has exactly 15 ordered phase boundaries.
+
+Every write uses `projectAgainstHead`; the pre-close and reopened Worker each
+perform an exact `head()` plus `working-graph@1` decision read. Generation
+sequence, unique commit identities, the fixed final commit, ordered decision
+semantics, workload hash, two successful session-close resolutions, and reopen
+equality fail closed before a report is emitted. The installed npm tool runs
+without a source checkout or TypeScript compiler and its emitted JSON is capped
+at 128 KiB. It is not part of readiness scoring.
+
+File observations use `lstat` logical lengths for owner-only regular files at
+settled harness boundaries. “Settled” means the awaited public operation has
+resolved; it does not mean OS flush or page-cache settlement. Session close
+success proves that the built-in PASSIVE checkpoint attempt returned a valid
+row and that the connection and Worker terminated. The public API does not
+expose `busy`, `log`, or `checkpointed`, and post-close size changes cannot be
+attributed separately to the PASSIVE attempt versus final-connection close.
+
+Reports remain `unattested-local-process`, `measurementOnly: true`, and
+`claimEligible: false`. Raw logical sizes do not establish allocated disk
+blocks, database page reuse, monotonic or production growth, checkpoint
+effectiveness, compaction, retention fitness, leak slope, sustained operation,
+tails, an SLA, or cross-host qualification.
+
 ## Agent decision-read active scale
 
 `agent-decision-read-scale@1` is a separate, in-memory public

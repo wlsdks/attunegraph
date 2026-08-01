@@ -8,7 +8,8 @@ const localProfileTests = [
   "**/src/local.test.ts",
   "**/scripts/benchmark-attunegraph-agent-decision-durable.test.mjs",
   "**/scripts/benchmark-attunegraph-agent-decision-mixed-durable.test.mjs",
-  "**/scripts/benchmark-attunegraph-worker-resource-lifecycle.test.mjs"
+  "**/scripts/benchmark-attunegraph-worker-resource-lifecycle.test.mjs",
+  "**/scripts/benchmark-attunegraph-sqlite-generation-growth.test.mjs"
 ];
 
 export default defineConfig({
