@@ -10,6 +10,7 @@ import {
 } from "./attunegraph-admin-readonly-inspector.mjs";
 import { AttuneGraphAdminReadonlyError } from "./attunegraph-admin-readonly-spine.js";
 import { openSqliteAttuneGraphStore } from "./attunegraph-sqlite-store.js";
+import { openLocalAttuneGraph } from "./local.js";
 import {
   ATTUNEGRAPH_PHYSICAL_SCHEMA_V1,
   classifyAttuneGraphPhysicalSchemaV1
@@ -18,6 +19,10 @@ import {
   ATTUNEGRAPH_PHYSICAL_SCHEMA_V2,
   classifyAttuneGraphPhysicalSchemaV2
 } from "./attunegraph-physical-schema-v2.mjs";
+import {
+  ATTUNEGRAPH_PHYSICAL_SCHEMA_V3,
+  classifyAttuneGraphPhysicalSchemaV3
+} from "./attunegraph-physical-schema-v3.mjs";
 
 it("defines and classifies the exact AttuneGraph v1 physical profile", () => {
   expect(ATTUNEGRAPH_PHYSICAL_SCHEMA_V1).toMatchObject({
@@ -77,6 +82,86 @@ it("classifies v2 exactly while the legacy v1 classifier remains future-only", (
   expect(Object.isFrozen(ATTUNEGRAPH_PHYSICAL_SCHEMA_V2)).toBe(true);
 });
 
+it("classifies and inspects an exact empty v3 current-head-index profile", () => {
+  const profile = {
+    applicationId: ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.applicationId,
+    userVersion: ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.userVersion,
+    objects: ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.objects,
+    headForeignKey: ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.headForeignKey
+  };
+  expect(classifyAttuneGraphPhysicalSchemaV2(profile)).toEqual({ kind: "future" });
+  expect(classifyAttuneGraphPhysicalSchemaV3(profile)).toEqual({ kind: "match" });
+
+  const database = new DatabaseSync(":memory:", { readBigInts: true });
+  database.exec(`
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createJournal};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createGenerationIndex};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createHead};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentManifest};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentAssertion};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentAssertionSubjectLookup};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentAssertionObjectLookup};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentSourceRef};
+    PRAGMA application_id = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.applicationId};
+    PRAGMA user_version = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.userVersion};
+  `);
+  const inspector = createAttuneGraphAdminReadOnlyInspector(database);
+  expect(inspector.inspectSummary()).toMatchObject({ userVersion: 3, headRows: 0, journalRows: 0 });
+  expect(inspector.verifyIntegrity()).toEqual({ verified: true });
+  database.close();
+});
+
+it("fails Admin integrity closed when a v3 derived row drifts from its exact head", async () => {
+  const directory = await realpath(await mkdtemp(join(tmpdir(), "attunegraph-admin-v3-index-")));
+  const databasePath = join(directory, "index.sqlite");
+  const scope = { sourceId: "admin-source", threadId: "admin-thread" };
+  try {
+    const graph = await openLocalAttuneGraph({ databasePath, scope });
+    await graph.project({
+      operator: "canonical-projection@2",
+      observation: {
+        schemaVersion: 2,
+        observationKey: "admin-v3-index",
+        scope,
+        threadRoot: { id: scope.threadId, kind: "thread" },
+        observedAt: "2026-08-02T00:00:00.000Z",
+        sourceFreshness: { state: "fresh", observedAt: "2026-08-02T00:00:00.000Z" },
+        assertions: [{
+          schemaVersion: 1,
+          id: "admin-v3-assertion",
+          subject: { id: "admin-artifact", kind: "artifact" },
+          predicate: "LINKED_TO",
+          object: { id: scope.threadId, kind: "thread" },
+          epistemicClass: "source-observed",
+          sourceRefs: [{ id: "admin-source-ref", namespace: "admin.test" }],
+          recordedAt: "2026-08-02T00:00:00.000Z",
+          derivation: { kind: "projection", version: "admin-test@1" }
+        }]
+      }
+    });
+    await graph.close();
+
+    const admitted = new DatabaseSync(databasePath, { readBigInts: true, readOnly: true });
+    expect(createAttuneGraphAdminReadOnlyInspector(admitted).verifyIntegrity()).toEqual({ verified: true });
+    admitted.close();
+
+    const writable = new DatabaseSync(databasePath);
+    writable.exec("UPDATE attunegraph_current_assertion SET subject_id = 'drifted'");
+    writable.close();
+    const readonly = new DatabaseSync(databasePath, { readBigInts: true, readOnly: true });
+    let failure: unknown;
+    try {
+      createAttuneGraphAdminReadOnlyInspector(readonly).verifyIntegrity();
+    } catch (cause) {
+      failure = cause;
+    }
+    expect(readAttuneGraphAdminReadonlyInspectorFailure(failure)).toBe("CORRUPT_STORE");
+    readonly.close();
+  } finally {
+    await rm(directory, { force: true, recursive: true });
+  }
+});
+
 it("inspects an empty caller-owned AttuneGraph v2 database with its actual version", () => {
   const database = new DatabaseSync(":memory:", { readBigInts: true });
   database.exec(`
@@ -109,7 +194,7 @@ it("preserves FUTURE_STORE_STATE when serving sees a future version and wrong ap
       ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.createGenerationIndex};
       ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.createHead};
       PRAGMA application_id = 1;
-      PRAGMA user_version = 3;
+      PRAGMA user_version = 4;
     `);
     database.close();
     await chmod(databasePath, 0o600);
@@ -241,7 +326,7 @@ it("distinguishes a dangling head from a missing scope", () => {
 
 it("authenticates only same-module sanitized inspector failures", () => {
   const future = createFixtureDatabase();
-  future.exec("PRAGMA user_version = 3");
+  future.exec("PRAGMA user_version = 4");
   let failure: unknown;
   try {
     createAttuneGraphAdminReadOnlyInspector(future);
@@ -375,7 +460,7 @@ it("uses bounded metadata SQL and maps only numeric SQLite primary codes", () =>
   const database = fakeMetadataDatabase(manifestSchemaRows());
   createAttuneGraphAdminReadOnlyInspector(database);
   expect(database.preparedSql.some((sql) =>
-    sql.includes("sqlite_schema") && sql.includes("LIMIT 4")
+    sql.includes("sqlite_schema") && sql.includes("LIMIT 9")
   )).toBe(true);
   expect(database.preparedSql.some((sql) =>
     sql.includes("pragma_foreign_key_list") && sql.includes("LIMIT 5")

@@ -1,11 +1,14 @@
 import { execFileSync } from "node:child_process";
-import { lstat, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { expect, it } from "vitest";
 
-import { captureSourceCheckoutProvenance } from "./source-checkout-provenance.mjs";
+import {
+  captureContentAddressedSourceCheckoutProvenance,
+  captureSourceCheckoutProvenance
+} from "./source-checkout-provenance.mjs";
 
 function git(root, ...args) {
   return execFileSync("git", ["-C", root, ...args], {
@@ -17,6 +20,7 @@ function git(root, ...args) {
 async function createRepository() {
   const root = await mkdtemp(join(tmpdir(), "attunegraph-source-provenance-"));
   await Promise.all([
+    writeFile(join(root, ".gitignore"), "generated/\n"),
     writeFile(join(root, "package.json"), "{}\n"),
     writeFile(join(root, "pnpm-lock.yaml"), "lockfileVersion: '9.0'\n")
   ]);
@@ -49,6 +53,72 @@ it("binds revision evidence to the exact clean source-checkout root", async () =
       tree: git(root, "rev-parse", "HEAD^{tree}")
     });
     expect(captured.repository.lockfileSha256).toMatch(/^sha256:[a-f0-9]{64}$/u);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+it("content-addresses staged, unstaged, and non-ignored untracked source state", async () => {
+  const root = await createRepository();
+  try {
+    const clean = captureContentAddressedSourceCheckoutProvenance({ packageRoot: root });
+    expect(clean.repository).toMatchObject({
+      clean: true,
+      sourceIdentity: expect.stringMatching(/^sha256:[a-f0-9]{64}$/u),
+      sourceState: {
+        schema: "attunegraph-source-state@1",
+        claim: "exact-clean-commit-tree-lockfile",
+        staged: { files: [] },
+        unstaged: { files: [] },
+        untracked: { files: [] }
+      }
+    });
+
+    await writeFile(join(root, "package.json"), "{\"candidate\":1}\n");
+    await writeFile(join(root, "candidate.mjs"), "export const candidate = 1;\n");
+    const dirty = captureContentAddressedSourceCheckoutProvenance({ packageRoot: root });
+    expect(dirty.repository).toMatchObject({
+      clean: false,
+      commit: clean.repository.commit,
+      tree: clean.repository.tree,
+      sourceState: {
+        claim: "exact-content-addressed-dirty-source-state",
+        staged: { files: [] },
+        unstaged: { files: ["package.json"] },
+        untracked: { files: [{ path: "candidate.mjs", kind: "file" }] }
+      }
+    });
+    expect(dirty.repository.sourceIdentity).not.toBe(clean.repository.sourceIdentity);
+
+    await mkdir(join(root, "generated"));
+    await writeFile(join(root, "generated", "runtime.json"), "ignored runtime output\n");
+    const withIgnoredRuntime = captureContentAddressedSourceCheckoutProvenance({ packageRoot: root });
+    expect(withIgnoredRuntime.repository.sourceIdentity).toBe(dirty.repository.sourceIdentity);
+    expect(withIgnoredRuntime.repository.sourceState.untracked.files).toEqual(
+      dirty.repository.sourceState.untracked.files
+    );
+
+    git(root, "add", "package.json");
+    const staged = captureContentAddressedSourceCheckoutProvenance({ packageRoot: root });
+    expect(staged.repository.sourceState.staged.files).toEqual(["package.json"]);
+    expect(staged.repository.sourceState.unstaged.files).toEqual([]);
+    expect(staged.repository.sourceIdentity).not.toBe(dirty.repository.sourceIdentity);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+it("rejects an untracked symlink and remains rejected after target mutation", async () => {
+  const root = await createRepository();
+  const target = join(root, "target.mjs");
+  try {
+    await writeFile(target, "export const target = 1;\n");
+    await symlink("target.mjs", join(root, "candidate-link.mjs"));
+    expect(() => captureContentAddressedSourceCheckoutProvenance({ packageRoot: root }))
+      .toThrow(/requires a source checkout/u);
+    await writeFile(target, "export const target = 2;\n");
+    expect(() => captureContentAddressedSourceCheckoutProvenance({ packageRoot: root }))
+      .toThrow(/requires a source checkout/u);
   } finally {
     await rm(root, { force: true, recursive: true });
   }

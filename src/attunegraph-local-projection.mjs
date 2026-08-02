@@ -109,6 +109,17 @@ function parseAssertion(value, label) {
 }
 
 /**
+ * Strictly admits one reconstructed durable assertion without requiring its
+ * enclosing compressed projection.
+ * @param {unknown} value
+ * @param {string} [label]
+ * @returns {import("./types.js").GraphAssertion}
+ */
+export function parseCanonicalAssertion(value, label = "current assertion") {
+  return parseAssertion(admitJsonData(value, label), label);
+}
+
+/**
  * Rebuilds a projection from descriptor-safe, closed graph structures.
  * @param {unknown} value
  * @param {AttuneGraphScope} scope

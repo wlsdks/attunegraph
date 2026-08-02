@@ -1033,3 +1033,80 @@ samples per report cannot characterize p95/p99 tails. This checkpoint supports
 one bounded decoder hot-path observation on one host; it does not establish a
 production SLA, cross-machine behavior, memory safety, leak freedom, filesystem
 transfer performance, or a general graph-database performance claim.
+
+### Historical physical v3 current-head materialization snapshot (2026-08-02; non-claim)
+
+The exact 10K figures below predate revision-bound materialization report
+provenance. That report did not record the repository commit, HEAD tree,
+lockfile hash, content-addressed dirty source state, or report-body hash. The
+numbers are retained only as an unbound historical observation; they are not
+admissible evidence for the current candidate and must not be reproduced or
+compared as though HEAD identified the dirty tree.
+
+`pnpm benchmark:current-head-materialization -- --scale=10000` compares exact
+legacy v2 storage with the v3 built candidate on the same deterministic
+10,000-assertion, 313-scope corpus. The profiles run in separate child processes
+and bind corpus seed/hash, Node, SQLite, host, projection bytes, physical rows,
+DB/WAL/SHM snapshots, pages, process max RSS, checkpoint main heap, and Worker
+checkpoint heap. Hooks accept 100K and 1M, but those cells have not been run.
+
+Both profiles retained semantic aggregate SHA-256
+`a64896a4375ab7aaa6fce8b94c825ddbc16aa5c5a16771e85a33e58c0d6fa0e4`,
+computed from exact scope/generation/commit/projection-fingerprint identities
+and canonical assertion bytes after reading every committed projection.
+
+| Metric | Physical v2 | Physical v3 | V3/V2 |
+| --- | ---: | ---: | ---: |
+| Project-write duration, one fixed-order run | 1,330.91 ms | 1,395.87 ms | 1.049x |
+| Store reopen structural validation | 26.02 ms | 38.64 ms | 1.485x |
+| Explicit Admin full integrity validation | 2.21 ms | 206.28 ms | 93.130x |
+| Settled database bytes | 1,593,344 | 5,632,000 | 3.535x |
+| Settled 4-KiB pages | 389 | 1,375 | 3.535x |
+| Final physical rows | 626 | 20,939 | 33.449x |
+| Process lifetime max RSS | 151,896,064 B | 151,764,992 B | observation only |
+| Checkpoint main heap maximum | 25,240,952 B | 26,747,464 B | observation only |
+| Worker checkpoint used-heap maximum | 21,183,520 B | 17,933,960 B | observation only |
+
+Compact v3's final rows include 313 manifests, 10,000 assertions with inline
+subject/object atoms, and 10,000 source refs in addition to the unchanged 313
+journal and 313 head rows. Two composite assertion indexes provide subject and
+object lookup without extra endpoint rows. The 2.094 rows per assertion meets
+the compact-row target, but the 3.535x settled byte/page ratio, 1.485x store
+reopen ratio, and 206.28 ms explicit v3 full scan remain acceptance warnings.
+Store reopen validates structural identities without reading projection
+payloads; Admin full integrity scans normalized rows. The run was produced from
+an unidentified dirty built-candidate tree and was not AB/BA alternated, so the
+duration ratio is a historical observation, not materialization-cost evidence
+or a regression threshold. No inherited 1.20 gate applies.
+
+The production WAL figures are point-in-time snapshots under normal
+auto-checkpoint behavior. They are not cumulative write-amplification evidence;
+that requires a separate controlled `wal_autocheckpoint=0` cell. This benchmark
+does not execute a query fast path, measure query latency, prove bounded page
+reads, qualify memory efficiency, or support a user-facing speed claim.
+
+Current `@2` reports bind both child profiles to identical canonical checkout
+provenance: commit, HEAD tree, lockfile SHA-256, staged and unstaged binary-patch
+identities, and a content manifest for every unignored untracked file. Each
+included regular-file source path is listed; an untracked symlink is rejected
+fail-closed because its target can escape or mutate independently. Git-ignored
+generated junk remains excluded from source identity, while the exact prepared `dist/` byte closure actually
+loaded by this benchmark is separately listed and content-addressed: five
+direct roots, their recursive relative static imports/exports, and the Worker
+URL target. The final closure contains 27 files and has aggregate
+`sha256:9299f6d3c350cd824574fb6719e668ad28175df686d01c891da99f6458f48d4f`.
+The exact 10K corpus and semantic hashes are respectively
+`2716fc73982702842d8eaa26aef36511ea174f6eccb5319aa08fbfbffc3f31aa` and
+`a64896a4375ab7aaa6fce8b94c825ddbc16aa5c5a16771e85a33e58c0d6fa0e4`.
+
+Each child recaptures source and runtime identities after its final validation;
+the parent checks the same identities before and after each child and after the
+pair. Pairing strict-admits the complete profile schema and binds each child
+independently to the parent-requested scale, parent-captured runtime, and the
+versioned official workload's expected semantic aggregate; child-to-child
+equality alone is never admission. Corpus, physical-row invariants, source
+provenance, and current runtime closure are also revalidated. The paired report
+carries a SHA-256 over the UTF-8 `JSON.stringify` body without the identity field. Only
+an unchanged report with those admissions is revision-bound materialization
+evidence; its source-state and report-body hashes belong with that run rather
+than being hard-coded as candidate constants.

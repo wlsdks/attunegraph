@@ -29,6 +29,10 @@ import { openSqliteAttuneGraphStore } from "./attunegraph-sqlite-store.js";
 import { runAttuneGraphStoreConformance } from "./attunegraph-testing.js";
 import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V1 } from "./attunegraph-physical-schema-v1.mjs";
 import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V2 } from "./attunegraph-physical-schema-v2.mjs";
+import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V3 } from "./attunegraph-physical-schema-v3.mjs";
+import { verifyAttuneGraphCurrentHeadIndexScope } from "./attunegraph-current-head-index.mjs";
+import { createAttuneGraphAdminReadOnlyInspector } from "./attunegraph-admin-readonly-inspector.mjs";
+import { canonicalAssertion, normalizeGraphAssertion } from "./validation.js";
 
 const NOW = "2026-07-30T00:00:00.000Z";
 const SCOPE: AttuneGraphScope = {
@@ -171,7 +175,7 @@ it("persists and reopens byte-identical Engine snapshots and results", async () 
   await expect(reopened.query(decisionQuery())).rejects.toMatchObject({ code: "CLOSED" });
 });
 
-it("creates physical schema v2 with exact compressed projection metadata", async () => {
+it("bootstraps physical schema v3 while retaining exact compressed projection metadata", async () => {
   const databasePath = await temporaryDatabase();
   const graph = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
   const snapshot = await graph.project(command("physical-v2"));
@@ -192,7 +196,7 @@ it("creates physical schema v2 with exact compressed projection metadata", async
   `).get();
   database.close();
 
-  expect(version).toEqual({ user_version: 2n });
+  expect(version).toEqual({ user_version: 3n });
   expect(columns).toContain("projection_payload");
   expect(columns).not.toContain("projection_json");
   expect(row).toMatchObject({
@@ -202,6 +206,262 @@ it("creates physical schema v2 with exact compressed projection metadata", async
     projectionFingerprint: snapshot.commitId.replace("attunegraph-commit:", "")
   });
   expect(row?.uncompressedBytes).toEqual(expect.any(BigInt));
+
+  expect(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3).toMatchObject({
+    applicationId: ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.applicationId,
+    userVersion: 3,
+    encoding: ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.encoding
+  });
+});
+
+it("materializes the exact current-head assertion, endpoint, provenance, and derivation atoms", async () => {
+  const databasePath = await temporaryDatabase("normalized-v3.sqlite");
+  const graph = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  const input = command("normalized-v3");
+  const assertion = {
+    ...input.observation.assertions[0]!,
+    sourceRefs: [
+      { id: "z-source", namespace: "example.local-test", version: "2" },
+      { id: "a-source", namespace: "example.local-test", version: "1" }
+    ],
+    validFrom: "2026-07-01T00:00:00.000Z",
+    validTo: "2026-09-01T00:00:00.000Z",
+    supersededAt: "2026-08-01T00:00:00.000Z",
+    derivation: { kind: "projection" as const, runId: "run-normalized-v3", version: "local-test@2" }
+  };
+  const snapshot = await graph.project({
+    ...input,
+    observation: { ...input.observation, assertions: [assertion] }
+  } as AttuneGraphProjectCommand);
+  await graph.close();
+
+  const database = new DatabaseSync(databasePath, { readBigInts: true, readOnly: true });
+  const manifest = database.prepare("SELECT * FROM attunegraph_current_manifest").get();
+  const assertions = database.prepare("SELECT * FROM attunegraph_current_assertion").all();
+  const sourceRefs = database.prepare(
+    "SELECT * FROM attunegraph_current_source_ref ORDER BY assertion_ordinal, source_ref_ordinal"
+  ).all();
+  const currentObjects = database.prepare(`
+    SELECT type, name FROM sqlite_schema
+    WHERE name LIKE 'attunegraph_current_%' ORDER BY type, name
+  `).all();
+  database.close();
+
+  expect(manifest).toMatchObject({
+    source_id: SCOPE.sourceId,
+    thread_id: SCOPE.threadId,
+    generation: 1n,
+    commit_id: snapshot.commitId,
+    projection_fingerprint: snapshot.commitId.replace("attunegraph-commit:", ""),
+    index_revision: "normalized-current-head@1",
+    assertion_count: 1n,
+    source_ref_count: 2n,
+    index_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u)
+  });
+  expect(assertions).toEqual([expect.objectContaining({
+    assertion_ordinal: 0n,
+    assertion_id: assertion.id,
+    subject_kind: "artifact",
+    subject_id: assertion.subject.id,
+    object_kind: "thread",
+    object_id: assertion.object.id,
+    predicate: "LINKED_TO",
+    epistemic_class: "source-observed",
+    valid_from: assertion.validFrom,
+    valid_to: assertion.validTo,
+    recorded_at: assertion.recordedAt,
+    superseded_at: assertion.supersededAt,
+    derivation_kind: "projection",
+    derivation_version: "local-test@2",
+    derivation_run_id: "run-normalized-v3"
+  })]);
+  const assertionRow = assertions[0] as Record<string, unknown>;
+  const reconstructed = normalizeGraphAssertion({
+    schemaVersion: 1,
+    id: assertionRow.assertion_id,
+    subject: { kind: assertionRow.subject_kind, id: assertionRow.subject_id },
+    predicate: assertionRow.predicate,
+    object: { kind: assertionRow.object_kind, id: assertionRow.object_id },
+    epistemicClass: assertionRow.epistemic_class,
+    sourceRefs: sourceRefs.map((row) => ({
+      namespace: row.source_namespace,
+      id: row.source_id_value,
+      ...((row.source_version ?? undefined) === undefined ? {} : { version: row.source_version })
+    })),
+    ...(assertionRow.valid_from === null ? {} : { validFrom: assertionRow.valid_from }),
+    ...(assertionRow.valid_to === null ? {} : { validTo: assertionRow.valid_to }),
+    recordedAt: assertionRow.recorded_at,
+    ...(assertionRow.superseded_at === null ? {} : { supersededAt: assertionRow.superseded_at }),
+    derivation: {
+      kind: assertionRow.derivation_kind,
+      version: assertionRow.derivation_version,
+      ...(assertionRow.derivation_run_id === null ? {} : { runId: assertionRow.derivation_run_id })
+    }
+  });
+  expect(canonicalAssertion(reconstructed)).toBe(JSON.stringify({
+    schemaVersion: 1,
+    id: assertion.id,
+    subject: assertion.subject,
+    predicate: assertion.predicate,
+    object: assertion.object,
+    epistemicClass: assertion.epistemicClass,
+    sourceRefs: [assertion.sourceRefs[1]!, assertion.sourceRefs[0]!],
+    validFrom: assertion.validFrom,
+    validTo: assertion.validTo,
+    recordedAt: assertion.recordedAt,
+    supersededAt: assertion.supersededAt,
+    derivation: assertion.derivation
+  }));
+  expect(sourceRefs).toEqual([
+    expect.objectContaining({ index_id: expect.any(BigInt), source_ref_ordinal: 0n, source_id_value: "a-source", source_version: "1" }),
+    expect.objectContaining({ index_id: expect.any(BigInt), source_ref_ordinal: 1n, source_id_value: "z-source", source_version: "2" })
+  ]);
+  expect(currentObjects).toEqual([
+    { type: "index", name: "attunegraph_current_assertion_object_lookup" },
+    { type: "index", name: "attunegraph_current_assertion_subject_lookup" },
+    { type: "table", name: "attunegraph_current_assertion" },
+    { type: "table", name: "attunegraph_current_manifest" },
+    { type: "table", name: "attunegraph_current_source_ref" }
+  ]);
+});
+
+it("replaces all prior current-index rows for one scope without disturbing another scope", async () => {
+  const databasePath = await temporaryDatabase("normalized-replacement-v3.sqlite");
+  const alternateScope = { sourceId: "other-source", threadId: "other-thread" };
+  const session = await openLocalAttuneGraphSession({ databasePath });
+  const main = await session.open({ scope: SCOPE });
+  const other = await session.open({ scope: alternateScope });
+  const first = await main.project(command("replace-old"));
+  await other.project(command("replace-other", alternateScope));
+  const second = await main.project({
+    ...command("replace-new"),
+    expectedSnapshot: first
+  });
+  await main.close();
+  await other.close();
+  await session.close();
+
+  const database = new DatabaseSync(databasePath, { readBigInts: true, readOnly: true });
+  const manifests = database.prepare(`
+    SELECT source_id, thread_id, generation, commit_id
+    FROM attunegraph_current_manifest ORDER BY source_id, thread_id
+  `).all();
+  const assertionIds = database.prepare(`
+    SELECT m.source_id, m.thread_id, a.assertion_id
+    FROM attunegraph_current_assertion AS a
+    JOIN attunegraph_current_manifest AS m ON m.index_id = a.index_id
+    ORDER BY m.source_id, m.thread_id, a.assertion_ordinal
+  `).all();
+  const counts = database.prepare(`
+    SELECT source_id, thread_id, COUNT(*) AS journal_count
+    FROM attunegraph_projection_journal GROUP BY source_id, thread_id ORDER BY source_id, thread_id
+  `).all();
+  database.close();
+
+  expect(manifests).toEqual([
+    { source_id: SCOPE.sourceId, thread_id: SCOPE.threadId, generation: 2n, commit_id: second.commitId },
+    expect.objectContaining({ source_id: alternateScope.sourceId, thread_id: alternateScope.threadId, generation: 1n })
+  ]);
+  expect(assertionIds).toEqual([
+    { source_id: SCOPE.sourceId, thread_id: SCOPE.threadId, assertion_id: "assertion-replace-new" },
+    { source_id: alternateScope.sourceId, thread_id: alternateScope.threadId, assertion_id: "assertion-replace-other" }
+  ]);
+  expect(counts).toEqual([
+    { source_id: SCOPE.sourceId, thread_id: SCOPE.threadId, journal_count: 2n },
+    { source_id: alternateScope.sourceId, thread_id: alternateScope.threadId, journal_count: 1n }
+  ]);
+});
+
+it.each([
+  ["missing manifest", "DELETE FROM attunegraph_current_manifest"],
+  ["stale manifest", "UPDATE attunegraph_current_manifest SET generation = generation + 1"],
+  ["extra manifest", `INSERT INTO attunegraph_current_manifest (
+      index_id, source_id, thread_id, generation, commit_id, projection_fingerprint,
+      index_revision, assertion_count, source_ref_count, index_digest
+    ) SELECT index_id + 1000, 'extra-source', 'extra-thread', generation, commit_id,
+      projection_fingerprint, index_revision, 0, 0, index_digest
+      FROM attunegraph_current_manifest LIMIT 1`]
+] as const)("fails store open when the v3 current-head index has structural %s", async (_label, mutation) => {
+  const databasePath = await temporaryDatabase("normalized-structural-corrupt-v3.sqlite");
+  const graph = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  await graph.project(command("normalized-structural-corruption"));
+  await graph.close();
+
+  const database = new DatabaseSync(databasePath);
+  database.exec("PRAGMA foreign_keys = OFF");
+  database.exec(mutation);
+  database.close();
+
+  await expect(openLocalAttuneGraph({ databasePath, scope: SCOPE })).rejects.toMatchObject({
+    code: "CORRUPT_STORE"
+  });
+});
+
+it.each([
+  ["digest drift", "UPDATE attunegraph_current_manifest SET index_digest = 'sha256:0000000000000000000000000000000000000000000000000000000000000000'"],
+  ["row-count drift", "UPDATE attunegraph_current_manifest SET assertion_count = assertion_count + 1"],
+  ["altered assertion", "UPDATE attunegraph_current_assertion SET predicate = 'CONTEXT_FOR'"],
+  ["missing source ref", "DELETE FROM attunegraph_current_source_ref"],
+  ["altered adjacency", "UPDATE attunegraph_current_assertion SET subject_id = 'wrong-ref'"],
+  ["extra assertion", `INSERT INTO attunegraph_current_assertion (
+      index_id, assertion_ordinal, assertion_id,
+      subject_kind, subject_id, object_kind, object_id,
+      predicate, epistemic_class, recorded_at, derivation_kind, derivation_version
+    ) SELECT index_id, 99, 'extra',
+      subject_kind, subject_id, object_kind, object_id,
+      predicate, epistemic_class, recorded_at, derivation_kind, derivation_version
+      FROM attunegraph_current_assertion LIMIT 1`]
+] as const)("leaves unused semantic %s to Admin/full per-scope verification", async (_label, mutation) => {
+  const databasePath = await temporaryDatabase("normalized-corrupt-v3.sqlite");
+  const graph = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  await graph.project(command("normalized-corruption"));
+  await graph.close();
+
+  const database = new DatabaseSync(databasePath);
+  database.exec("PRAGMA foreign_keys = OFF");
+  database.exec(mutation);
+  database.close();
+
+  const perScope = new DatabaseSync(databasePath, { readBigInts: true, readOnly: true });
+  expect(() => verifyAttuneGraphCurrentHeadIndexScope(perScope, SCOPE)).toThrow();
+  perScope.close();
+
+  const adminDatabase = new DatabaseSync(databasePath, { readBigInts: true, readOnly: true });
+  const inspector = createAttuneGraphAdminReadOnlyInspector(adminDatabase);
+  expect(() => inspector.verifyIntegrity()).toThrow();
+  adminDatabase.close();
+
+  const reopened = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  await expect(reopened.execute(execute())).resolves.toBeDefined();
+  await reopened.close();
+});
+
+it("opens v3 from normalized integrity rows without decoding the current compressed projection", async () => {
+  const databasePath = await temporaryDatabase("normalized-open-without-projection-decode-v3.sqlite");
+  const graph = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  const snapshot = await graph.project(command("normalized-open-no-decode"));
+  await graph.close();
+
+  const invalidPayload = Buffer.from([0]);
+  const database = new DatabaseSync(databasePath);
+  database.prepare(`
+    UPDATE attunegraph_projection_journal
+    SET projection_payload = ?, projection_payload_sha256 = ?
+    WHERE source_id = ? AND thread_id = ? AND generation = ? AND commit_id = ?
+  `).run(
+    invalidPayload,
+    `sha256:${createHash("sha256").update(invalidPayload).digest("hex")}`,
+    SCOPE.sourceId,
+    SCOPE.threadId,
+    snapshot.generation,
+    snapshot.commitId
+  );
+  database.close();
+
+  const reopened = await openSqliteAttuneGraphStore({ databasePath });
+  await expect(reopened.backend.readHead?.(SCOPE)).resolves.toEqual(snapshot);
+  await expect(reopened.backend.read(SCOPE)).rejects.toMatchObject({ code: "CORRUPT_STORE" });
+  await reopened.close();
 });
 
 it("opens and keeps writing exact physical schema v1 without automatic migration", async () => {
@@ -239,11 +499,25 @@ it("opens and keeps writing exact physical schema v1 without automatic migration
 
 it("fails closed on v2 trailing bytes even when their payload hash is recomputed", async () => {
   const databasePath = await temporaryDatabase("trailing-v2.sqlite");
+  const fixture = new DatabaseSync(databasePath);
+  fixture.exec(`
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.createJournal};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.createGenerationIndex};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.createHead};
+    PRAGMA application_id = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.applicationId};
+    PRAGMA user_version = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.userVersion};
+  `);
+  fixture.close();
+  await chmod(databasePath, 0o600);
   const graph = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
   await graph.project(command("trailing-v2"));
   await graph.close();
 
   const database = new DatabaseSync(databasePath);
+  expect(database.prepare("PRAGMA user_version").get()).toEqual({ user_version: 2 });
+  expect(database.prepare(
+    "SELECT name FROM sqlite_schema WHERE name = 'attunegraph_current_manifest'"
+  ).get()).toBeUndefined();
   const row = database.prepare(
     "SELECT projection_payload AS payload FROM attunegraph_projection_journal"
   ).get() as { payload: Uint8Array };
@@ -829,6 +1103,83 @@ it("recovers the three commit and acknowledgement crash boundaries", async () =>
   await acknowledgedReopen.close();
 });
 
+it("atomically recovers the v3 journal, head, manifest, and normalized rows across commit crashes", async () => {
+  const inspect = (databasePath: string) => {
+    const database = new DatabaseSync(databasePath, { readBigInts: true, readOnly: true });
+    try {
+      return {
+        head: database.prepare("SELECT generation, commit_id AS commitId FROM attunegraph_projection_head").get(),
+        manifest: database.prepare("SELECT generation, commit_id AS commitId, index_digest AS indexDigest FROM attunegraph_current_manifest").get(),
+        assertionIds: database.prepare("SELECT assertion_id AS assertionId FROM attunegraph_current_assertion ORDER BY assertion_ordinal").all(),
+        assertionRows: database.prepare("SELECT COUNT(*) AS count FROM attunegraph_current_assertion").get(),
+        sourceRefRows: database.prepare("SELECT COUNT(*) AS count FROM attunegraph_current_source_ref").get(),
+        journalRows: database.prepare("SELECT COUNT(*) AS count FROM attunegraph_projection_journal").get()
+      };
+    } finally {
+      database.close();
+    }
+  };
+
+  const beforePath = await temporaryDatabase("v3-index-before-commit.sqlite");
+  const beforeBase = await openLocalAttuneGraph({ databasePath: beforePath, scope: SCOPE });
+  const beforeOld = await beforeBase.project(command("v3-before-old"));
+  await beforeBase.close();
+  const beforeResource = await openSqliteAttuneGraphStore({
+    databasePath: beforePath,
+    testFault: "before-commit"
+  });
+  const beforeGraph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(beforeResource.backend)
+  });
+  await expect(beforeGraph.project({
+    ...command("v3-before-new"),
+    expectedSnapshot: beforeOld
+  })).rejects.toMatchObject({ code: "STORE_FAILURE" });
+  await beforeGraph.close();
+  expect(inspect(beforePath)).toMatchObject({
+    head: { generation: 1n, commitId: beforeOld.commitId },
+    manifest: { generation: 1n, commitId: beforeOld.commitId, indexDigest: expect.stringMatching(/^sha256:/u) },
+    assertionIds: [{ assertionId: "assertion-v3-before-old" }],
+    assertionRows: { count: 1n },
+    sourceRefRows: { count: 1n },
+    journalRows: { count: 1n }
+  });
+
+  const afterPath = await temporaryDatabase("v3-index-after-commit.sqlite");
+  const afterBase = await openLocalAttuneGraph({ databasePath: afterPath, scope: SCOPE });
+  const afterOld = await afterBase.project(command("v3-after-old"));
+  await afterBase.close();
+  const afterResource = await openSqliteAttuneGraphStore({
+    databasePath: afterPath,
+    testFault: "after-commit-before-ack"
+  });
+  const afterGraph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(afterResource.backend)
+  });
+  const afterCommand = { ...command("v3-after-new"), expectedSnapshot: afterOld };
+  await expect(afterGraph.project(afterCommand)).rejects.toMatchObject({ code: "STORE_FAILURE" });
+  await afterGraph.close();
+  const afterState = inspect(afterPath);
+  expect(afterState).toMatchObject({
+    head: { generation: 2n },
+    manifest: { generation: 2n, indexDigest: expect.stringMatching(/^sha256:/u) },
+    assertionIds: [{ assertionId: "assertion-v3-after-new" }],
+    assertionRows: { count: 1n },
+    sourceRefRows: { count: 1n },
+    journalRows: { count: 2n }
+  });
+  expect((afterState.head as { commitId: string }).commitId).toBe(
+    (afterState.manifest as { commitId: string }).commitId
+  );
+  const afterReopen = await openLocalAttuneGraph({ databasePath: afterPath, scope: SCOPE });
+  const recovered = await afterReopen.project(afterCommand);
+  expect(recovered.generation).toBe(2);
+  await afterReopen.close();
+  expect(inspect(afterPath)).toEqual(afterState);
+});
+
 it("fails closed for future, foreign, malformed, orphaned, and NOTADB state", async () => {
   const futurePath = await temporaryDatabase("future.sqlite");
   const future = await openSqliteAttuneGraphStore({
@@ -865,14 +1216,12 @@ it("fails closed for future, foreign, malformed, orphaned, and NOTADB state", as
   await malformed.mutateForTesting("malformed-projection-json");
   await malformedAttuneGraph.close();
   await malformed.close();
-  const malformedReopen = await openLocalAttuneGraph({
+  const malformedReopened = await openLocalAttuneGraph({
     databasePath: malformedPath,
     scope: SCOPE
   });
-  await expect(
-    malformedReopen.execute(execute())
-  ).rejects.toMatchObject({ code: "CORRUPT_STORE" });
-  await malformedReopen.close();
+  await expect(malformedReopened.execute(execute())).rejects.toMatchObject({ code: "CORRUPT_STORE" });
+  await malformedReopened.close();
 
   const orphanPath = await temporaryDatabase("orphan.sqlite");
   const orphan = await openSqliteAttuneGraphStore({
@@ -1024,6 +1373,16 @@ it("proves stale cross-Worker CAS, monotone generations, and exact physical coun
 
   await Promise.all([first.close(), second.close()]);
   await Promise.all([firstResource.close(), secondResource.close()]);
+
+  const database = new DatabaseSync(databasePath, { readBigInts: true, readOnly: true });
+  expect(database.prepare("SELECT COUNT(*) AS count FROM attunegraph_projection_journal").get()).toEqual({ count: 3n });
+  expect(database.prepare("SELECT COUNT(*) AS count FROM attunegraph_current_manifest").get()).toEqual({ count: 1n });
+  expect(database.prepare("SELECT COUNT(*) AS count FROM attunegraph_current_assertion").get()).toEqual({ count: 1n });
+  expect(database.prepare("SELECT COUNT(*) AS count FROM attunegraph_current_source_ref").get()).toEqual({ count: 1n });
+  expect(database.prepare(
+    "SELECT 1 AS found FROM attunegraph_current_assertion WHERE assertion_id IN ('assertion-stale-generation-two', 'assertion-generation-three-a', 'assertion-generation-three-b') LIMIT 2"
+  ).all()).toHaveLength(1);
+  database.close();
 });
 
 it("bounds busy exhaustion without an orphan journal or changed head", async () => {

@@ -23,9 +23,17 @@ import {
   classifyAttuneGraphPhysicalSchemaV2
 } from "./attunegraph-physical-schema-v2.mjs";
 import {
+  ATTUNEGRAPH_PHYSICAL_SCHEMA_V3,
+  classifyAttuneGraphPhysicalSchemaV3
+} from "./attunegraph-physical-schema-v3.mjs";
+import {
   decodeAttuneGraphProjectionJson,
   encodeAttuneGraphProjectionJson
 } from "./attunegraph-projection-codec.mjs";
+import {
+  materializeAttuneGraphCurrentHeadIndex,
+  verifyAttuneGraphCurrentHeadIndexStructureDatabase
+} from "./attunegraph-current-head-index.mjs";
 import { parseProjection } from "./attunegraph-local-projection.mjs";
 import {
   assertNodeProfile,
@@ -44,7 +52,7 @@ const SQLITE_NOTADB = 26;
 let database;
 /** @type {ReturnType<typeof prepareStatements>} */
 let statements;
-/** @type {1 | 2} */
+/** @type {1 | 2 | 3} */
 let physicalSchemaVersion;
 let initialized = false;
 let closing = false;
@@ -185,7 +193,7 @@ function allSql(statement, ...parameters) {
   }
 }
 
-/** @param {import("node:sqlite").StatementSync} statement @param {import("node:sqlite").SQLInputValue[]} parameters @returns {void} */
+/** @param {import("node:sqlite").StatementSync} statement @param {import("node:sqlite").SQLInputValue[]} parameters */
 function runSql(statement, ...parameters) {
   try {
     const result = sqlRow(
@@ -193,8 +201,10 @@ function runSql(statement, ...parameters) {
       "SQLite write result",
       ["changes", "lastInsertRowid"]
     );
-    safeInteger(result.changes, "SQLite write changes", 0n, "STORE_FAILURE");
-    safeInteger(result.lastInsertRowid, "SQLite write last insert rowid", 0n, "STORE_FAILURE");
+    return Object.freeze({
+      changes: safeInteger(result.changes, "SQLite write changes", 0n, "STORE_FAILURE"),
+      lastInsertRowid: safeInteger(result.lastInsertRowid, "SQLite write last insert rowid", 0n, "STORE_FAILURE")
+    });
   } catch (cause) {
     mapSqliteFailure(cause, "SQLite write");
   }
@@ -223,9 +233,9 @@ function physicalText(value, maximum) {
 function assertExactSchema(applicationId, userVersion) {
   const objects = sqlRows(allSql(database.prepare(
     "SELECT type, name, tbl_name AS tableName, sql FROM sqlite_schema "
-      + "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name LIMIT 4"
+      + "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name LIMIT 9"
   )), "schema object rows", ["type", "name", "tableName", "sql"], "CORRUPT_STORE");
-  if (objects.length === 4) {
+  if (objects.length === 9) {
     fail("CORRUPT_STORE", "local AttuneGraph schema has unexpected or missing objects");
   }
   const admittedObjects = Object.freeze(objects.map((object) => Object.freeze({
@@ -267,7 +277,9 @@ function assertExactSchema(applicationId, userVersion) {
   });
   const classification = userVersion === ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.userVersion
     ? classifyAttuneGraphPhysicalSchemaV1(admitted)
-    : classifyAttuneGraphPhysicalSchemaV2(admitted);
+    : userVersion === ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.userVersion
+      ? classifyAttuneGraphPhysicalSchemaV2(admitted)
+      : classifyAttuneGraphPhysicalSchemaV3(admitted);
   if (classification.kind === "future") {
     fail("FUTURE_STORE_STATE", "local AttuneGraph store has a future physical schema");
   }
@@ -301,6 +313,16 @@ function assertDatabaseIntegrity(physicalIdentity) {
   if (safeInteger(orphan.count, "orphan head count", 0n) !== 0) {
     fail("CORRUPT_STORE", "local AttuneGraph head does not identify an exact journal row");
   }
+  if (getSql(database.prepare("SELECT * FROM pragma_foreign_key_check LIMIT 1")) !== undefined) {
+    fail("CORRUPT_STORE", "local AttuneGraph store has a foreign-key violation");
+  }
+  if (physicalIdentity.userVersion === ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.userVersion) {
+    try {
+      verifyAttuneGraphCurrentHeadIndexStructureDatabase(database);
+    } catch (cause) {
+      fail("CORRUPT_STORE", "current-head index structural identity is invalid", cause);
+    }
+  }
 }
 
 /** @param {boolean} wasEmpty */
@@ -317,9 +339,14 @@ function initializeSchema(wasEmpty) {
     }
     execSql("BEGIN IMMEDIATE", "schema transaction");
     try {
-      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.createJournal, "journal schema creation");
-      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.createGenerationIndex, "journal index creation");
-      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.createHead, "head schema creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createJournal, "journal schema creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createGenerationIndex, "journal index creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createHead, "head schema creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentManifest, "current manifest schema creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentAssertion, "current assertion schema creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentAssertionSubjectLookup, "current subject index creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentAssertionObjectLookup, "current object index creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentSourceRef, "current source-ref schema creation");
       execSql(`PRAGMA application_id = ${APPLICATION_ID}`);
       execSql(`PRAGMA user_version = ${USER_VERSION}`);
       execSql("COMMIT", "schema commit");
@@ -332,8 +359,8 @@ function initializeSchema(wasEmpty) {
       throw cause;
     }
     return Object.freeze({
-      applicationId: ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.applicationId,
-      userVersion: ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.userVersion
+      applicationId: ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.applicationId,
+      userVersion: ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.userVersion
     });
   }
   if (userVersion > USER_VERSION) {
@@ -346,16 +373,17 @@ function initializeSchema(wasEmpty) {
     );
   }
   if (
-    applicationId !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.applicationId
+    applicationId !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.applicationId
     || (userVersion !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.userVersion
-      && userVersion !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.userVersion)
+      && userVersion !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.userVersion
+      && userVersion !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.userVersion)
   ) {
     fail("CORRUPT_STORE", "local AttuneGraph store has a foreign physical identity");
   }
   return Object.freeze({ applicationId, userVersion });
 }
 
-/** @param {1 | 2} schemaVersion */
+/** @param {1 | 2 | 3} schemaVersion */
 function prepareStatements(schemaVersion) {
   return {
     read: database.prepare(schemaVersion === 1 ? `
@@ -406,7 +434,30 @@ function prepareStatements(schemaVersion) {
       ON CONFLICT (source_id, thread_id) DO UPDATE SET
         generation = excluded.generation,
         commit_id = excluded.commit_id
-    `)
+    `),
+    deleteCurrentManifest: schemaVersion === 3 ? database.prepare(`
+      DELETE FROM attunegraph_current_manifest WHERE source_id = ? AND thread_id = ?
+    `) : undefined,
+    insertCurrentManifest: schemaVersion === 3 ? database.prepare(`
+      INSERT INTO attunegraph_current_manifest (
+        source_id, thread_id, generation, commit_id, projection_fingerprint,
+        index_revision, assertion_count, source_ref_count, index_digest
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `) : undefined,
+    insertCurrentAssertion: schemaVersion === 3 ? database.prepare(`
+      INSERT INTO attunegraph_current_assertion (
+        index_id, assertion_ordinal, assertion_id,
+        subject_kind, subject_id, object_kind, object_id,
+        predicate, epistemic_class, valid_from, valid_to, recorded_at,
+        superseded_at, derivation_kind, derivation_version, derivation_run_id
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `) : undefined,
+    insertCurrentSourceRef: schemaVersion === 3 ? database.prepare(`
+      INSERT INTO attunegraph_current_source_ref (
+        index_id, assertion_ordinal, source_ref_ordinal,
+        source_namespace, source_id_value, source_version
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `) : undefined
   };
 }
 
@@ -517,7 +568,7 @@ async function initialize(payload) {
       fail("UNSUPPORTED_STORE_PROFILE", "SQLite safety pragmas could not be established");
     }
     assertDatabaseIntegrity(physicalIdentity);
-    physicalSchemaVersion = /** @type {1 | 2} */ (physicalIdentity.userVersion);
+    physicalSchemaVersion = /** @type {1 | 2 | 3} */ (physicalIdentity.userVersion);
     statements = prepareStatements(physicalSchemaVersion);
     initialized = true;
     return {
@@ -678,6 +729,72 @@ function sameSnapshot(left, right) {
   );
 }
 
+/** @param {ReturnType<typeof materializeAttuneGraphCurrentHeadIndex>["manifest"]} manifest */
+function clearCurrentHeadIndex(manifest) {
+  if (!statements.deleteCurrentManifest) {
+    fail("STORE_FAILURE", "current-head index deletion statement is unavailable");
+  }
+  runSql(statements.deleteCurrentManifest, manifest.sourceId, manifest.threadId);
+}
+
+/** @param {ReturnType<typeof materializeAttuneGraphCurrentHeadIndex>} currentIndex */
+function insertCurrentHeadIndex(currentIndex) {
+  if (
+    !statements.insertCurrentManifest
+    || !statements.insertCurrentAssertion
+    || !statements.insertCurrentSourceRef
+  ) fail("STORE_FAILURE", "current-head index statements are unavailable");
+  const { manifest } = currentIndex;
+  const manifestWrite = runSql(
+    statements.insertCurrentManifest,
+    manifest.sourceId,
+    manifest.threadId,
+    BigInt(manifest.generation),
+    manifest.commitId,
+    manifest.projectionFingerprint,
+    manifest.indexRevision,
+    BigInt(manifest.assertionCount),
+    BigInt(manifest.sourceRefCount),
+    manifest.indexDigest
+  );
+  if (manifestWrite.changes !== 1 || manifestWrite.lastInsertRowid < 1) {
+    fail("STORE_FAILURE", "current-head manifest identity was not created exactly once");
+  }
+  const indexId = BigInt(manifestWrite.lastInsertRowid);
+  for (const assertion of currentIndex.assertions) {
+    runSql(
+      statements.insertCurrentAssertion,
+      indexId,
+      BigInt(assertion.assertionOrdinal),
+      assertion.assertionId,
+      assertion.subjectKind,
+      assertion.subjectId,
+      assertion.objectKind,
+      assertion.objectId,
+      assertion.predicate,
+      assertion.epistemicClass,
+      assertion.validFrom,
+      assertion.validTo,
+      assertion.recordedAt,
+      assertion.supersededAt,
+      assertion.derivationKind,
+      assertion.derivationVersion,
+      assertion.derivationRunId
+    );
+  }
+  for (const sourceRef of currentIndex.sourceRefs) {
+    runSql(
+      statements.insertCurrentSourceRef,
+      indexId,
+      BigInt(sourceRef.assertionOrdinal),
+      BigInt(sourceRef.sourceRefOrdinal),
+      sourceRef.sourceNamespace,
+      sourceRef.sourceIdValue,
+      sourceRef.sourceVersion
+    );
+  }
+}
+
 /** @param {import("./attunegraph-local-protocol.mjs").CompareAndSwapPayload} payload @returns {import("./attunegraph-local-protocol.mjs").CompareAndSwapResult} */
 function compareAndSwap(payload) {
   assertReady();
@@ -692,13 +809,16 @@ function compareAndSwap(payload) {
     : parseSnapshot(input.expected, scope, "expected snapshot");
   const proposed = validateProjection(input.proposed, scope);
   let encoded;
-  if (physicalSchemaVersion === 2) {
+  if (physicalSchemaVersion !== 1) {
     try {
       encoded = encodeAttuneGraphProjectionJson(proposed.json);
     } catch (cause) {
       fail("STORE_FAILURE", "proposed projection could not be encoded", cause);
     }
   }
+  const currentIndex = physicalSchemaVersion === 3
+    ? materializeAttuneGraphCurrentHeadIndex(proposed.projection)
+    : undefined;
   execSql("BEGIN IMMEDIATE", "compare-and-swap begin");
   try {
     const current = currentSnapshot(scope);
@@ -738,6 +858,7 @@ function compareAndSwap(payload) {
         proposed.fingerprint
       );
     }
+    if (currentIndex !== undefined) clearCurrentHeadIndex(currentIndex.manifest);
     runSql(
       statements.insertHead,
       scope.sourceId,
@@ -745,6 +866,7 @@ function compareAndSwap(payload) {
       BigInt(proposed.snapshot.generation),
       proposed.snapshot.commitId
     );
+    if (currentIndex !== undefined) insertCurrentHeadIndex(currentIndex);
     if (testFault === "before-commit") process.exit(71);
     execSql("COMMIT", "compare-and-swap commit");
     if (testFault === "after-commit-before-ack") process.exit(72);
@@ -840,7 +962,7 @@ function mutateForTesting(payload) {
   const input = payload;
   switch (input.mutation) {
     case "future-user-version":
-      execSql("PRAGMA user_version = 3", "future-version test mutation");
+      execSql("PRAGMA user_version = 4", "future-version test mutation");
       break;
     case "wrong-application-id":
       execSql("PRAGMA application_id = 1", "application-id test mutation");

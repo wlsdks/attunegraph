@@ -20,7 +20,7 @@ export const ADMIN_WORKER_ERROR_CODES = Object.freeze([
 /** @typedef {"INVALID_INPUT" | "INVALID_STATE" | "REENTRY" | "SOURCE_NOT_FOUND" | "UNSUPPORTED_PROFILE" | "CORRUPT_STORE" | "FUTURE_STORE_STATE" | "STORE_BUSY" | "TIMED_OUT" | "WORKER_FAILURE"} AdminWorkerErrorCode */
 /** @typedef {Readonly<{sourceId: string, threadId: string}>} AdminScope */
 /** @typedef {Readonly<{protocolVersion: 1, id: number, type: AdminRequestType, payload: Readonly<Record<string, unknown>>}>} AdminWorkerRequest */
-/** @typedef {Readonly<{ready: true}> | Readonly<{applicationId: number, userVersion: 1 | 2, protocolVersion: 1, sqliteVersion: string, headRows: number, journalRows: number, maxGeneration: number}> | Readonly<{found: false}> | Readonly<{found: true, head: Readonly<{scope: AdminScope, generation: number, commitId: string, projectionFingerprint: string}>}> | Readonly<{verified: true}> | Readonly<{closed: true}>} AdminWorkerSuccessResult */
+/** @typedef {Readonly<{ready: true}> | Readonly<{applicationId: number, userVersion: 1 | 2 | 3, protocolVersion: 1, sqliteVersion: string, headRows: number, journalRows: number, maxGeneration: number}> | Readonly<{found: false}> | Readonly<{found: true, head: Readonly<{scope: AdminScope, generation: number, commitId: string, projectionFingerprint: string}>}> | Readonly<{verified: true}> | Readonly<{closed: true}>} AdminWorkerSuccessResult */
 /** @typedef {Readonly<{protocolVersion: 1, id: number, ok: true, result: AdminWorkerSuccessResult}> | Readonly<{protocolVersion: 1, id: number, ok: false, error: Readonly<{code: AdminWorkerErrorCode}>}>} AdminWorkerResponse */
 
 /** @returns {never} */
@@ -210,7 +210,7 @@ function parseSuccessResult(value, type) {
     ]);
     if (
       result.applicationId !== 0x41544731
-      || (result.userVersion !== 1 && result.userVersion !== 2)
+      || (result.userVersion !== 1 && result.userVersion !== 2 && result.userVersion !== 3)
       || result.protocolVersion !== ADMIN_PROTOCOL_VERSION
     ) {
       return invalidProtocol();

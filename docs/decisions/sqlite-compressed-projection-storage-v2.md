@@ -4,7 +4,7 @@ Status: shipped in `d61a172` (2026-08-02)
 
 ## Decision
 
-New local SQLite databases use AttuneGraph physical schema v2. Each journal row
+Physical schema v2 introduced the compressed AttuneGraph journal. Each journal row
 stores the exact canonical stored-projection JSON bytes using the dependency-free
 Node built-in `deflateRaw` codec at level 1. The row binds:
 
@@ -27,17 +27,18 @@ adds framing/block overhead.
 
 ## Compatibility and upgrade status
 
-Physical schema v1 remains a supported exact legacy profile. Opening a v1
-database selects its v1 text read/write statements and leaves `user_version = 1`.
+Physical schemas v1 and v2 remain supported exact legacy profiles. Opening one
+selects only its declared statements and leaves its `user_version` unchanged.
 There is no automatic migration or unbounded rewrite during open. New empty
-databases atomically bootstrap as v2 with `application_id = 0x41544731` and
-`user_version = 2`; future versions still fail with `FUTURE_STORE_STATE`.
+databases now atomically bootstrap as v3; see
+[SQLite normalized current-head index v3](sqlite-normalized-current-head-index-v3.md).
+Unknown future versions still fail with `FUTURE_STORE_STATE`.
 
 No public in-place or cross-file v1-to-v2 upgrade is shipped in this unit. The
 portable format defines transport and validation semantics, but its public
 export/rebuild application API remains future design; it is not a currently
-supported upgrade path. Existing state therefore stays on the supported v1
-legacy read/write profile, while only new empty databases select v2. A public
+supported upgrade path. Existing state therefore stays on its supported v1 or
+v2 legacy read/write profile, while only new empty databases select v3. A public
 upgrade workflow, atomic switch procedure, and end-to-end recovery evidence are
 roadmap work and evidence missing.
 
@@ -51,22 +52,22 @@ workflow.
 Run on a reviewed local profile:
 
 ```sh
-PATH=/Users/jinan/.nvm/versions/node/v24.16.0/bin:$PATH \
+PATH=/path/to/node-24.15-or-newer/bin:$PATH \
   corepack pnpm benchmark:sqlite-compression-qualification
 
 # Full bounded raw samples for external evidence capture:
-PATH=/Users/jinan/.nvm/versions/node/v24.16.0/bin:$PATH \
+PATH=/path/to/node-24.15-or-newer/bin:$PATH \
   corepack pnpm --silent benchmark:sqlite-compression-qualification -- --json \
   > /absolute/non-repository/evidence/sqlite-compression.json
 
 # Reproduce the normal settled storage cells (10K and 100K):
-PATH=/Users/jinan/.nvm/versions/node/v24.16.0/bin:$PATH \
+PATH=/path/to/node-24.15-or-newer/bin:$PATH \
   corepack pnpm --silent benchmark:sqlite-compression-qualification -- \
   --scale-evidence=standard --json \
   > /absolute/non-repository/evidence/sqlite-compression-scale-standard.json
 
 # Explicit opt-in long run, adding the separate 1M cell:
-PATH=/Users/jinan/.nvm/versions/node/v24.16.0/bin:$PATH \
+PATH=/path/to/node-24.15-or-newer/bin:$PATH \
   corepack pnpm --silent benchmark:sqlite-compression-qualification -- \
   --scale-evidence=all --json \
   > /absolute/non-repository/evidence/sqlite-compression-scale-all.json

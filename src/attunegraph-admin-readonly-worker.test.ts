@@ -15,6 +15,7 @@ import {
   acquireAttuneGraphAdminReadonlySnapshot
 } from "./attunegraph-admin-readonly-snapshot.mjs";
 import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V1 } from "./attunegraph-physical-schema-v1.mjs";
+import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V3 } from "./attunegraph-physical-schema-v3.mjs";
 
 const fixtureDirectories: string[] = [];
 
@@ -386,7 +387,7 @@ it("reports a thrown SQLite close as one code-only Worker failure", async () => 
 it("does not let cleanup close failure replace an earlier inspector code", async () => {
   const fixture = await createDatabaseFixture();
   const source = new DatabaseSync(fixture.databasePath, { readBigInts: true });
-  source.exec("PRAGMA user_version = 3");
+  source.exec(`PRAGMA user_version = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.userVersion + 1}`);
   source.close();
   const lease = await acquireAttuneGraphAdminReadonlySnapshot({
     databasePath: fixture.databasePath,
@@ -869,7 +870,7 @@ it("preserves a genuine inspector FUTURE_STORE_STATE code", async () => {
   const database = new DatabaseSync(fixture.databasePath, {
     readBigInts: true
   });
-  database.exec("PRAGMA user_version = 3");
+  database.exec(`PRAGMA user_version = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.userVersion + 1}`);
   database.close();
 
   await expect(openAttuneGraphAdminReadonlyApplication({
