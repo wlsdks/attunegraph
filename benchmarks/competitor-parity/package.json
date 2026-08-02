@@ -1,0 +1,13 @@
+{
+  "name": "attunegraph-competitor-parity-private",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24.15.0" },
+  "dependencies": {
+    "@ladybugdb/core": "0.19.0",
+    "cozo-node": "0.7.6"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["@ladybugdb/core", "cozo-node"]
+  }
+}

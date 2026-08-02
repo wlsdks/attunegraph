@@ -126,6 +126,55 @@ evidence: the current connection-local auto-checkpoint and close behavior need
 a separate controlled WAL experiment. The report is measurement-only,
 claim-ineligible, and does not measure query speed or a competitor.
 
+## 10K embedded competitor parity lane
+
+The competitor harness is outside the root runtime dependency graph. Install
+its pinned native packages in the private benchmark package, then run the fixed
+10K cell on Node 24.15 or newer:
+
+```sh
+cd benchmarks/competitor-parity
+pnpm install --frozen-lockfile
+pnpm rebuild @ladybugdb/core cozo-node --pending
+cd ../..
+pnpm --silent benchmark:competitor-parity --json
+```
+
+`@ladybugdb/core@0.19.0` and `cozo-node@0.7.6` are exact lockfile inputs. They
+are not root runtime dependencies and their installed packages or native
+binaries are not bundled. The published tarball intentionally retains the
+private benchmark manifest, lockfile, orchestrator, and child so this optional
+measurement lane remains reproducible; `npm pack` must report `bundled: []`.
+Five rotating trials start all three engines in fresh subprocesses and
+databases. The corpus has exactly
+10,000 edges/assertions, 313 scopes, and 10,313 source references. Every scope
+must reproduce its ordered-neighbor and degree oracle before 20 warmups and
+200 timed adjacency plus 200 timed degree samples.
+
+The generic `native-storage-only` lane records module load, open, ingest,
+settled database bytes, reopen, first-after-reopen, query summaries, and peak
+RSS. It is not product-boundary equivalent: AttuneGraph reads exact v4 tables,
+Ladybug uses native Cypher, and Cozo uses SQLite Datalog. The report emits no
+speedup or product ratio. AttuneGraph exact-head/source-ref/digest proof
+assembly is a separate `attunegraph-v4-proof-assembly-only` lane.
+
+One 2026-08-02 macOS arm64 Node 24.16 dirty implementation run completed all
+15 children. Median-of-five p50 observations were about 0.016 ms adjacency and
+0.0032 ms degree for raw AttuneGraph v4, 0.620 ms and 0.378 ms for Ladybug, and
+0.084 ms and 0.075 ms for Cozo. AttuneGraph proof assembly was about 1.00 ms.
+Settled database bytes were 6,148,096, 3,092,480, and 1,748,992 respectively.
+These are implementation-selection observations, not shipped evidence, an SLA,
+or a superiority claim; clean revision-bound, larger, cold, and crash-recovery
+cells remain missing.
+
+Reports bind content-addressed source, root/private lockfiles, package,
+orchestrator, child, the complete generated AttuneGraph `dist/*.js|mjs` runtime
+closure, and corpus hashes. Child output is bounded to 128 KiB and
+the aggregate to 512 KiB; arguments are exact and validated temporary roots are
+removed on success or failure. Reports remain `measurementOnly: true`,
+`claimEligible: false`, and `productBoundaryEquivalent: false`, with explicit
+temporal, provenance, authority, and receipt product-ratio exclusions.
+
 ## Evidence document
 
 `attunegraph-scale-benchmark@1` binds:
