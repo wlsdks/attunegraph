@@ -12,6 +12,27 @@ as a typed object or bounded AttuneQL and returns an explicit `complete`,
 
 AttuneGraph is not a smaller Neo4j. It decides which relationships an agent may use as evidence **now**, under time, provenance, freshness, and context budgets.
 
+## Current measured baseline
+
+The clean 2026-08-02 macOS arm64, Node 24.16 10K storage-primitive run gives a
+useful, deliberately narrow answer about the engine today:
+
+| What the evidence says | Current result |
+| --- | --- |
+| Raw indexed local reads | AttuneGraph v4 measured about **0.0162 ms adjacency** and **0.00317 ms degree** p50. In this cell, SQLite is not the limiting lookup component. |
+| Agent-safe result construction | Exact-head/source/provenance proof assembly measured about **0.991 ms** p50. Canonical reconstruction and proof work are the larger current read cost. |
+| Representation cost | The settled AttuneGraph database was **6,148,096 bytes**, versus **3,092,480** for LadybugDB and **1,748,992** for CozoDB in their native storage lanes. Representation density and ingest/write amplification still need work. |
+| Engineering decision | Keep SQLite as the authoritative embedded store for now; optimize proof assembly and representation before replacing the storage engine. Reconsider a derived read plane only when larger profiles prove it necessary. |
+
+The comparison used 10,000 assertions/edges and exact adjacency/degree oracles
+with LadybugDB 0.19.0 and CozoDB 0.7.6. Their native APIs do **not** provide the
+same temporal, provenance, authority, budget, or abstention contract, so these
+numbers are not a product ranking or SLA. Controlled-cold, update/delete,
+equivalent-durability, crash-recovery, 100K, and 1M comparison cells remain
+unverified. See [the reproducible benchmark](BENCHMARKS.md#10k-embedded-competitor-parity-lane)
+and [the storage decision record](https://github.com/wlsdks/attunegraph/blob/main/docs/decisions/storage-engine-and-temporal-layout-research.md#competitor-parity-decision-2026-08-02)
+for conditions, source identity, and open gaps.
+
 ## Why agents need a different graph
 
 Long-lived agents rarely fail because one fact is impossible to retrieve. They
