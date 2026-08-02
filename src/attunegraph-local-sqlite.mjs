@@ -27,11 +27,16 @@ import {
   classifyAttuneGraphPhysicalSchemaV3
 } from "./attunegraph-physical-schema-v3.mjs";
 import {
+  ATTUNEGRAPH_PHYSICAL_SCHEMA_V4,
+  classifyAttuneGraphPhysicalSchemaV4
+} from "./attunegraph-physical-schema-v4.mjs";
+import {
   decodeAttuneGraphProjectionJson,
   encodeAttuneGraphProjectionJson
 } from "./attunegraph-projection-codec.mjs";
 import {
   materializeAttuneGraphCurrentHeadIndex,
+  materializeAttuneGraphCurrentHeadIndexV4,
   verifyAttuneGraphCurrentHeadIndexStructureDatabase
 } from "./attunegraph-current-head-index.mjs";
 import { parseProjection } from "./attunegraph-local-projection.mjs";
@@ -52,7 +57,7 @@ const SQLITE_NOTADB = 26;
 let database;
 /** @type {ReturnType<typeof prepareStatements>} */
 let statements;
-/** @type {1 | 2 | 3} */
+/** @type {1 | 2 | 3 | 4} */
 let physicalSchemaVersion;
 let initialized = false;
 let closing = false;
@@ -233,9 +238,9 @@ function physicalText(value, maximum) {
 function assertExactSchema(applicationId, userVersion) {
   const objects = sqlRows(allSql(database.prepare(
     "SELECT type, name, tbl_name AS tableName, sql FROM sqlite_schema "
-      + "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name LIMIT 9"
+      + "WHERE name NOT LIKE 'sqlite_%' ORDER BY type, name LIMIT 10"
   )), "schema object rows", ["type", "name", "tableName", "sql"], "CORRUPT_STORE");
-  if (objects.length === 9) {
+  if (objects.length === 10) {
     fail("CORRUPT_STORE", "local AttuneGraph schema has unexpected or missing objects");
   }
   const admittedObjects = Object.freeze(objects.map((object) => Object.freeze({
@@ -279,7 +284,9 @@ function assertExactSchema(applicationId, userVersion) {
     ? classifyAttuneGraphPhysicalSchemaV1(admitted)
     : userVersion === ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.userVersion
       ? classifyAttuneGraphPhysicalSchemaV2(admitted)
-      : classifyAttuneGraphPhysicalSchemaV3(admitted);
+      : userVersion === ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.userVersion
+        ? classifyAttuneGraphPhysicalSchemaV3(admitted)
+        : classifyAttuneGraphPhysicalSchemaV4(admitted);
   if (classification.kind === "future") {
     fail("FUTURE_STORE_STATE", "local AttuneGraph store has a future physical schema");
   }
@@ -316,7 +323,7 @@ function assertDatabaseIntegrity(physicalIdentity) {
   if (getSql(database.prepare("SELECT * FROM pragma_foreign_key_check LIMIT 1")) !== undefined) {
     fail("CORRUPT_STORE", "local AttuneGraph store has a foreign-key violation");
   }
-  if (physicalIdentity.userVersion === ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.userVersion) {
+  if (physicalIdentity.userVersion >= ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.userVersion) {
     try {
       verifyAttuneGraphCurrentHeadIndexStructureDatabase(database);
     } catch (cause) {
@@ -339,14 +346,15 @@ function initializeSchema(wasEmpty) {
     }
     execSql("BEGIN IMMEDIATE", "schema transaction");
     try {
-      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createJournal, "journal schema creation");
-      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createGenerationIndex, "journal index creation");
-      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createHead, "head schema creation");
-      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentManifest, "current manifest schema creation");
-      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentAssertion, "current assertion schema creation");
-      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentAssertionSubjectLookup, "current subject index creation");
-      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentAssertionObjectLookup, "current object index creation");
-      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentSourceRef, "current source-ref schema creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createJournal, "journal schema creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createGenerationIndex, "journal index creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createHead, "head schema creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentManifest, "current manifest schema creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentAssertion, "current assertion schema creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentAssertionSubjectLookup, "current subject index creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentAssertionObjectLookup, "current object index creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentSourceRef, "current source-ref schema creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentEndpointDegree, "current endpoint-degree schema creation");
       execSql(`PRAGMA application_id = ${APPLICATION_ID}`);
       execSql(`PRAGMA user_version = ${USER_VERSION}`);
       execSql("COMMIT", "schema commit");
@@ -359,8 +367,8 @@ function initializeSchema(wasEmpty) {
       throw cause;
     }
     return Object.freeze({
-      applicationId: ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.applicationId,
-      userVersion: ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.userVersion
+      applicationId: ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.applicationId,
+      userVersion: ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.userVersion
     });
   }
   if (userVersion > USER_VERSION) {
@@ -373,17 +381,18 @@ function initializeSchema(wasEmpty) {
     );
   }
   if (
-    applicationId !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.applicationId
+    applicationId !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.applicationId
     || (userVersion !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.userVersion
       && userVersion !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.userVersion
-      && userVersion !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.userVersion)
+      && userVersion !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.userVersion
+      && userVersion !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.userVersion)
   ) {
     fail("CORRUPT_STORE", "local AttuneGraph store has a foreign physical identity");
   }
   return Object.freeze({ applicationId, userVersion });
 }
 
-/** @param {1 | 2 | 3} schemaVersion */
+/** @param {1 | 2 | 3 | 4} schemaVersion */
 function prepareStatements(schemaVersion) {
   return {
     read: database.prepare(schemaVersion === 1 ? `
@@ -435,10 +444,10 @@ function prepareStatements(schemaVersion) {
         generation = excluded.generation,
         commit_id = excluded.commit_id
     `),
-    deleteCurrentManifest: schemaVersion === 3 ? database.prepare(`
+    deleteCurrentManifest: schemaVersion >= 3 ? database.prepare(`
       DELETE FROM attunegraph_current_manifest WHERE source_id = ? AND thread_id = ?
     `) : undefined,
-    insertCurrentManifest: schemaVersion === 3 ? database.prepare(`
+    insertCurrentManifest: schemaVersion >= 3 ? database.prepare(`
       INSERT INTO attunegraph_current_manifest (
         source_id, thread_id, generation, commit_id, projection_fingerprint,
         index_revision, assertion_count, source_ref_count, index_digest
@@ -451,12 +460,25 @@ function prepareStatements(schemaVersion) {
         predicate, epistemic_class, valid_from, valid_to, recorded_at,
         superseded_at, derivation_kind, derivation_version, derivation_run_id
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `) : schemaVersion === 4 ? database.prepare(`
+      INSERT INTO attunegraph_current_assertion (
+        index_id, assertion_ordinal, assertion_id,
+        subject_kind, subject_id, object_kind, object_id,
+        predicate, epistemic_class, valid_from, valid_to, recorded_at,
+        superseded_at, derivation_kind, derivation_version, derivation_run_id,
+        source_ref_count, source_ref_digest
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `) : undefined,
-    insertCurrentSourceRef: schemaVersion === 3 ? database.prepare(`
+    insertCurrentSourceRef: schemaVersion >= 3 ? database.prepare(`
       INSERT INTO attunegraph_current_source_ref (
         index_id, assertion_ordinal, source_ref_ordinal,
         source_namespace, source_id_value, source_version
       ) VALUES (?, ?, ?, ?, ?, ?)
+    `) : undefined,
+    insertCurrentEndpointDegree: schemaVersion === 4 ? database.prepare(`
+      INSERT INTO attunegraph_current_endpoint_degree (
+        index_id, ref_kind, ref_id, incident_assertion_count
+      ) VALUES (?, ?, ?, ?)
     `) : undefined
   };
 }
@@ -568,7 +590,7 @@ async function initialize(payload) {
       fail("UNSUPPORTED_STORE_PROFILE", "SQLite safety pragmas could not be established");
     }
     assertDatabaseIntegrity(physicalIdentity);
-    physicalSchemaVersion = /** @type {1 | 2 | 3} */ (physicalIdentity.userVersion);
+    physicalSchemaVersion = /** @type {1 | 2 | 3 | 4} */ (physicalIdentity.userVersion);
     statements = prepareStatements(physicalSchemaVersion);
     initialized = true;
     return {
@@ -729,7 +751,8 @@ function sameSnapshot(left, right) {
   );
 }
 
-/** @param {ReturnType<typeof materializeAttuneGraphCurrentHeadIndex>["manifest"]} manifest */
+/** @param {ReturnType<typeof materializeAttuneGraphCurrentHeadIndex>["manifest"]
+ * | ReturnType<typeof materializeAttuneGraphCurrentHeadIndexV4>["manifest"]} manifest */
 function clearCurrentHeadIndex(manifest) {
   if (!statements.deleteCurrentManifest) {
     fail("STORE_FAILURE", "current-head index deletion statement is unavailable");
@@ -737,7 +760,8 @@ function clearCurrentHeadIndex(manifest) {
   runSql(statements.deleteCurrentManifest, manifest.sourceId, manifest.threadId);
 }
 
-/** @param {ReturnType<typeof materializeAttuneGraphCurrentHeadIndex>} currentIndex */
+/** @param {ReturnType<typeof materializeAttuneGraphCurrentHeadIndex>
+ * | ReturnType<typeof materializeAttuneGraphCurrentHeadIndexV4>} currentIndex */
 function insertCurrentHeadIndex(currentIndex) {
   if (
     !statements.insertCurrentManifest
@@ -762,8 +786,7 @@ function insertCurrentHeadIndex(currentIndex) {
   }
   const indexId = BigInt(manifestWrite.lastInsertRowid);
   for (const assertion of currentIndex.assertions) {
-    runSql(
-      statements.insertCurrentAssertion,
+    const values = [
       indexId,
       BigInt(assertion.assertionOrdinal),
       assertion.assertionId,
@@ -780,7 +803,11 @@ function insertCurrentHeadIndex(currentIndex) {
       assertion.derivationKind,
       assertion.derivationVersion,
       assertion.derivationRunId
-    );
+    ];
+    if ("sourceRefCount" in assertion && "sourceRefDigest" in assertion) {
+      values.push(BigInt(assertion.sourceRefCount), assertion.sourceRefDigest);
+    }
+    runSql(statements.insertCurrentAssertion, ...values);
   }
   for (const sourceRef of currentIndex.sourceRefs) {
     runSql(
@@ -792,6 +819,20 @@ function insertCurrentHeadIndex(currentIndex) {
       sourceRef.sourceIdValue,
       sourceRef.sourceVersion
     );
+  }
+  if ("endpointDegrees" in currentIndex) {
+    if (!statements.insertCurrentEndpointDegree) {
+      fail("STORE_FAILURE", "current endpoint-degree statement is unavailable");
+    }
+    for (const endpoint of currentIndex.endpointDegrees) {
+      runSql(
+        statements.insertCurrentEndpointDegree,
+        indexId,
+        endpoint.refKind,
+        endpoint.refId,
+        BigInt(endpoint.incidentAssertionCount)
+      );
+    }
   }
 }
 
@@ -816,9 +857,11 @@ function compareAndSwap(payload) {
       fail("STORE_FAILURE", "proposed projection could not be encoded", cause);
     }
   }
-  const currentIndex = physicalSchemaVersion === 3
-    ? materializeAttuneGraphCurrentHeadIndex(proposed.projection)
-    : undefined;
+  const currentIndex = physicalSchemaVersion === 4
+    ? materializeAttuneGraphCurrentHeadIndexV4(proposed.projection)
+    : physicalSchemaVersion === 3
+      ? materializeAttuneGraphCurrentHeadIndex(proposed.projection)
+      : undefined;
   execSql("BEGIN IMMEDIATE", "compare-and-swap begin");
   try {
     const current = currentSnapshot(scope);
@@ -962,7 +1005,7 @@ function mutateForTesting(payload) {
   const input = payload;
   switch (input.mutation) {
     case "future-user-version":
-      execSql("PRAGMA user_version = 4", "future-version test mutation");
+      execSql("PRAGMA user_version = 5", "future-version test mutation");
       break;
     case "wrong-application-id":
       execSql("PRAGMA application_id = 1", "application-id test mutation");

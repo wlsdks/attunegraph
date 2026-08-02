@@ -133,7 +133,7 @@ function adaptiveEndpoint(database, scope, seed) {
     asOf: NOW,
     maxCandidateAssertions: ADAPTIVE_SPARSE_CANDIDATE_LIMIT
   });
-  return normalized.scanStatus === "built-unverified"
+  return normalized.scanStatus === "complete"
     ? Object.freeze({ path: "normalized-candidate", assertions: normalized.assertions })
     : Object.freeze({ path: "canonical-fallback", assertions: fullProjectionEndpoint(database, scope, seed) });
 }
@@ -238,7 +238,7 @@ async function scenario(
       asOf: NOW
     });
     if (
-      normalized.scanStatus !== "built-unverified"
+      normalized.scanStatus !== "complete"
       || JSON.stringify(full) !== JSON.stringify(normalized.assertions)
     ) {
       throw new Error(`${name} endpoint semantic identity diverged`);
@@ -491,7 +491,7 @@ export async function runNormalizedDecisionEndpointBenchmark({
       throw new Error("normalized endpoint benchmark source changed during measurement");
     }
     const body = Object.freeze({
-      schema: "attunegraph-normalized-decision-endpoint-benchmark@2",
+      schema: "attunegraph-normalized-decision-endpoint-benchmark@3",
       measurementOnly: true,
       claimEligible: false,
       provenance: startProvenance,
@@ -501,6 +501,7 @@ export async function runNormalizedDecisionEndpointBenchmark({
         samples,
         warmup,
         asOf: NOW,
+        adaptiveRouting: "v4-endpoint-degree-hint-then-exact-set-proof",
         adaptiveSparseCandidateLimit: ADAPTIVE_SPARSE_CANDIDATE_LIMIT,
         sourceRefCounts: SOURCE_REF_COUNTS,
         simulatedWitnessMetadataScanLimit: SIMULATED_WITNESS_METADATA_SCAN_LIMIT,
@@ -512,7 +513,7 @@ export async function runNormalizedDecisionEndpointBenchmark({
         "no-worker-or-engine-transport",
         "no-full-working-graph-bfs",
         "no-public-fast-path",
-        "simulated-v4-columns-no-production-write-migration-or-durable-file-size-measurement",
+        "fresh-v4-production-store-plus-simulated-prototype-overhead-no-v3-to-v4-migration-or-durable-file-size-measurement",
         "single-host-no-sla"
       ])
     });

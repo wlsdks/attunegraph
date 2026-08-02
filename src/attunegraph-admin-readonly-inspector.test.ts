@@ -23,6 +23,10 @@ import {
   ATTUNEGRAPH_PHYSICAL_SCHEMA_V3,
   classifyAttuneGraphPhysicalSchemaV3
 } from "./attunegraph-physical-schema-v3.mjs";
+import {
+  ATTUNEGRAPH_PHYSICAL_SCHEMA_V4,
+  classifyAttuneGraphPhysicalSchemaV4
+} from "./attunegraph-physical-schema-v4.mjs";
 
 it("defines and classifies the exact AttuneGraph v1 physical profile", () => {
   expect(ATTUNEGRAPH_PHYSICAL_SCHEMA_V1).toMatchObject({
@@ -111,6 +115,41 @@ it("classifies and inspects an exact empty v3 current-head-index profile", () =>
   database.close();
 });
 
+it("classifies and inspects the exact empty v4 witnessed current-head-index profile", () => {
+  const profile = {
+    applicationId: ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.applicationId,
+    userVersion: ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.userVersion,
+    objects: ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.objects,
+    headForeignKey: ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.headForeignKey
+  };
+  expect(classifyAttuneGraphPhysicalSchemaV3(profile)).toEqual({ kind: "future" });
+  expect(classifyAttuneGraphPhysicalSchemaV4(profile)).toEqual({ kind: "match" });
+  expect(ATTUNEGRAPH_PHYSICAL_SCHEMA_V4).toMatchObject({
+    userVersion: 4,
+    currentIndexRevision: "normalized-current-head@2"
+  });
+  expect(Object.isFrozen(ATTUNEGRAPH_PHYSICAL_SCHEMA_V4)).toBe(true);
+
+  const database = new DatabaseSync(":memory:", { readBigInts: true });
+  database.exec(`
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createJournal};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createGenerationIndex};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createHead};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentManifest};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentAssertion};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentAssertionSubjectLookup};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentAssertionObjectLookup};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentSourceRef};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentEndpointDegree};
+    PRAGMA application_id = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.applicationId};
+    PRAGMA user_version = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.userVersion};
+  `);
+  const inspector = createAttuneGraphAdminReadOnlyInspector(database);
+  expect(inspector.inspectSummary()).toMatchObject({ userVersion: 4, headRows: 0, journalRows: 0 });
+  expect(inspector.verifyIntegrity()).toEqual({ verified: true });
+  database.close();
+});
+
 it("fails Admin integrity closed when a v3 derived row drifts from its exact head", async () => {
   const directory = await realpath(await mkdtemp(join(tmpdir(), "attunegraph-admin-v3-index-")));
   const databasePath = join(directory, "index.sqlite");
@@ -194,7 +233,7 @@ it("preserves FUTURE_STORE_STATE when serving sees a future version and wrong ap
       ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.createGenerationIndex};
       ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.createHead};
       PRAGMA application_id = 1;
-      PRAGMA user_version = 4;
+      PRAGMA user_version = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.userVersion + 1};
     `);
     database.close();
     await chmod(databasePath, 0o600);
@@ -326,7 +365,7 @@ it("distinguishes a dangling head from a missing scope", () => {
 
 it("authenticates only same-module sanitized inspector failures", () => {
   const future = createFixtureDatabase();
-  future.exec("PRAGMA user_version = 4");
+  future.exec(`PRAGMA user_version = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.userVersion + 1}`);
   let failure: unknown;
   try {
     createAttuneGraphAdminReadOnlyInspector(future);
@@ -460,7 +499,7 @@ it("uses bounded metadata SQL and maps only numeric SQLite primary codes", () =>
   const database = fakeMetadataDatabase(manifestSchemaRows());
   createAttuneGraphAdminReadOnlyInspector(database);
   expect(database.preparedSql.some((sql) =>
-    sql.includes("sqlite_schema") && sql.includes("LIMIT 9")
+    sql.includes("sqlite_schema") && sql.includes("LIMIT 10")
   )).toBe(true);
   expect(database.preparedSql.some((sql) =>
     sql.includes("pragma_foreign_key_list") && sql.includes("LIMIT 5")

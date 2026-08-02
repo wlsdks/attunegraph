@@ -21,6 +21,7 @@ import { createAttuneGraphStore } from "../dist/attunegraph-backend.js";
 import { createAttuneGraphAdminReadOnlyInspector } from "../dist/attunegraph-admin-readonly-inspector.mjs";
 import { openAttuneGraph } from "../dist/attunegraph-engine.js";
 import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V2 } from "../dist/attunegraph-physical-schema-v2.mjs";
+import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V3 } from "../dist/attunegraph-physical-schema-v3.mjs";
 import { openSqliteAttuneGraphStore } from "../dist/attunegraph-sqlite-store.js";
 import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
 import {
@@ -443,6 +444,24 @@ function createV2Database(databasePath) {
   chmodSync(databasePath, 0o600);
 }
 
+function createV3Database(databasePath) {
+  const database = new DatabaseSync(databasePath);
+  database.exec(`
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createJournal};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createGenerationIndex};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createHead};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentManifest};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentAssertion};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentAssertionSubjectLookup};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentAssertionObjectLookup};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentSourceRef};
+    PRAGMA application_id = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.applicationId};
+    PRAGMA user_version = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.userVersion};
+  `);
+  database.close();
+  chmodSync(databasePath, 0o600);
+}
+
 function inspectDatabase(databasePath, profile) {
   const database = new DatabaseSync(databasePath, { readBigInts: true, readOnly: true });
   try {
@@ -651,6 +670,7 @@ export async function runCurrentHeadMaterializationProfile({ profile, scale, dat
   }
   const identity = captureMaterializationIdentity();
   if (profile === "v2") createV2Database(databasePath);
+  else createV3Database(databasePath);
   const shardCount = Math.ceil(scale / ASSERTIONS_PER_SCOPE);
   const corpusHash = createHash("sha256").update(CORPUS_SEED).update("\0");
   const semanticHash = createHash("sha256").update("attunegraph.materialization-semantics.v1").update("\0");

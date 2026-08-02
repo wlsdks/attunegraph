@@ -1,12 +1,12 @@
 import { Buffer } from "node:buffer";
 import { types as nodeTypes } from "node:util";
 import { parseProjection } from "./attunegraph-local-projection.mjs";
-import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V3 } from "./attunegraph-physical-schema-v3.mjs";
+import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V4 } from "./attunegraph-physical-schema-v4.mjs";
 export const PROTOCOL_VERSION = 1;
 export const MAX_ENVELOPE_BYTES = 2_097_152;
-export const APPLICATION_ID = ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.applicationId;
-export const USER_VERSION = ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.userVersion;
-const SUPPORTED_USER_VERSIONS = new Set([1, 2, USER_VERSION]);
+export const APPLICATION_ID = ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.applicationId;
+export const USER_VERSION = ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.userVersion;
+const SUPPORTED_USER_VERSIONS = new Set([1, 2, 3, USER_VERSION]);
 /** @typedef {"CORRUPT_STORE" | "FUTURE_STORE_STATE" | "INCOMPATIBLE_STORE_PROFILE" | "STORE_FAILURE" | "UNSUPPORTED_STORE_PROFILE"} SerializedErrorCode */
 /** @typedef {"initialize" | "read" | "readHead" | "compareAndSwap" | "holdWriteLockForTesting" | "inspectForTesting" | "mutateForTesting" | "close"} WorkerRequestType */
 /** @typedef {"future-user-version" | "wrong-application-id" | "malformed-projection-json" | "missing-journal-row" | "partial-bootstrap" | "oversized-projection-json" | "mismatched-head" | "quick-check-corruption"} TestMutation */
@@ -32,7 +32,7 @@ const SUPPORTED_USER_VERSIONS = new Set([1, 2, USER_VERSION]);
 /** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "mutateForTesting", readonly payload: MutatePayload }} MutateRequest */
 /** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "close", readonly payload: EmptyPayload }} CloseRequest */
 /** @typedef {InitializeRequest | ReadRequest | ReadHeadRequest | CompareAndSwapRequest | HoldWriteLockRequest | InspectRequest | MutateRequest | CloseRequest} WorkerRequest */
-/** @typedef {{ readonly applicationId: number, readonly profileVersion: 1, readonly protocolVersion: 1, readonly sqliteVersion: string, readonly userVersion: 1 | 2 | 3 }} InitializeResult */
+/** @typedef {{ readonly applicationId: number, readonly profileVersion: 1, readonly protocolVersion: 1, readonly sqliteVersion: string, readonly userVersion: 1 | 2 | 3 | 4 }} InitializeResult */
 /** @typedef {{ readonly found: false } | { readonly found: true, readonly projection: AttuneGraphStoredProjection }} ReadResult */
 /** @typedef {{ readonly found: false } | { readonly found: true, readonly snapshot: AttuneGraphSnapshot }} ReadHeadResult */
 /** @typedef {{ readonly committed: boolean }} CompareAndSwapResult */
@@ -465,7 +465,7 @@ export function parseWorkerResult(type, value) {
         profileVersion: 1,
         protocolVersion: PROTOCOL_VERSION,
         sqliteVersion: input.sqliteVersion,
-        userVersion: /** @type {1 | 2 | 3} */ (input.userVersion)
+        userVersion: /** @type {1 | 2 | 3 | 4} */ (input.userVersion)
       });
     }
     case "read": {

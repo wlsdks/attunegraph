@@ -30,6 +30,7 @@ import { runAttuneGraphStoreConformance } from "./attunegraph-testing.js";
 import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V1 } from "./attunegraph-physical-schema-v1.mjs";
 import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V2 } from "./attunegraph-physical-schema-v2.mjs";
 import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V3 } from "./attunegraph-physical-schema-v3.mjs";
+import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V4 } from "./attunegraph-physical-schema-v4.mjs";
 import {
   ATTUNEGRAPH_CURRENT_DECISION_ENDPOINT_PREDICATES_FOR_MEASUREMENT,
   ATTUNEGRAPH_CURRENT_DECISION_ENDPOINT_SOURCE_REFS_FOR_MEASUREMENT,
@@ -184,7 +185,7 @@ it("persists and reopens byte-identical Engine snapshots and results", async () 
   await expect(reopened.query(decisionQuery())).rejects.toMatchObject({ code: "CLOSED" });
 });
 
-it("bootstraps physical schema v3 while retaining exact compressed projection metadata", async () => {
+it("bootstraps physical schema v4 while retaining exact compressed projection metadata", async () => {
   const databasePath = await temporaryDatabase();
   const graph = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
   const snapshot = await graph.project(command("physical-v2"));
@@ -205,7 +206,7 @@ it("bootstraps physical schema v3 while retaining exact compressed projection me
   `).get();
   database.close();
 
-  expect(version).toEqual({ user_version: 3n });
+  expect(version).toEqual({ user_version: 4n });
   expect(columns).toContain("projection_payload");
   expect(columns).not.toContain("projection_json");
   expect(row).toMatchObject({
@@ -216,9 +217,9 @@ it("bootstraps physical schema v3 while retaining exact compressed projection me
   });
   expect(row?.uncompressedBytes).toEqual(expect.any(BigInt));
 
-  expect(ATTUNEGRAPH_PHYSICAL_SCHEMA_V3).toMatchObject({
+  expect(ATTUNEGRAPH_PHYSICAL_SCHEMA_V4).toMatchObject({
     applicationId: ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.applicationId,
-    userVersion: 3,
+    userVersion: 4,
     encoding: ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.encoding
   });
 });
@@ -250,6 +251,10 @@ it("materializes the exact current-head assertion, endpoint, provenance, and der
   const sourceRefs = database.prepare(
     "SELECT * FROM attunegraph_current_source_ref ORDER BY assertion_ordinal, source_ref_ordinal"
   ).all();
+  const endpointDegrees = database.prepare(`
+    SELECT ref_kind, ref_id, incident_assertion_count
+    FROM attunegraph_current_endpoint_degree ORDER BY ref_kind, ref_id
+  `).all();
   const currentObjects = database.prepare(`
     SELECT type, name FROM sqlite_schema
     WHERE name LIKE 'attunegraph_current_%' ORDER BY type, name
@@ -262,7 +267,7 @@ it("materializes the exact current-head assertion, endpoint, provenance, and der
     generation: 1n,
     commit_id: snapshot.commitId,
     projection_fingerprint: snapshot.commitId.replace("attunegraph-commit:", ""),
-    index_revision: "normalized-current-head@1",
+    index_revision: "normalized-current-head@2",
     assertion_count: 1n,
     source_ref_count: 2n,
     index_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u)
@@ -282,7 +287,9 @@ it("materializes the exact current-head assertion, endpoint, provenance, and der
     superseded_at: assertion.supersededAt,
     derivation_kind: "projection",
     derivation_version: "local-test@2",
-    derivation_run_id: "run-normalized-v3"
+    derivation_run_id: "run-normalized-v3",
+    source_ref_count: 2n,
+    source_ref_digest: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u)
   })]);
   const assertionRow = assertions[0] as Record<string, unknown>;
   const reconstructed = normalizeGraphAssertion({
@@ -325,10 +332,15 @@ it("materializes the exact current-head assertion, endpoint, provenance, and der
     expect.objectContaining({ index_id: expect.any(BigInt), source_ref_ordinal: 0n, source_id_value: "a-source", source_version: "1" }),
     expect.objectContaining({ index_id: expect.any(BigInt), source_ref_ordinal: 1n, source_id_value: "z-source", source_version: "2" })
   ]);
+  expect(endpointDegrees).toEqual([
+    { ref_kind: "artifact", ref_id: assertion.subject.id, incident_assertion_count: 1n },
+    { ref_kind: "thread", ref_id: assertion.object.id, incident_assertion_count: 1n }
+  ]);
   expect(currentObjects).toEqual([
     { type: "index", name: "attunegraph_current_assertion_object_lookup" },
     { type: "index", name: "attunegraph_current_assertion_subject_lookup" },
     { type: "table", name: "attunegraph_current_assertion" },
+    { type: "table", name: "attunegraph_current_endpoint_degree" },
     { type: "table", name: "attunegraph_current_manifest" },
     { type: "table", name: "attunegraph_current_source_ref" }
   ]);
@@ -404,13 +416,10 @@ it("reads a bounded temporally eligible decision endpoint with exact code-unit o
     expect(result).toMatchObject({
       schema: "attunegraph-current-decision-endpoint-measurement@1",
       measurementOnly: true,
-      scanStatus: "built-unverified",
-      verificationLimitations: [
-        "selected-bucket-and-source-ref-tail-completeness-not-proven-by-v3"
-      ],
+      scanStatus: "complete",
       snapshot,
       projectionFingerprint: snapshot.commitId.replace("attunegraph-commit:", ""),
-      scannedAssertions: 2
+      scannedAssertions: 4
     });
     expect(result.assertions.map((entry) => entry.id)).toEqual([
       supplementaryFirst.id,
@@ -443,26 +452,98 @@ it("reads a bounded temporally eligible decision endpoint with exact code-unit o
       assertions: []
     });
 
+    expect(readAttuneGraphCurrentDecisionEndpointForMeasurement(database, {
+      scope: SCOPE,
+      seed: { id: "artifact:absent", kind: "artifact" },
+      asOf: NOW
+    })).toMatchObject({
+      scanStatus: "complete",
+      scannedAssertions: 4,
+      assertions: []
+    });
+
+    const manifest = database.prepare(`
+      SELECT index_digest AS indexDigest FROM attunegraph_current_manifest
+    `).get() as { indexDigest: string };
+    database.prepare(`
+      UPDATE attunegraph_current_manifest SET index_digest = ?
+    `).run("sha256:" + "0".repeat(64));
+    expect(() => readAttuneGraphCurrentDecisionEndpointForMeasurement(database, {
+      scope: SCOPE,
+      seed,
+      asOf: NOW
+    })).toThrow(/assertion-set witness is invalid/u);
+    database.prepare(`
+      UPDATE attunegraph_current_manifest SET index_digest = ?
+    `).run(manifest.indexDigest);
+
+    database.prepare(`
+      UPDATE attunegraph_current_assertion SET predicate = ?
+      WHERE assertion_ordinal = 0
+    `).run("x".repeat(1_048_577));
+    expect(() => readAttuneGraphCurrentDecisionEndpointForMeasurement(database, {
+      scope: SCOPE,
+      seed,
+      asOf: NOW
+    })).toThrow(/metadata byte budget is invalid/u);
+    database.prepare(`
+      UPDATE attunegraph_current_assertion SET predicate = ?
+      WHERE assertion_ordinal = 0
+    `).run(bmpSecond.predicate);
+
+    database.prepare(`
+      UPDATE attunegraph_current_manifest SET assertion_count = 65
+    `).run();
+    expect(readAttuneGraphCurrentDecisionEndpointForMeasurement(database, {
+      scope: SCOPE,
+      seed,
+      asOf: NOW
+    })).toMatchObject({
+      scanStatus: "abstained",
+      abstentionReason: "metadata-scan-budget",
+      scannedAssertions: 0,
+      assertions: []
+    });
+    database.prepare(`
+      UPDATE attunegraph_current_manifest SET assertion_count = 4
+    `).run();
+
+    database.prepare(`
+      DELETE FROM attunegraph_current_endpoint_degree
+      WHERE ref_kind = ? AND ref_id = ?
+    `).run(seed.kind, seed.id);
+    expect(() => readAttuneGraphCurrentDecisionEndpointForMeasurement(database, {
+      scope: SCOPE,
+      seed,
+      asOf: NOW
+    })).toThrow(/routing witness is stale or invalid/u);
+    database.prepare(`
+      INSERT INTO attunegraph_current_endpoint_degree (
+        index_id, ref_kind, ref_id, incident_assertion_count
+      ) SELECT index_id, ?, ?, 4 FROM attunegraph_current_manifest
+    `).run(seed.kind, seed.id);
+
     database.prepare(`
       DELETE FROM attunegraph_current_source_ref
       WHERE source_id_value = ?
     `).run("source:supplementary:1");
-    const missingTrailingRef = readAttuneGraphCurrentDecisionEndpointForMeasurement(database, {
+    expect(() => readAttuneGraphCurrentDecisionEndpointForMeasurement(database, {
       scope: SCOPE,
       seed,
       asOf: NOW
-    });
-    expect(missingTrailingRef).toMatchObject({
-      scanStatus: "built-unverified",
-      verificationLimitations: [
-        "selected-bucket-and-source-ref-tail-completeness-not-proven-by-v3"
-      ]
-    });
-    expect(missingTrailingRef.assertions.find((entry) => entry.id === supplementaryFirst.id)
-      ?.sourceRefs.map((sourceRef) => sourceRef.id)).toEqual(["source:supplementary:0"]);
+    })).toThrow(/selected source-ref count is invalid/u);
 
     database.prepare(`
-      UPDATE attunegraph_current_source_ref SET source_ref_ordinal = 1
+      INSERT INTO attunegraph_current_source_ref (
+        index_id, assertion_ordinal, source_ref_ordinal,
+        source_namespace, source_id_value, source_version
+      ) SELECT index_id, assertion_ordinal, 1, source_namespace, ?, source_version
+        FROM attunegraph_current_source_ref
+        WHERE source_id_value = ?
+    `).run("source:supplementary:1", "source:supplementary:0");
+
+    database.prepare(`
+      UPDATE attunegraph_current_source_ref SET source_ref_ordinal = 2
       WHERE source_id_value = ?
     `).run("source:supplementary:0");
     expect(() => readAttuneGraphCurrentDecisionEndpointForMeasurement(database, {
@@ -480,6 +561,50 @@ it("reads a bounded temporally eligible decision endpoint with exact code-unit o
       seed,
       asOf: NOW
     })).toThrow(/current-head index integer is invalid/u);
+  } finally {
+    database.close();
+  }
+});
+
+it("keeps physical v3 writes on revision @1 and the endpoint explicitly built-unverified", async () => {
+  const databasePath = await temporaryDatabase("normalized-decision-endpoint-v3-compat.sqlite");
+  const fixture = new DatabaseSync(databasePath);
+  fixture.exec(`
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createJournal};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createGenerationIndex};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createHead};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentManifest};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentAssertion};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentAssertionSubjectLookup};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentAssertionObjectLookup};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.createCurrentSourceRef};
+    PRAGMA application_id = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.applicationId};
+    PRAGMA user_version = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V3.userVersion};
+  `);
+  fixture.close();
+  await chmod(databasePath, 0o600);
+
+  const graph = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  const snapshot = await graph.project(command("v3-endpoint-compat"));
+  await graph.close();
+
+  const database = new DatabaseSync(databasePath, { readBigInts: true, readOnly: true });
+  try {
+    expect(database.prepare("PRAGMA user_version").get()).toEqual({ user_version: 3n });
+    expect(database.prepare(`
+      SELECT index_revision AS indexRevision FROM attunegraph_current_manifest
+    `).get()).toEqual({ indexRevision: "normalized-current-head@1" });
+    expect(readAttuneGraphCurrentDecisionEndpointForMeasurement(database, {
+      scope: SCOPE,
+      seed: { id: SCOPE.threadId, kind: "thread" },
+      asOf: NOW
+    })).toMatchObject({
+      scanStatus: "built-unverified",
+      verificationLimitations: [
+        "selected-bucket-and-source-ref-tail-completeness-not-proven-by-v3"
+      ],
+      snapshot
+    });
   } finally {
     database.close();
   }
@@ -561,15 +686,18 @@ it.each([
   ["digest drift", "UPDATE attunegraph_current_manifest SET index_digest = 'sha256:0000000000000000000000000000000000000000000000000000000000000000'"],
   ["row-count drift", "UPDATE attunegraph_current_manifest SET assertion_count = assertion_count + 1"],
   ["altered assertion", "UPDATE attunegraph_current_assertion SET predicate = 'CONTEXT_FOR'"],
+  ["missing endpoint degree", "DELETE FROM attunegraph_current_endpoint_degree"],
   ["missing source ref", "DELETE FROM attunegraph_current_source_ref"],
   ["altered adjacency", "UPDATE attunegraph_current_assertion SET subject_id = 'wrong-ref'"],
   ["extra assertion", `INSERT INTO attunegraph_current_assertion (
       index_id, assertion_ordinal, assertion_id,
       subject_kind, subject_id, object_kind, object_id,
-      predicate, epistemic_class, recorded_at, derivation_kind, derivation_version
+      predicate, epistemic_class, recorded_at, derivation_kind, derivation_version,
+      source_ref_count, source_ref_digest
     ) SELECT index_id, 99, 'extra',
       subject_kind, subject_id, object_kind, object_id,
-      predicate, epistemic_class, recorded_at, derivation_kind, derivation_version
+      predicate, epistemic_class, recorded_at, derivation_kind, derivation_version,
+      source_ref_count, source_ref_digest
       FROM attunegraph_current_assertion LIMIT 1`]
 ] as const)("leaves unused semantic %s to Admin/full per-scope verification", async (_label, mutation) => {
   const databasePath = await temporaryDatabase("normalized-corrupt-v3.sqlite");

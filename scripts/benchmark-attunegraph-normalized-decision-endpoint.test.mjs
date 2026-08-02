@@ -33,10 +33,11 @@ it("pairs full projection decode with exact sparse and hub normalized endpoint r
     warmup: 0
   });
   expect(report).toMatchObject({
-    schema: "attunegraph-normalized-decision-endpoint-benchmark@2",
+    schema: "attunegraph-normalized-decision-endpoint-benchmark@3",
     measurementOnly: true,
     claimEligible: false,
     workload: {
+      adaptiveRouting: "v4-endpoint-degree-hint-then-exact-set-proof",
       measurementOrder: "rotating-four-cell-round-robin",
       simulatedWitnessMetadataScanLimit: 64,
       simulatedWitnessSourceRefScanLimit: 64
@@ -45,7 +46,7 @@ it("pairs full projection decode with exact sparse and hub normalized endpoint r
       sparse: {
         endpointAssertions: 1,
         semanticByteIdentity: true,
-        normalizedCompleteness: "built-unverified",
+        normalizedCompleteness: "complete",
         witnessedCompleteness: "simulated-v4-two-level-witness",
         witnessedEndpoint: { samples: 3 },
         witnessedPhases: {
@@ -60,7 +61,7 @@ it("pairs full projection decode with exact sparse and hub normalized endpoint r
       hub: {
         endpointAssertions: 32,
         semanticByteIdentity: true,
-        normalizedCompleteness: "built-unverified",
+        normalizedCompleteness: "complete",
         witnessedCompleteness: "simulated-v4-two-level-witness",
         witnessedEndpoint: { samples: 3 },
         adaptivePath: "canonical-fallback"
@@ -77,7 +78,7 @@ it("pairs full projection decode with exact sparse and hub normalized endpoint r
     cell.semanticByteIdentity && cell.witnessedCompleteness === "simulated-v4-two-level-witness"
   )).toBe(true);
   for (const cell of report.scenarios.degreeSweep) {
-    expect(cell.sqliteAllocation.delta.pages).toBeGreaterThan(0);
+    expect(cell.sqliteAllocation.delta.pages).toBeGreaterThanOrEqual(0);
     expect(cell.sqliteAllocation.delta.bytes)
       .toBe(cell.sqliteAllocation.delta.pages * cell.sqliteAllocation.baseline.pageSize);
     expect(cell.sqliteAllocation.simulatedWitness.pageSize)

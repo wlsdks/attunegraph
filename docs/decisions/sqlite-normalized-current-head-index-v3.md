@@ -1,16 +1,20 @@
 # SQLite normalized current-head index v3
 
-Status: built candidate in the current source tree; not a released migration or
+Status: superseded for fresh databases by physical v4; retained as the exact v3
+compatibility profile and historical decision. Not a migration or
 query-performance result.
 Last reviewed: 2026-08-02.
 
 ## Decision
 
-New empty local SQLite databases select physical schema v3. V3 retains the v2
-immutable compressed projection journal and exact-head CAS contract, and adds a
-rebuildable normalized index for only the current head of each scope. No public
-AttuneGraph method, Worker request, query path, or Engine fast path consumes the
-index in this slice. It therefore makes no query-latency claim.
+This decision introduced physical schema v3 for new empty local SQLite
+databases. Fresh databases now select v4; existing v3 databases continue to
+open and write this exact profile without automatic migration. V3 retains the
+v2 immutable compressed projection journal and exact-head CAS contract, and
+adds a rebuildable normalized index for only the current head of each scope. No
+public AttuneGraph method, Worker request, query path, or Engine fast path uses
+v3 as a completeness-proven read path. It therefore makes no query-latency
+claim.
 
 One `BEGIN IMMEDIATE` transaction activates the compressed journal row, exact
 head, exact-head manifest, and all current assertion and source-reference rows,

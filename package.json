@@ -21,6 +21,7 @@
     "docs/decisions/agent-native-graph-positioning.md",
     "docs/decisions/first-principles-performance.md",
     "docs/decisions/sqlite-normalized-current-head-index-v3.md",
+    "docs/decisions/sqlite-exact-witness-current-head-v4.md",
     "BENCHMARKS.md",
     "PERFORMANCE-QUALIFICATION.md",
     "READINESS.md",
