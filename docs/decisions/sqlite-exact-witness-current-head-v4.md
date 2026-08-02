@@ -110,14 +110,20 @@ identity. It deliberately does not ratio RSS/heap, treat the production WAL
 snapshot as cumulative write evidence, measure a query path, or compare a
 competitor.
 
-One dirty-tree 10K diagnostic on Apple M2 Max, Node 24.16.0, and SQLite 3.53.0
-observed v4/v3 ratios of 1.046 write duration, 1.213 settled bytes/pages, 1.493
-physical rows, 1.092 reopen validation, and 1.892 Admin full integrity. This
-single ordered run is useful for exposing the likely Admin verification cost,
-but it is not revision-bound, alternated, repeated, tail-qualified, or
-claim-eligible. It cannot establish efficiency or a release threshold. A clean
-repeated run must replace it before promotion, and cumulative WAL remains a
-separate controlled risk boundary.
+Five clean revision-bound 10K runs at `587ae7bf09e247c6a84d05fe74a496cc2a847f7d`
+on Apple M2 Max, Node 24.16.0, and SQLite 3.53.0 preserved one exact semantic
+aggregate. The median per-run v4/v3 ratios were 1.030 write duration, 1.213
+settled bytes/pages, 1.493 physical rows, 1.053 reopen validation, and 1.833
+Admin full integrity. The median absolute v3/v4 write durations were
+1,384/1,422 ms and Admin durations were 253/468 ms. V4 wrote 10,313 endpoint
+rows for 10,000 assertions in 313 scopes.
+
+This is repeated clean evidence, but it still runs v3 before v4 on one host,
+does not control thermal or OS page-cache state, and does not qualify tails,
+query speed, or a public path. It exposes Admin full verification as the
+largest measured v4 cost and cannot establish efficiency or a release
+threshold. Alternating-order evidence is required before a timing claim;
+cumulative WAL remains a separate controlled risk boundary.
 
 ## Integrity boundary
 
