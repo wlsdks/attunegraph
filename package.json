@@ -127,7 +127,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit --pretty false",
     "test": "pnpm test:cross-platform",
     "test:benchmark-qualification": "pnpm build && vitest run --config vitest.benchmark-qualification.config.ts",
-    "test:cross-platform": "pnpm build && vitest run --config vitest.cross-platform.config.ts",
+    "test:cross-platform": "pnpm build && vitest run --config vitest.cross-platform.config.ts --exclude scripts/benchmark-attunegraph-current-head-materialization-fault.test.mjs && vitest run --no-file-parallelism scripts/benchmark-attunegraph-current-head-materialization-fault.test.mjs",
     "test:local-profile": "pnpm build && vitest run --config vitest.local-profile.config.ts",
     "test:performance": "pnpm build && vitest run scripts/benchmark-attunegraph-agent-decision-read.test.mjs scripts/benchmark-attunegraph-agent-decision-read-scale.test.mjs scripts/benchmark-attunegraph-normalized-decision-endpoint.test.mjs scripts/benchmark-attunegraph-prepared-plan-seed.test.mjs scripts/benchmark-attunegraph-performance.test.mjs scripts/qualify-attunegraph-performance.test.mjs scripts/verify-attunegraph-performance-regression.test.mjs",
     "test:readiness": "vitest run --no-file-parallelism scripts/capture-attunegraph-readiness.test.mjs scripts/capture-attunegraph-measurement.test.mjs scripts/readiness-measurement-contracts.test.mjs scripts/score-attunegraph-readiness.test.mjs",
