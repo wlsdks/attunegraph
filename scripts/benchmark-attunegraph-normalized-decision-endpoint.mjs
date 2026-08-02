@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdtempSync, realpathSync, rmSync, statSync } from "node:fs";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { performance } from "node:perf_hooks";
@@ -16,6 +16,15 @@ import { openSqliteAttuneGraphStore } from "../dist/attunegraph-sqlite-store.js"
 import { ACTIVATION_PREDICATES } from "../dist/constants.js";
 import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
 import { captureContentAddressedSourceCheckoutProvenance } from "./source-checkout-provenance.mjs";
+import {
+  createSimulatedWitnessPhaseSamples,
+  installSimulatedV4Witness,
+  resealSimulatedAssertionSet,
+  SIMULATED_WITNESS_METADATA_SCAN_LIMIT,
+  SIMULATED_WITNESS_SOURCE_REF_SCAN_LIMIT,
+  simulatedV4WitnessEndpoint,
+  sqliteAllocation
+} from "./attunegraph-simulated-v4-witness.mjs";
 
 const NOW = "2026-08-02T00:00:00.000Z";
 const DEFAULT_ASSERTIONS = 32;
@@ -23,8 +32,9 @@ const DEFAULT_SAMPLES = 200;
 const DEFAULT_WARMUP = 20;
 const ADAPTIVE_SPARSE_CANDIDATE_LIMIT = 8;
 const ENDPOINT_DEGREES = Object.freeze([1, 2, 4, 8, 12, 16, 24, 32]);
+const SOURCE_REF_COUNTS = Object.freeze([1, 4, 8, 16, 32]);
 
-function assertion(id, subject, predicate, object) {
+function assertion(id, subject, predicate, object, sourceRefCount = 1) {
   return Object.freeze({
     schemaVersion: 1,
     id,
@@ -32,19 +42,28 @@ function assertion(id, subject, predicate, object) {
     predicate,
     object: Object.freeze(object),
     epistemicClass: "source-observed",
-    sourceRefs: Object.freeze([Object.freeze({ namespace: "benchmark.endpoint", id: `source:${id}` })]),
+    sourceRefs: Object.freeze(Array.from({ length: sourceRefCount }, (_, index) => Object.freeze({
+      namespace: "benchmark.endpoint",
+      id: `source:${id}:${index.toString().padStart(2, "0")}`
+    }))),
     recordedAt: NOW,
     derivation: Object.freeze({ kind: "projection", version: "normalized-endpoint@1" })
   });
 }
 
-function workload(name, assertionCount, hubCount) {
+function workload(name, assertionCount, hubCount, endpointSourceRefCount) {
   const scope = Object.freeze({ sourceId: "normalized-endpoint", threadId: `thread:${name}` });
   const root = Object.freeze({ kind: "thread", id: scope.threadId });
   const assertions = [];
   for (let index = 0; index < hubCount; index += 1) {
     const artifact = { kind: "artifact", id: `artifact:${name}:hub:${index.toString().padStart(4, "0")}` };
-    assertions.push(assertion(`assertion:${name}:hub:${index.toString().padStart(4, "0")}`, artifact, "LINKED_TO", root));
+    assertions.push(assertion(
+      `assertion:${name}:hub:${index.toString().padStart(4, "0")}`,
+      artifact,
+      "LINKED_TO",
+      root,
+      index === 0 ? endpointSourceRefCount : 1
+    ));
   }
   let previous = { kind: "artifact", id: `artifact:${name}:hub:0000` };
   for (let index = hubCount; index < assertionCount; index += 1) {
@@ -59,7 +78,7 @@ function workload(name, assertionCount, hubCount) {
       operator: "canonical-projection@2",
       observation: Object.freeze({
         schemaVersion: 2,
-        observationKey: `normalized-endpoint:${name}:${assertionCount}:${hubCount}`,
+        observationKey: `normalized-endpoint:${name}:${assertionCount}:${hubCount}:${endpointSourceRefCount}`,
         scope,
         threadRoot: root,
         observedAt: NOW,
@@ -123,6 +142,17 @@ function percentile(sorted, fraction) {
   return sorted[Math.min(sorted.length - 1, Math.floor(sorted.length * fraction))];
 }
 
+function durationProfile(values) {
+  const sorted = [...values].sort((left, right) => left - right);
+  if (sorted.length === 0) throw new Error("benchmark phase profile is empty");
+  return Object.freeze({
+    samples: sorted.length,
+    p50Ms: percentile(sorted, 0.50),
+    p95Ms: percentile(sorted, 0.95),
+    p99Ms: percentile(sorted, 0.99)
+  });
+}
+
 function sampleOperations(operations, warmup, samples) {
   const durations = new Map(operations.map(({ name }) => [name, []]));
   const runRound = (round, measured) => {
@@ -130,7 +160,7 @@ function sampleOperations(operations, warmup, samples) {
       const operation = operations[(round + offset) % operations.length];
       if (operation === undefined) throw new Error("benchmark operation is missing");
       const started = performance.now();
-      operation.run();
+      operation.run(measured);
       if (measured) durations.get(operation.name)?.push(performance.now() - started);
     }
   };
@@ -147,16 +177,60 @@ function sampleOperations(operations, warmup, samples) {
   })));
 }
 
-async function scenario(directory, name, assertionCount, hubCount, warmup, samples) {
+async function scenario(
+  directory,
+  name,
+  assertionCount,
+  hubCount,
+  endpointSourceRefCount,
+  warmup,
+  samples,
+  allowProjectionBudgetBlock = false
+) {
   const databasePath = join(directory, `${name}.sqlite`);
-  const fixture = workload(name, assertionCount, hubCount);
+  const fixture = workload(name, assertionCount, hubCount, endpointSourceRefCount);
   const resource = await openSqliteAttuneGraphStore({ databasePath });
   const graph = await openAttuneGraph({ scope: fixture.scope, store: createAttuneGraphStore(resource.backend) });
-  await graph.project(JSON.parse(JSON.stringify(fixture.command)));
-  await graph.close();
-  await resource.close();
-  const database = new DatabaseSync(databasePath, { readBigInts: true, readOnly: true });
+  let projectionFailure;
   try {
+    await graph.project(JSON.parse(JSON.stringify(fixture.command)));
+  } catch (cause) {
+    projectionFailure = cause;
+  } finally {
+    await graph.close();
+    await resource.close();
+  }
+  if (projectionFailure !== undefined) {
+    if (
+      allowProjectionBudgetBlock
+      && projectionFailure !== null
+      && typeof projectionFailure === "object"
+      && projectionFailure.code === "INVALID_INPUT"
+      && projectionFailure.message === "source observation exceeds the stored projection text budget"
+    ) {
+      return Object.freeze({
+        name,
+        assertionCount,
+        requestedSourceRefs: endpointSourceRefCount,
+        observationBytes: Buffer.byteLength(JSON.stringify(fixture.command.observation), "utf8"),
+        status: "blocked-by-production-projection-budget"
+      });
+    }
+    throw projectionFailure;
+  }
+  const database = new DatabaseSync(databasePath, { readBigInts: true });
+  try {
+    const baselineAllocation = sqliteAllocation(database);
+    installSimulatedV4Witness(database, fixture.scope);
+    const simulatedWitnessAllocation = sqliteAllocation(database);
+    const allocation = Object.freeze({
+      baseline: baselineAllocation,
+      simulatedWitness: simulatedWitnessAllocation,
+      delta: Object.freeze({
+        pages: simulatedWitnessAllocation.pageCount - baselineAllocation.pageCount,
+        bytes: simulatedWitnessAllocation.bytes - baselineAllocation.bytes
+      })
+    });
     const full = fullProjectionEndpoint(database, fixture.scope, fixture.root);
     const normalized = readAttuneGraphCurrentDecisionEndpointForMeasurement(database, {
       scope: fixture.scope,
@@ -173,6 +247,11 @@ async function scenario(directory, name, assertionCount, hubCount, warmup, sampl
     if (JSON.stringify(full) !== JSON.stringify(adaptive.assertions)) {
       throw new Error(`${name} adaptive endpoint semantic identity diverged`);
     }
+    const witnessed = simulatedV4WitnessEndpoint(database, fixture.scope, fixture.root, { asOf: NOW });
+    if (JSON.stringify(full) !== JSON.stringify(witnessed)) {
+      throw new Error(`${name} simulated witness endpoint semantic identity diverged`);
+    }
+    const witnessPhaseSamples = createSimulatedWitnessPhaseSamples();
     const profiles = sampleOperations([
       Object.freeze({
         name: "fullProjectionEndpoint",
@@ -189,30 +268,172 @@ async function scenario(directory, name, assertionCount, hubCount, warmup, sampl
       Object.freeze({
         name: "adaptiveEndpoint",
         run: () => adaptiveEndpoint(database, fixture.scope, fixture.root)
+      }),
+      Object.freeze({
+        name: "witnessedEndpoint",
+        run: (measured) => simulatedV4WitnessEndpoint(database, fixture.scope, fixture.root, {
+          asOf: NOW,
+          phaseSamples: measured ? witnessPhaseSamples : undefined
+        })
       })
     ], warmup, samples);
     const fullProfile = profiles.fullProjectionEndpoint;
     const normalizedProfile = profiles.normalizedEndpoint;
     const adaptiveProfile = profiles.adaptiveEndpoint;
-    if (fullProfile === undefined || normalizedProfile === undefined || adaptiveProfile === undefined) {
+    const witnessedProfile = profiles.witnessedEndpoint;
+    if (
+      fullProfile === undefined
+      || normalizedProfile === undefined
+      || adaptiveProfile === undefined
+      || witnessedProfile === undefined
+    ) {
       throw new Error("benchmark profile is missing");
     }
+    const witnessedPhases = Object.freeze(Object.fromEntries(
+      Object.entries(witnessPhaseSamples).map(([phaseName, values]) => [
+        phaseName,
+        durationProfile(values)
+      ])
+    ));
     return Object.freeze({
       name,
       assertionCount,
+      requestedSourceRefs: endpointSourceRefCount,
+      status: "measured",
       endpointAssertions: full.length,
-      databaseBytes: statSync(databasePath).size,
+      selectedSourceRefs: full.reduce((total, assertion) => total + assertion.sourceRefs.length, 0),
+      sqliteAllocation: allocation,
       semanticByteIdentity: true,
       normalizedCompleteness: normalized.scanStatus,
+      witnessedCompleteness: "simulated-v4-two-level-witness",
       adaptivePath: adaptive.path,
       fullProjectionEndpoint: fullProfile,
       normalizedEndpoint: normalizedProfile,
       adaptiveEndpoint: adaptiveProfile,
+      witnessedEndpoint: witnessedProfile,
+      witnessedPhases,
       p50SpeedupFullOverNormalized: fullProfile.p50Ms / normalizedProfile.p50Ms,
-      p50SpeedupFullOverAdaptive: fullProfile.p50Ms / adaptiveProfile.p50Ms
+      p50SpeedupFullOverAdaptive: fullProfile.p50Ms / adaptiveProfile.p50Ms,
+      p50SpeedupFullOverWitnessed: fullProfile.p50Ms / witnessedProfile.p50Ms
     });
   } finally {
     database.close();
+  }
+}
+
+async function projectedWitnessFixture(directory, name, temporalDecoys = false) {
+  const base = workload(name, 12, 5, 1);
+  const command = JSON.parse(JSON.stringify(base.command));
+  if (temporalDecoys) {
+    command.observation.assertions[1].recordedAt = "2026-08-03T00:00:00.000Z";
+    command.observation.assertions[2].validFrom = "2026-08-03T00:00:00.000Z";
+    command.observation.assertions[3].validTo = "2026-08-01T00:00:00.000Z";
+    command.observation.assertions[4].supersededAt = NOW;
+  }
+  const databasePath = join(directory, `${name}.sqlite`);
+  const resource = await openSqliteAttuneGraphStore({ databasePath });
+  const graph = await openAttuneGraph({ scope: base.scope, store: createAttuneGraphStore(resource.backend) });
+  try {
+    await graph.project(command);
+  } finally {
+    await graph.close();
+    await resource.close();
+  }
+  const database = new DatabaseSync(databasePath, { readBigInts: true });
+  installSimulatedV4Witness(database, base.scope);
+  return Object.freeze({ database, fixture: base });
+}
+
+async function simulatedWitnessFault(directory, name, mutate, options = {}) {
+  const { database, fixture } = await projectedWitnessFixture(directory, name);
+  try {
+    mutate(database, fixture.scope);
+    try {
+      simulatedV4WitnessEndpoint(database, fixture.scope, fixture.root, { asOf: NOW, ...options });
+      return Object.freeze({ detected: false, message: null });
+    } catch (cause) {
+      return Object.freeze({
+        detected: true,
+        message: cause instanceof Error ? cause.message : String(cause)
+      });
+    }
+  } finally {
+    database.close();
+  }
+}
+
+export async function runSimulatedV4WitnessFalsification() {
+  const directory = realpathSync(mkdtempSync(join(tmpdir(), "attunegraph-witness-falsification-")));
+  try {
+    const temporal = await projectedWitnessFixture(directory, "temporal", true);
+    let temporalSelectedAssertionIds;
+    try {
+      temporalSelectedAssertionIds = simulatedV4WitnessEndpoint(
+        temporal.database,
+        temporal.fixture.scope,
+        temporal.fixture.root,
+        { asOf: NOW }
+      ).map((assertion) => assertion.id);
+    } finally {
+      temporal.database.close();
+    }
+    const corruptDigest = `sha256:${"0".repeat(64)}`;
+    const faults = Object.freeze({
+      manifestDigest: await simulatedWitnessFault(directory, "fault-manifest", (database) => {
+        database.prepare("UPDATE attunegraph_current_manifest SET simulated_index_digest = ?")
+          .run(corruptDigest);
+      }),
+      assertionMetadata: await simulatedWitnessFault(directory, "fault-assertion", (database) => {
+        database.prepare("UPDATE attunegraph_current_assertion SET predicate = 'NEXT_STEP_FOR' WHERE assertion_ordinal = 0")
+          .run();
+      }),
+      selectedSourceRefCount: await simulatedWitnessFault(directory, "fault-source-count", (database, scope) => {
+        database.prepare(`
+          UPDATE attunegraph_current_assertion
+          SET simulated_source_ref_count = simulated_source_ref_count + 1
+          WHERE assertion_id LIKE '%:hub:0000'
+        `).run();
+        database.prepare(`
+          UPDATE attunegraph_current_manifest SET source_ref_count = source_ref_count + 1
+        `).run();
+        resealSimulatedAssertionSet(database, scope);
+      }),
+      selectedSourceRefDigest: await simulatedWitnessFault(directory, "fault-source-digest", (database, scope) => {
+        database.prepare(`
+          UPDATE attunegraph_current_assertion SET simulated_source_ref_digest = ?
+          WHERE assertion_id LIKE '%:hub:0000'
+        `).run(corruptDigest);
+        resealSimulatedAssertionSet(database, scope);
+      }),
+      selectedSourceRefOrdinal: await simulatedWitnessFault(directory, "fault-source-ordinal", (database) => {
+        database.prepare(`
+          UPDATE attunegraph_current_source_ref SET source_ref_ordinal = 1
+          WHERE assertion_ordinal = (
+            SELECT assertion_ordinal FROM attunegraph_current_assertion
+            WHERE assertion_id LIKE '%:hub:0000'
+          ) AND source_ref_ordinal = 0
+        `).run();
+      }),
+      metadataScanBound: await simulatedWitnessFault(
+        directory,
+        "fault-metadata-bound",
+        () => {},
+        { metadataScanLimit: 1 }
+      ),
+      selectedSourceRefScanBound: await simulatedWitnessFault(
+        directory,
+        "fault-source-bound",
+        () => {},
+        { sourceRefScanLimit: 1 }
+      )
+    });
+    return Object.freeze({
+      schema: "attunegraph-simulated-v4-witness-falsification@1",
+      temporalSelectedAssertionIds: Object.freeze(temporalSelectedAssertionIds),
+      faults
+    });
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
   }
 }
 
@@ -240,11 +461,26 @@ export async function runNormalizedDecisionEndpointBenchmark({
         `degree-${degree.toString().padStart(2, "0")}`,
         assertionCount,
         degree,
+        1,
         warmup,
         samples
       ));
     }
     const degreeSweep = Object.freeze(degreeCells);
+    const sourceRefCells = [];
+    for (const sourceRefCount of SOURCE_REF_COUNTS) {
+      sourceRefCells.push(await scenario(
+        directory,
+        `source-refs-${sourceRefCount.toString().padStart(2, "0")}`,
+        assertionCount,
+        1,
+        sourceRefCount,
+        warmup,
+        samples,
+        true
+      ));
+    }
+    const sourceRefSweep = Object.freeze(sourceRefCells);
     const sparse = degreeSweep[0];
     const hub = degreeSweep[degreeSweep.length - 1];
     if (sparse === undefined || hub === undefined) {
@@ -255,7 +491,7 @@ export async function runNormalizedDecisionEndpointBenchmark({
       throw new Error("normalized endpoint benchmark source changed during measurement");
     }
     const body = Object.freeze({
-      schema: "attunegraph-normalized-decision-endpoint-benchmark@1",
+      schema: "attunegraph-normalized-decision-endpoint-benchmark@2",
       measurementOnly: true,
       claimEligible: false,
       provenance: startProvenance,
@@ -266,13 +502,17 @@ export async function runNormalizedDecisionEndpointBenchmark({
         warmup,
         asOf: NOW,
         adaptiveSparseCandidateLimit: ADAPTIVE_SPARSE_CANDIDATE_LIMIT,
-        measurementOrder: "rotating-three-cell-round-robin"
+        sourceRefCounts: SOURCE_REF_COUNTS,
+        simulatedWitnessMetadataScanLimit: SIMULATED_WITNESS_METADATA_SCAN_LIMIT,
+        simulatedWitnessSourceRefScanLimit: SIMULATED_WITNESS_SOURCE_REF_SCAN_LIMIT,
+        measurementOrder: "rotating-four-cell-round-robin"
       }),
-      scenarios: Object.freeze({ sparse, hub, degreeSweep }),
+      scenarios: Object.freeze({ sparse, hub, degreeSweep, sourceRefSweep }),
       exclusions: Object.freeze([
         "no-worker-or-engine-transport",
         "no-full-working-graph-bfs",
         "no-public-fast-path",
+        "simulated-v4-columns-no-production-write-migration-or-durable-file-size-measurement",
         "single-host-no-sla"
       ])
     });

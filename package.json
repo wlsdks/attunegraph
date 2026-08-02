@@ -40,6 +40,7 @@
     "scripts/benchmark-attunegraph-worker-resource-lifecycle.mjs",
     "scripts/benchmark-attunegraph-sqlite-generation-growth.mjs",
     "scripts/benchmark-attunegraph-current-head-materialization.mjs",
+    "scripts/attunegraph-simulated-v4-witness.mjs",
     "scripts/benchmark-attunegraph-normalized-decision-endpoint.mjs",
     "scripts/qualify-attunegraph-sqlite-compression.mjs",
     "scripts/benchmark-attunegraph-performance.mjs",
