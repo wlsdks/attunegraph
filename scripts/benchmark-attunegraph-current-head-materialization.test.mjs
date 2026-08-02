@@ -7,7 +7,10 @@ import { expect, it } from "vitest";
 
 import {
   pairCurrentHeadMaterializationProfiles,
-  runCurrentHeadMaterializationProfile
+  pairV4StorageCostProfiles,
+  runCurrentHeadMaterializationProfile,
+  runV4StorageCostBenchmark,
+  runV4StorageCostProfile
 } from "./benchmark-attunegraph-current-head-materialization.mjs";
 
 it("pairs v2 and v3 materialization with exact semantic bytes and explicit non-query limits", async () => {
@@ -24,6 +27,16 @@ it("pairs v2 and v3 materialization with exact semantic bytes and explicit non-q
       scale: 64,
       databasePath: join(directory, "v3.sqlite")
     });
+    const v3Storage = await runV4StorageCostProfile({
+      profile: "v3",
+      scale: 64,
+      databasePath: join(directory, "v3-storage.sqlite")
+    });
+    const v4 = await runV4StorageCostProfile({
+      profile: "v4",
+      scale: 64,
+      databasePath: join(directory, "v4.sqlite")
+    });
     const admission = {
       scale: 64,
       runtime: structuredClone(v2.runtime),
@@ -32,12 +45,23 @@ it("pairs v2 and v3 materialization with exact semantic bytes and explicit non-q
     const pair = (left, right, expected = admission) =>
       pairCurrentHeadMaterializationProfiles(left, right, expected);
     const paired = pair(v2, v3);
+    const pairedV3V4 = pairV4StorageCostProfiles(v3Storage, v4, admission);
+
+    await expect(runCurrentHeadMaterializationProfile({
+      profile: "v4",
+      scale: 64,
+      databasePath: join(directory, "legacy-v4.sqlite")
+    })).rejects.toThrow(/options are invalid/u);
 
     expect(paired.schema).toBe("attunegraph-current-head-materialization-paired@2");
     expect(v2.schema).toBe("attunegraph-current-head-materialization-profile@2");
+    expect(v3Storage.schema).toBe("attunegraph-current-head-v4-storage-profile@1");
+    expect(v4.schema).toBe("attunegraph-current-head-v4-storage-profile@1");
     expect(paired.provenance).toEqual(v2.provenance);
     expect(paired.provenance).toEqual(v3.provenance);
+    expect(pairedV3V4.provenance).toEqual(v4.provenance);
     expect(v2.runtime.runtimeArtifact).toEqual(v3.runtime.runtimeArtifact);
+    expect(v3Storage.runtime.runtimeArtifact).toEqual(v4.runtime.runtimeArtifact);
     expect(v3.runtime.runtimeArtifact).toMatchObject({
       schema: "attunegraph-runtime-artifact@1",
       roots: expect.arrayContaining([
@@ -88,6 +112,44 @@ it("pairs v2 and v3 materialization with exact semantic bytes and explicit non-q
       sourceRefRows: 64,
       adjacencyLookupIndexes: 2,
       finalPhysicalRows: 134
+    });
+    expect(v3Storage.storage.database).toMatchObject({
+      userVersion: 3,
+      endpointDegreeRows: 0,
+      finalPhysicalRows: 134
+    });
+    expect(v4.storage.database).toMatchObject({
+      userVersion: 4,
+      journalRows: 2,
+      headRows: 2,
+      manifestRows: 2,
+      assertionRows: 64,
+      sourceRefRows: 64,
+      endpointDegreeRows: 66,
+      adjacencyLookupIndexes: 2,
+      finalPhysicalRows: 200
+    });
+    expect(pairedV3V4).toMatchObject({
+      schema: "attunegraph-current-head-v4-storage-paired@1",
+      measurementOnly: true,
+      claimEligible: false,
+      correctness: {
+        semanticAggregateSha256: v3Storage.correctness.semanticAggregateSha256,
+        v3V4SemanticByteIdentity: true
+      },
+      profiles: { v3: v3Storage, v4 },
+      amplification: {
+        materializationWriteDurationRatioV4OverV3: expect.any(Number),
+        settledDatabaseBytesRatioV4OverV3: expect.any(Number),
+        settledPageCountRatioV4OverV3: expect.any(Number),
+        finalPhysicalRowsRatioV4OverV3: 200 / 134,
+        reopenValidationDurationRatioV4OverV3: expect.any(Number),
+        adminFullIntegrityDurationRatioV4OverV3: expect.any(Number)
+      },
+      qualification: {
+        competitorComparisonMeasured: false,
+        resourceRatiosMeasured: false
+      }
     });
     expect(v3.materialization.reopenValidationDurationMs).toBeGreaterThan(0);
     expect(v2.materialization.reopenValidationDurationMs).toBeGreaterThan(0);
@@ -162,4 +224,9 @@ it("pairs v2 and v3 materialization with exact semantic bytes and explicit non-q
   } finally {
     rmSync(directory, { force: true, recursive: true });
   }
+});
+
+it("rejects unknown v4 storage cost CLI options before starting a benchmark", () => {
+  expect(() => runV4StorageCostBenchmark(["--scale=10000", "--bogus=true"]))
+    .toThrow(/arguments are invalid/u);
 });

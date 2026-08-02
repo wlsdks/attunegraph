@@ -102,10 +102,22 @@ was noisy across the five runs; no SLA or tail claim is made. The checked-in
 benchmark remains `measurementOnly: true` and `claimEligible: false`.
 
 V4 also writes one endpoint-degree row for each distinct activation endpoint.
-Its page, write, reopen, Admin-scan, WAL, RSS, and heap cost versus v3 must be
-captured by a revision-bound paired materialization report before the storage
-tradeoff is described as efficient. The pre-existing v3 warnings remain
-applicable.
+`pnpm benchmark:v4-storage-cost -- --scale=10000` now captures a separate
+v3-to-v4 paired contract without changing the historical v2-to-v3 report. It
+records write, settled bytes/pages, physical rows, reopen, Admin full
+integrity, and per-profile resource observations under exact semantic-byte
+identity. It deliberately does not ratio RSS/heap, treat the production WAL
+snapshot as cumulative write evidence, measure a query path, or compare a
+competitor.
+
+One dirty-tree 10K diagnostic on Apple M2 Max, Node 24.16.0, and SQLite 3.53.0
+observed v4/v3 ratios of 1.046 write duration, 1.213 settled bytes/pages, 1.493
+physical rows, 1.092 reopen validation, and 1.892 Admin full integrity. This
+single ordered run is useful for exposing the likely Admin verification cost,
+but it is not revision-bound, alternated, repeated, tail-qualified, or
+claim-eligible. It cannot establish efficiency or a release threshold. A clean
+repeated run must replace it before promotion, and cumulative WAL remains a
+separate controlled risk boundary.
 
 ## Integrity boundary
 

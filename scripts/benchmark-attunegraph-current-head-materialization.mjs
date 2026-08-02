@@ -22,6 +22,7 @@ import { createAttuneGraphAdminReadOnlyInspector } from "../dist/attunegraph-adm
 import { openAttuneGraph } from "../dist/attunegraph-engine.js";
 import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V2 } from "../dist/attunegraph-physical-schema-v2.mjs";
 import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V3 } from "../dist/attunegraph-physical-schema-v3.mjs";
+import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V4 } from "../dist/attunegraph-physical-schema-v4.mjs";
 import { openSqliteAttuneGraphStore } from "../dist/attunegraph-sqlite-store.js";
 import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
 import {
@@ -462,7 +463,26 @@ function createV3Database(databasePath) {
   chmodSync(databasePath, 0o600);
 }
 
-function inspectDatabase(databasePath, profile) {
+function createV4Database(databasePath) {
+  const database = new DatabaseSync(databasePath);
+  database.exec(`
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createJournal};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createGenerationIndex};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createHead};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentManifest};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentAssertion};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentAssertionSubjectLookup};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentAssertionObjectLookup};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentSourceRef};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.createCurrentEndpointDegree};
+    PRAGMA application_id = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.applicationId};
+    PRAGMA user_version = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V4.userVersion};
+  `);
+  database.close();
+  chmodSync(databasePath, 0o600);
+}
+
+function inspectDatabase(databasePath, profile, includeEndpointDegreeRows = false) {
   const database = new DatabaseSync(databasePath, { readBigInts: true, readOnly: true });
   try {
     const integer = (sql) => {
@@ -477,10 +497,17 @@ function inspectDatabase(databasePath, profile) {
     const projectionCompressedBytes = integer(
       "SELECT COALESCE(SUM(length(projection_payload)), 0) AS value FROM attunegraph_projection_journal"
     );
-    const derived = profile === "v3" ? Object.freeze({
+    const derived = profile === "v4" ? Object.freeze({
       manifestRows: integer("SELECT COUNT(*) AS value FROM attunegraph_current_manifest"),
       assertionRows: integer("SELECT COUNT(*) AS value FROM attunegraph_current_assertion"),
       sourceRefRows: integer("SELECT COUNT(*) AS value FROM attunegraph_current_source_ref"),
+      endpointDegreeRows: integer("SELECT COUNT(*) AS value FROM attunegraph_current_endpoint_degree"),
+      adjacencyLookupIndexes: 2
+    }) : profile === "v3" ? Object.freeze({
+      manifestRows: integer("SELECT COUNT(*) AS value FROM attunegraph_current_manifest"),
+      assertionRows: integer("SELECT COUNT(*) AS value FROM attunegraph_current_assertion"),
+      sourceRefRows: integer("SELECT COUNT(*) AS value FROM attunegraph_current_source_ref"),
+      ...(includeEndpointDegreeRows ? { endpointDegreeRows: 0 } : {}),
       adjacencyLookupIndexes: 2
     }) : Object.freeze({
       manifestRows: 0,
@@ -499,7 +526,7 @@ function inspectDatabase(databasePath, profile) {
       projectionCompressedBytes,
       ...derived,
       finalPhysicalRows: journalRows + headRows + derived.manifestRows
-        + derived.assertionRows + derived.sourceRefRows
+        + derived.assertionRows + derived.sourceRefRows + (derived.endpointDegreeRows ?? 0)
     });
   } finally {
     database.close();
@@ -518,37 +545,56 @@ function exactStorageSnapshot(value, label) {
   return value;
 }
 
-function exactProfileDatabase(value, profile, scale, scopeCount) {
+function exactProfileDatabase(value, profile, scale, scopeCount, includeEndpointDegreeRows = false) {
   exactRecord(value, [
     "userVersion", "pageCount", "pageSizeBytes", "freelistPages", "journalRows", "headRows",
     "projectionUncompressedBytes", "projectionCompressedBytes", "manifestRows", "assertionRows",
-    "sourceRefRows", "adjacencyLookupIndexes", "finalPhysicalRows"
+    "sourceRefRows", "adjacencyLookupIndexes", "finalPhysicalRows",
+    ...(profile === "v4" || includeEndpointDegreeRows ? ["endpointDegreeRows"] : [])
   ], "materialization profile database");
   for (const key of Object.keys(value)) {
     exactInteger(value[key], `materialization profile database ${key}`);
   }
-  const expectedDerived = profile === "v3"
-    ? { manifestRows: scopeCount, assertionRows: scale, sourceRefRows: scale, adjacencyLookupIndexes: 2 }
+  const expectedDerived = profile === "v4"
+    ? {
+        manifestRows: scopeCount,
+        assertionRows: scale,
+        sourceRefRows: scale,
+        endpointDegreeRows: scale + scopeCount,
+        adjacencyLookupIndexes: 2
+      }
+    : profile === "v3"
+    ? {
+        manifestRows: scopeCount,
+        assertionRows: scale,
+        sourceRefRows: scale,
+        ...(includeEndpointDegreeRows ? { endpointDegreeRows: 0 } : {}),
+        adjacencyLookupIndexes: 2
+      }
     : { manifestRows: 0, assertionRows: 0, sourceRefRows: 0, adjacencyLookupIndexes: 0 };
   if (
-    value.userVersion !== (profile === "v3" ? 3 : 2)
+    value.userVersion !== (profile === "v4" ? 4 : profile === "v3" ? 3 : 2)
     || value.pageCount < 1 || value.pageSizeBytes < 512 || value.freelistPages > value.pageCount
     || value.journalRows !== scopeCount || value.headRows !== scopeCount
     || value.projectionUncompressedBytes < 1 || value.projectionCompressedBytes < 1
     || Object.entries(expectedDerived).some(([key, expected]) => value[key] !== expected)
     || value.finalPhysicalRows !== value.journalRows + value.headRows + value.manifestRows
-      + value.assertionRows + value.sourceRefRows
+      + value.assertionRows + value.sourceRefRows + (value.endpointDegreeRows ?? 0)
   ) throw new Error("materialization profile database invariants are invalid");
   return value;
 }
 
-function exactMaterializationProfile(value, expectedProfile) {
+function exactMaterializationProfile(
+  value,
+  expectedProfile,
+  { schema = "attunegraph-current-head-materialization-profile@2", includeEndpointDegreeRows = false } = {}
+) {
   exactRecord(value, [
     "schema", "measurementOnly", "claimEligible", "profile", "scale", "provenance", "corpus",
     "runtime", "correctness", "materialization", "storage", "resources", "exclusions"
   ], "materialization profile report");
   if (
-    value.schema !== "attunegraph-current-head-materialization-profile@2"
+    value.schema !== schema
     || value.measurementOnly !== true || value.claimEligible !== false
     || value.profile !== expectedProfile
   ) throw new Error("materialization profile report identity is invalid");
@@ -610,7 +656,13 @@ function exactMaterializationProfile(value, expectedProfile) {
     "productionWalSnapshotIsCumulativeWriteEvidence", "cumulativeWalWriteAmplification",
     "settledLogicalBytesPerProjectionByte"
   ], "materialization profile storage");
-  const database = exactProfileDatabase(storage.database, expectedProfile, scale, scopeCount);
+  const database = exactProfileDatabase(
+    storage.database,
+    expectedProfile,
+    scale,
+    scopeCount,
+    includeEndpointDegreeRows
+  );
   exactStorageSnapshot(storage.openStorageSnapshot, "materialization open storage snapshot");
   exactStorageSnapshot(storage.settledStorageSnapshot, "materialization settled storage snapshot");
   exactFiniteNumber(
@@ -661,16 +713,23 @@ function exactMaterializationProfile(value, expectedProfile) {
   return value;
 }
 
-export async function runCurrentHeadMaterializationProfile({ profile, scale, databasePath }) {
+async function measureCurrentHeadMaterializationProfile({
+  profile,
+  scale,
+  databasePath,
+  schema,
+  includeEndpointDegreeRows
+}) {
   if (
-    (profile !== "v2" && profile !== "v3") || !Number.isSafeInteger(scale)
+    (profile !== "v2" && profile !== "v3" && profile !== "v4") || !Number.isSafeInteger(scale)
     || scale < 1 || scale > Math.max(...OFFICIAL_SCALES)
   ) {
     throw new Error("materialization profile options are invalid");
   }
   const identity = captureMaterializationIdentity();
   if (profile === "v2") createV2Database(databasePath);
-  else createV3Database(databasePath);
+  else if (profile === "v3") createV3Database(databasePath);
+  else createV4Database(databasePath);
   const shardCount = Math.ceil(scale / ASSERTIONS_PER_SCOPE);
   const corpusHash = createHash("sha256").update(CORPUS_SEED).update("\0");
   const semanticHash = createHash("sha256").update("attunegraph.materialization-semantics.v1").update("\0");
@@ -728,14 +787,14 @@ export async function runCurrentHeadMaterializationProfile({ profile, scale, dat
     const adminFullIntegrityDurationMs = performance.now() - adminValidationStarted;
     adminDatabase.close();
     const settledStorageSnapshot = storageSnapshot(databasePath);
-    const database = inspectDatabase(databasePath, profile);
+    const database = inspectDatabase(databasePath, profile, includeEndpointDegreeRows);
     requireIdenticalMaterializationIdentity(
       identity,
       captureMaterializationIdentity(),
       `${profile} child`
     );
     const report = Object.freeze({
-      schema: "attunegraph-current-head-materialization-profile@2",
+      schema,
       measurementOnly: true,
       claimEligible: false,
       profile,
@@ -752,7 +811,7 @@ export async function runCurrentHeadMaterializationProfile({ profile, scale, dat
         semanticAggregateSha256: semanticHash.digest("hex"),
         exactCurrentProjectionReadAfterEveryCas: true,
         expectedAssertions: scale,
-        observedAssertionRows: profile === "v3" ? database.assertionRows : scale
+        observedAssertionRows: profile === "v2" ? scale : database.assertionRows
       }),
       materialization: Object.freeze({
         writeDurationMs,
@@ -789,7 +848,7 @@ export async function runCurrentHeadMaterializationProfile({ profile, scale, dat
         "no-inherited-performance-threshold"
       ])
     });
-    exactMaterializationProfile(report, profile);
+    exactMaterializationProfile(report, profile, { schema, includeEndpointDegreeRows });
     if (Buffer.byteLength(JSON.stringify(report), "utf8") > MAX_REPORT_BYTES) {
       throw new Error("materialization profile report exceeded its byte bound");
     }
@@ -798,6 +857,32 @@ export async function runCurrentHeadMaterializationProfile({ profile, scale, dat
     await resource.dispose().catch(() => undefined);
     throw cause;
   }
+}
+
+export async function runCurrentHeadMaterializationProfile({ profile, scale, databasePath }) {
+  if (profile !== "v2" && profile !== "v3") {
+    throw new Error("materialization profile options are invalid");
+  }
+  return measureCurrentHeadMaterializationProfile({
+    profile,
+    scale,
+    databasePath,
+    schema: "attunegraph-current-head-materialization-profile@2",
+    includeEndpointDegreeRows: false
+  });
+}
+
+export async function runV4StorageCostProfile({ profile, scale, databasePath }) {
+  if (profile !== "v3" && profile !== "v4") {
+    throw new Error("v4 storage cost profile options are invalid");
+  }
+  return measureCurrentHeadMaterializationProfile({
+    profile,
+    scale,
+    databasePath,
+    schema: "attunegraph-current-head-v4-storage-profile@1",
+    includeEndpointDegreeRows: true
+  });
 }
 
 function parseArguments(argv) {
@@ -811,9 +896,20 @@ function parseArguments(argv) {
   return values;
 }
 
-export function pairCurrentHeadMaterializationProfiles(v2, v3, admission) {
-  exactMaterializationProfile(v2, "v2");
-  exactMaterializationProfile(v3, "v3");
+function exactArgumentKeys(values, allowed) {
+  return Object.keys(values).every((key) => allowed.includes(key));
+}
+
+function admitMaterializationPair(
+  left,
+  right,
+  leftProfile,
+  rightProfile,
+  admission,
+  exactProfile = (value, profile) => exactMaterializationProfile(value, profile)
+) {
+  exactProfile(left, leftProfile);
+  exactProfile(right, rightProfile);
   exactRecord(admission, ["scale", "runtime", "semanticAggregateSha256"], "materialization admission");
   const expectedScale = exactInteger(admission.scale, "materialization admission scale", {
     minimum: 1,
@@ -828,35 +924,60 @@ export function pairCurrentHeadMaterializationProfiles(v2, v3, admission) {
     "materialization admission semantic aggregate SHA-256"
   );
   const currentIdentity = captureMaterializationIdentity();
-  const v2Provenance = v2.provenance;
-  const v3Provenance = v3.provenance;
-  if (JSON.stringify(v2Provenance) !== JSON.stringify(v3Provenance)) {
-    throw new Error("v2/v3 materialization source provenance diverged");
+  const pairLabel = `${leftProfile}/${rightProfile}`;
+  if (JSON.stringify(left.provenance) !== JSON.stringify(right.provenance)) {
+    throw new Error(`${pairLabel} materialization source provenance diverged`);
   }
-  if (JSON.stringify(v3Provenance) !== JSON.stringify(currentIdentity.provenance)) {
+  if (JSON.stringify(right.provenance) !== JSON.stringify(currentIdentity.provenance)) {
     throw new Error("paired materialization source provenance is not current");
   }
-  if (v2.scale !== expectedScale || v3.scale !== expectedScale) {
+  if (left.scale !== expectedScale || right.scale !== expectedScale) {
     throw new Error("paired materialization scale is not the requested scale");
   }
-  if (JSON.stringify(v2.corpus) !== JSON.stringify(v3.corpus)) {
-    throw new Error("v2/v3 materialization corpus identity diverged");
+  if (JSON.stringify(left.corpus) !== JSON.stringify(right.corpus)) {
+    throw new Error(`${pairLabel} materialization corpus identity diverged`);
   }
   if (
-    JSON.stringify(v2.runtime) !== JSON.stringify(expectedRuntime)
-    || JSON.stringify(v3.runtime) !== JSON.stringify(expectedRuntime)
+    JSON.stringify(left.runtime) !== JSON.stringify(expectedRuntime)
+    || JSON.stringify(right.runtime) !== JSON.stringify(expectedRuntime)
   ) {
     throw new Error("paired materialization runtime is not the parent runtime");
   }
-  if (JSON.stringify(v3.runtime.runtimeArtifact) !== JSON.stringify(currentIdentity.runtimeArtifact)) {
+  if (JSON.stringify(right.runtime.runtimeArtifact) !== JSON.stringify(currentIdentity.runtimeArtifact)) {
     throw new Error("paired materialization runtime artifact is not current");
   }
   if (
-    v2.correctness.semanticAggregateSha256 !== expectedSemanticAggregate
-    || v3.correctness.semanticAggregateSha256 !== expectedSemanticAggregate
+    left.correctness.semanticAggregateSha256 !== expectedSemanticAggregate
+    || right.correctness.semanticAggregateSha256 !== expectedSemanticAggregate
   ) {
     throw new Error("paired materialization semantics do not match the workload anchor");
   }
+  return Object.freeze({ provenance: right.provenance });
+}
+
+function sealMaterializationPair(body) {
+  const report = Object.freeze({
+    ...body,
+    artifactIdentity: Object.freeze({
+      schema: "attunegraph-json-report-content@1",
+      canonicalization: "UTF-8 JSON.stringify(report without artifactIdentity)",
+      sha256: sha256Identity(Buffer.from(JSON.stringify(body), "utf8"))
+    })
+  });
+  if (Buffer.byteLength(JSON.stringify(report), "utf8") > MAX_REPORT_BYTES) {
+    throw new Error("paired materialization report exceeded its byte bound");
+  }
+  return report;
+}
+
+export function pairCurrentHeadMaterializationProfiles(v2, v3, admission) {
+  const { provenance: v3Provenance } = admitMaterializationPair(
+    v2,
+    v3,
+    "v2",
+    "v3",
+    admission
+  );
   const body = Object.freeze({
     schema: "attunegraph-current-head-materialization-paired@2",
     measurementOnly: true,
@@ -890,35 +1011,139 @@ export function pairCurrentHeadMaterializationProfiles(v2, v3, admission) {
       cumulativeWalWriteAmplificationMeasured: false
     })
   });
-  const report = Object.freeze({
-    ...body,
-    artifactIdentity: Object.freeze({
-      schema: "attunegraph-json-report-content@1",
-      canonicalization: "UTF-8 JSON.stringify(report without artifactIdentity)",
-      sha256: sha256Identity(Buffer.from(JSON.stringify(body), "utf8"))
+  return sealMaterializationPair(body);
+}
+
+export function pairV4StorageCostProfiles(v3, v4, admission) {
+  const exactProfile = (value, profile) => exactMaterializationProfile(value, profile, {
+    schema: "attunegraph-current-head-v4-storage-profile@1",
+    includeEndpointDegreeRows: true
+  });
+  const { provenance } = admitMaterializationPair(
+    v3,
+    v4,
+    "v3",
+    "v4",
+    admission,
+    exactProfile
+  );
+  const body = Object.freeze({
+    schema: "attunegraph-current-head-v4-storage-paired@1",
+    measurementOnly: true,
+    claimEligible: false,
+    provenance,
+    corpus: v4.corpus,
+    runtime: v4.runtime,
+    correctness: Object.freeze({
+      semanticAggregateSha256: v4.correctness.semanticAggregateSha256,
+      v3V4SemanticByteIdentity: true
+    }),
+    profiles: Object.freeze({ v3, v4 }),
+    amplification: Object.freeze({
+      materializationWriteDurationRatioV4OverV3:
+        v4.materialization.writeDurationMs / v3.materialization.writeDurationMs,
+      settledDatabaseBytesRatioV4OverV3:
+        v4.storage.settledStorageSnapshot.databaseBytes / v3.storage.settledStorageSnapshot.databaseBytes,
+      settledPageCountRatioV4OverV3:
+        v4.storage.database.pageCount / v3.storage.database.pageCount,
+      finalPhysicalRowsRatioV4OverV3:
+        v4.materialization.finalPhysicalRows / v3.materialization.finalPhysicalRows,
+      reopenValidationDurationRatioV4OverV3:
+        v4.materialization.reopenValidationDurationMs / v3.materialization.reopenValidationDurationMs,
+      adminFullIntegrityDurationRatioV4OverV3:
+        v4.materialization.adminFullIntegrityDurationMs / v3.materialization.adminFullIntegrityDurationMs
+    }),
+    qualification: Object.freeze({
+      threshold: null,
+      status: "measurement-only-no-threshold",
+      queryLatencyMeasured: false,
+      cumulativeWalWriteAmplificationMeasured: false,
+      competitorComparisonMeasured: false,
+      resourceRatiosMeasured: false
     })
   });
-  if (Buffer.byteLength(JSON.stringify(report), "utf8") > MAX_REPORT_BYTES) {
-    throw new Error("paired materialization report exceeded its byte bound");
-  }
-  return report;
+  return sealMaterializationPair(body);
 }
 
 async function runChild(values) {
   const profile = values.profile;
   const scale = Number(values.scale);
   const databasePath = values.database;
-  if ((profile !== "v2" && profile !== "v3") || !databasePath || !Number.isSafeInteger(scale)) {
+  if (
+    (profile !== "v2" && profile !== "v3" && profile !== "v4")
+    || !databasePath || !Number.isSafeInteger(scale)
+    || !exactArgumentKeys(values, ["child", "contract", "profile", "scale", "database"])
+    || (values.contract !== undefined && values.contract !== "v4-storage")
+    || (values.contract === "v4-storage" ? profile === "v2" : profile === "v4")
+  ) {
     throw new Error("materialization child arguments are invalid");
   }
-  const report = await runCurrentHeadMaterializationProfile({ profile, scale, databasePath });
+  const report = values.contract === "v4-storage"
+    ? await runV4StorageCostProfile({ profile, scale, databasePath })
+    : await runCurrentHeadMaterializationProfile({ profile, scale, databasePath });
   process.stdout.write(`${JSON.stringify(report)}\n`);
+}
+
+export function runV4StorageCostBenchmark(argv = process.argv.slice(2)) {
+  const values = parseArguments(argv);
+  if (!exactArgumentKeys(values, ["scale"])) {
+    throw new Error("v4 storage cost benchmark arguments are invalid");
+  }
+  const scale = values.scale === undefined ? 10_000 : Number(values.scale);
+  if (
+    !OFFICIAL_SCALES.has(scale) || values.child !== undefined || values.profile !== undefined
+    || values.database !== undefined || values.contract !== undefined
+  ) throw new Error("scale must be one of 10000, 100000, or 1000000");
+  const parentIdentity = captureMaterializationIdentity();
+  const admission = officialMaterializationAdmission(scale, parentIdentity);
+  const created = mkdtempSync(join(tmpdir(), "attunegraph-current-head-v4-storage-"));
+  const directory = realpathSync(created);
+  try {
+    const profiles = {};
+    for (const profile of ["v3", "v4"]) {
+      const child = spawnSync(process.execPath, [
+        fileURLToPath(import.meta.url),
+        "--child=true",
+        "--contract=v4-storage",
+        `--profile=${profile}`,
+        `--scale=${scale.toString()}`,
+        `--database=${join(directory, `${profile}.sqlite`)}`
+      ], { encoding: "utf8", maxBuffer: MAX_REPORT_BYTES * 2 });
+      if (child.status !== 0) throw new Error(child.stderr.trim() || `${profile} storage cost child failed`);
+      profiles[profile] = JSON.parse(child.stdout);
+      exactMaterializationProfile(profiles[profile], profile, {
+        schema: "attunegraph-current-head-v4-storage-profile@1",
+        includeEndpointDegreeRows: true
+      });
+      requireIdenticalMaterializationIdentity(
+        parentIdentity,
+        captureMaterializationIdentity(),
+        `parent before/after ${profile} storage cost child`
+      );
+    }
+    const paired = pairV4StorageCostProfiles(profiles.v3, profiles.v4, admission);
+    requireIdenticalMaterializationIdentity(
+      parentIdentity,
+      captureMaterializationIdentity(),
+      "parent before/after v4 storage cost children"
+    );
+    process.stdout.write(`${JSON.stringify(paired, null, 2)}\n`);
+    return paired;
+  } finally {
+    rmSync(directory, { force: true, recursive: true });
+  }
 }
 
 export function runCurrentHeadMaterializationBenchmark(argv = process.argv.slice(2)) {
   const values = parseArguments(argv);
+  if (!exactArgumentKeys(values, ["scale"])) {
+    throw new Error("materialization benchmark arguments are invalid");
+  }
   const scale = values.scale === undefined ? 10_000 : Number(values.scale);
-  if (!OFFICIAL_SCALES.has(scale) || values.child !== undefined || values.profile !== undefined || values.database !== undefined) {
+  if (
+    !OFFICIAL_SCALES.has(scale)
+    || values.child !== undefined || values.profile !== undefined || values.database !== undefined
+  ) {
     throw new Error("scale must be one of 10000, 100000, or 1000000");
   }
   const parentIdentity = captureMaterializationIdentity();

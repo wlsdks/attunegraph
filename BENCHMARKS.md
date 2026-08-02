@@ -109,6 +109,23 @@ deterministic parser, corpus, hashing, percentile, and fail-closed CLI checks.
 They are long evidence activities and should run independently from editing or
 unrelated verification.
 
+Measure the separate v3-to-v4 physical storage tradeoff with the same
+deterministic current-head corpus:
+
+```sh
+pnpm benchmark:v4-storage-cost -- --scale=10000
+```
+
+This emits `attunegraph-current-head-v4-storage-paired@1`. It preserves the
+historical v2-to-v3 `@2` report unchanged and compares write duration, settled
+database bytes/pages, physical rows, reopen validation, and Admin full
+integrity. Both profiles retain exact semantic-byte identity. RSS and heap are
+recorded per profile but are not ratioed, because process high-water marks are
+not independent cells. The production WAL snapshot is not cumulative write
+evidence: the current connection-local auto-checkpoint and close behavior need
+a separate controlled WAL experiment. The report is measurement-only,
+claim-ineligible, and does not measure query speed or a competitor.
+
 ## Evidence document
 
 `attunegraph-scale-benchmark@1` binds:
