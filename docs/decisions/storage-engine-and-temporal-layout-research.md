@@ -150,7 +150,7 @@ but not the source of truth.
 | Physical schema v2 compression | `verified-current` | Shipped in `d61a172` after independent evaluation; 17.18x representative payload density, 7.19x 313-row DB density, 101-sample p50/p95 gate, and separate 10K/100K/1M settled-size runs. |
 | Normalized current-head index | `built-unverified query candidate` | Physical v3, atomic journal/head/index activation, structural store-open admission, explicit full Admin plus per-scope normalized validation, and crash recovery are built. A package-private endpoint and degree-sweep harness now show where normalized reconstruction can remove canonical decode work. No Engine/public fast path, full Working Graph result, 100K/1M query qualification, or latency claim exists. |
 | Anchor+delta history | `roadmap` | Requires a workload-derived checkpoint policy, bounded reconstruction, exact replay, revocation propagation, and portable rebuild tests. |
-| Ladybug/Cozo measured comparison | `built-unverified measurement lane` | The private-package 10K lane pins Ladybug 0.19.0 and Cozo 0.7.6, rotates five isolated trials, and verifies all 313 adjacency/degree oracles. Native APIs and product semantics are not boundary-equivalent; 100K/1M, cold-cache, crash-recovery, and clean revision-bound evidence remain missing. |
+| Ladybug/Cozo measured comparison | `verified-current 10K measurement lane` | Clean commit `35f87868` completed five isolated rotating trials for AttuneGraph v4, Ladybug 0.19.0, and Cozo 0.7.6 and verified all 313 adjacency/degree oracles. Native APIs and product semantics are not boundary-equivalent; 100K/1M, controlled cold-cache, equivalent durability, update/delete, and crash-recovery evidence remain missing. |
 | Lower agent token cost or fewer errors | `evidence missing` | Same-model, same-budget LongMemEval-style and clean-room agent studies with exact evidence sufficiency and abstention. |
 
 The reviewed papers and product docs support the direction, not a superiority
@@ -167,14 +167,14 @@ witness reconstruction with digest proof. Combining them would hide the cost
 of AttuneGraph's agent-native contract or credit a generic store with semantics
 it does not provide, so the report forbids product ratios and labels both lanes.
 
-The dirty implementation run suggests SQLite is not the raw lookup bottleneck
+The clean revision-bound 10K run shows SQLite is not the raw lookup bottleneck
 at this corpus shape: v4 indexed adjacency and endpoint degree were materially
 below one millisecond. Proof assembly and canonical reconstruction cost more,
 while projection ingestion and settled bytes trail the lighter competitor
 schemas. Proof-work reduction, write amplification, and representation density
 therefore precede replacing SQLite solely for a 32-edge lookup. This is a
-selection decision, not shipped evidence; the replacement trigger above stays
-unchanged.
+storage-primitive selection result, not product-equivalent evidence; the
+replacement trigger above stays unchanged.
 
 Native dependency installations remain under `benchmarks/competitor-parity/`
 and never enter the runtime dependency graph or package bundle. The tarball

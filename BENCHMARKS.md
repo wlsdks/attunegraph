@@ -158,17 +158,21 @@ Ladybug uses native Cypher, and Cozo uses SQLite Datalog. The report emits no
 speedup or product ratio. AttuneGraph exact-head/source-ref/digest proof
 assembly is a separate `attunegraph-v4-proof-assembly-only` lane.
 
-One 2026-08-02 macOS arm64 Node 24.16 dirty implementation run completed all
-15 children. Median-of-five p50 observations were about 0.016 ms adjacency and
-0.0032 ms degree for raw AttuneGraph v4, 0.620 ms and 0.378 ms for Ladybug, and
-0.084 ms and 0.075 ms for Cozo. AttuneGraph proof assembly was about 1.00 ms.
-Settled database bytes were 6,148,096, 3,092,480, and 1,748,992 respectively.
-These are implementation-selection observations, not shipped evidence, an SLA,
-or a superiority claim; clean revision-bound, larger, cold, and crash-recovery
-cells remain missing.
+A clean revision-bound 2026-08-02 macOS arm64 Node 24.16 run on commit
+`35f87868a1ad7b330ce20a0681552fcc503278e4` completed all 15 children. Its
+artifact identity is
+`sha256:341ac693a1eaf794b40ada586dbdddbca8897fcd2a2a3d71981abb4878d98d6a`.
+Median-of-five p50 observations were about 0.0162 ms adjacency and 0.00317 ms
+degree for raw AttuneGraph v4, 0.681 ms and 0.413 ms for Ladybug, and 0.0922 ms
+and 0.0814 ms for Cozo. AttuneGraph proof assembly was about 0.991 ms. Settled
+database bytes were 6,148,096, 3,092,480, and 1,748,992 respectively. This is
+verified 10K storage-primitive evidence, not an SLA or superiority claim;
+larger, controlled-cold, update/delete, equivalent-durability, and crash-
+recovery cells remain missing.
 
 Reports bind content-addressed source, root/private lockfiles, package,
-orchestrator, child, the complete generated AttuneGraph `dist/*.js|mjs` runtime
+orchestrator, child, the complete generated AttuneGraph `dist/*.js` and
+`dist/*.mjs` runtime
 closure, and corpus hashes. Child output is bounded to 128 KiB and
 the aggregate to 512 KiB; arguments are exact and validated temporary roots are
 removed on success or failure. Reports remain `measurementOnly: true`,
