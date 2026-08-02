@@ -56,6 +56,14 @@ function check(condition: boolean, message: string): asserts condition {
   if (!condition) throw new Error(message);
 }
 
+function deepFreeze<T>(value: T): T {
+  if (value !== null && typeof value === "object") {
+    for (const child of Object.values(value)) deepFreeze(child);
+    Object.freeze(value);
+  }
+  return value;
+}
+
 function isCode(cause: unknown, code: AttuneGraphError["code"]): boolean {
   return cause instanceof AttuneGraphError && cause.code === code;
 }
@@ -170,6 +178,7 @@ export async function runAttuneGraphStoreConformance(createBackend: AttuneGraphS
     ["reads are detached and corrupt or future state fails closed", () => withBackend(createBackend, async (backend) => {
       let seed: AttuneGraph | undefined;
       let corruptAttuneGraph: AttuneGraph | undefined;
+      let hybridAttuneGraph: AttuneGraph | undefined;
       let futureAttuneGraph: AttuneGraph | undefined;
       try {
         seed = await openAttuneGraph({ scope: SCOPE, store: createAttuneGraphStore(backend) });
@@ -180,17 +189,36 @@ export async function runAttuneGraphStoreConformance(createBackend: AttuneGraphS
         const corrupt: AttuneGraphStoreBackend = {
           async read(scope) {
             const raw = await backend.read(scope);
-            return raw === undefined ? undefined : { ...raw, projectionFingerprint: "collision" };
+            return raw === undefined
+              ? undefined
+              : deepFreeze({ ...raw, projectionFingerprint: "collision" });
           },
           compareAndSwap: backend.compareAndSwap.bind(backend)
         };
         const openedCorrupt = await openAttuneGraph({ scope: SCOPE, store: createAttuneGraphStore(corrupt) });
         corruptAttuneGraph = openedCorrupt;
         await rejectsCode(() => openedCorrupt.execute(EXECUTE), "CORRUPT_STORE");
+        const hybrid: AttuneGraphStoreBackend = {
+          async read(scope) {
+            const raw = await backend.read(scope);
+            if (raw === undefined) return undefined;
+            for (const child of Object.values(raw)) deepFreeze(child);
+            return { ...raw, schemaVersion: 2 } as never;
+          },
+          compareAndSwap: backend.compareAndSwap.bind(backend)
+        };
+        const openedHybrid = await openAttuneGraph({
+          scope: SCOPE,
+          store: createAttuneGraphStore(hybrid)
+        });
+        hybridAttuneGraph = openedHybrid;
+        await rejectsCode(() => openedHybrid.execute(EXECUTE), "CORRUPT_STORE");
         const future: AttuneGraphStoreBackend = {
           async read(scope) {
             const raw = await backend.read(scope);
-            return raw === undefined ? undefined : { ...raw, schemaVersion: 2 } as never;
+            return raw === undefined
+              ? undefined
+              : deepFreeze({ ...raw, schemaVersion: 2 }) as never;
           },
           compareAndSwap: backend.compareAndSwap.bind(backend)
         };
@@ -198,7 +226,12 @@ export async function runAttuneGraphStoreConformance(createBackend: AttuneGraphS
         futureAttuneGraph = openedFuture;
         await rejectsCode(() => openedFuture.execute(EXECUTE), "FUTURE_STORE_STATE");
       } finally {
-        await closeAttuneGraphs(seed, corruptAttuneGraph, futureAttuneGraph);
+        await closeAttuneGraphs(
+          seed,
+          corruptAttuneGraph,
+          hybridAttuneGraph,
+          futureAttuneGraph
+        );
       }
     })]
   ];

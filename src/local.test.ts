@@ -91,6 +91,12 @@ function decisionQuery(scope: AttuneGraphScope = SCOPE) {
   };
 }
 
+function expectDeeplyFrozen(value: unknown): void {
+  if (value === null || typeof value !== "object") return;
+  expect(Object.isFrozen(value)).toBe(true);
+  for (const child of Object.values(value)) expectDeeplyFrozen(child);
+}
+
 afterEach(async () => {
   await Promise.all(
     temporaryDirectories.splice(0).map((directory) =>
@@ -585,6 +591,71 @@ it("passes the backend-neutral Store conformance corpus with disposal", async ()
   );
   expect(report).toMatchObject({ passed: true });
   expect(report.cases).toHaveLength(5);
+});
+
+it("returns deeply frozen mutation-isolated projections from direct SQLite backend reads", async () => {
+  const resource = await openSqliteAttuneGraphStore({
+    databasePath: await temporaryDatabase()
+  });
+  const attuneGraph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(resource.backend)
+  });
+  const snapshot = await attuneGraph.project(command("direct-backend-read"));
+
+  const first = await resource.backend.read(SCOPE);
+  const second = await resource.backend.read(SCOPE);
+  expect(first).toBeDefined();
+  expect(second).toEqual(first);
+  expect(second).not.toBe(first);
+  expect(second?.snapshot).not.toBe(first?.snapshot);
+  expect(second?.assertions).not.toBe(first?.assertions);
+  expect(second?.assertions[0]).not.toBe(first?.assertions[0]);
+  expectDeeplyFrozen(first);
+  expectDeeplyFrozen(second);
+
+  expect(() => {
+    (first?.assertions[0]?.subject as { id: string }).id = "mutated";
+  }).toThrow(TypeError);
+  await expect(resource.backend.read(SCOPE)).resolves.toEqual(second);
+  await expect(attuneGraph.head()).resolves.toEqual(snapshot);
+
+  await attuneGraph.close();
+  await resource.close();
+});
+
+it("uses only the two protocol-size stringifications and no parent JSON parse per SQLite read", async () => {
+  const resource = await openSqliteAttuneGraphStore({
+    databasePath: await temporaryDatabase()
+  });
+  const attuneGraph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(resource.backend)
+  });
+  await attuneGraph.project(command("parent-json-passes"));
+
+  const originalParse = JSON.parse;
+  const originalStringify = JSON.stringify;
+  let parses = 0;
+  let stringifies = 0;
+  JSON.parse = ((...args: Parameters<typeof JSON.parse>) => {
+    parses += 1;
+    return originalParse(...args);
+  }) as typeof JSON.parse;
+  JSON.stringify = ((...args: Parameters<typeof JSON.stringify>) => {
+    stringifies += 1;
+    return originalStringify(...args);
+  }) as typeof JSON.stringify;
+  try {
+    await expect(resource.backend.read(SCOPE)).resolves.toBeDefined();
+  } finally {
+    JSON.parse = originalParse;
+    JSON.stringify = originalStringify;
+  }
+  expect({ parses, stringifies }).toEqual({ parses: 0, stringifies: 2 });
+
+  await attuneGraph.close();
+  await resource.close();
 });
 
 it("recovers the three commit and acknowledgement crash boundaries", async () => {

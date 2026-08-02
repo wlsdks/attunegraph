@@ -122,14 +122,6 @@ function plainRecord(
   return value as Record<string, unknown>;
 }
 
-function detachedProjection(value: unknown): AttuneGraphStoredProjection {
-  try {
-    return JSON.parse(JSON.stringify(value)) as AttuneGraphStoredProjection;
-  } catch (cause) {
-    throw storeFailure("local AttuneGraph worker returned an unserializable projection", cause);
-  }
-}
-
 export async function openSqliteAttuneGraphStore(
   options: OpenSqliteAttuneGraphStoreOptions
 ): Promise<OpenedSqliteAttuneGraphStore> {
@@ -491,7 +483,7 @@ export async function openSqliteAttuneGraphStore(
             storeFailure("local AttuneGraph worker returned an invalid read result")
           );
         }
-        return detachedProjection(response.projection);
+        return response.projection as AttuneGraphStoredProjection;
       });
     },
     readHead(scope: AttuneGraphScope): Promise<AttuneGraphSnapshot | undefined> {

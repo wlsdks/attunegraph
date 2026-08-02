@@ -255,7 +255,12 @@ gates, independent evaluation, landing, and release integration:
 
 - root-public `admitDecisionQueryResult` for safe detached full-result
   admission, exact token/bitemporal/ref/status/witness closure, and receipt
-  revision-2 content resealing after JSON transport.
+  revision-2 content resealing after JSON transport;
+- direct SQLite backend reads that return the new, deeply frozen parent-side
+  projection already reconstructed by worker response protocol admission,
+  without a second parent JSON stringify/parse detachment. Request and response
+  protocol-size serialization and Worker transport remain; the Engine still
+  performs canonical Store admission before persisted graph state is used.
 
 The admission parser accepts at most 64 assertions and 65 returned refs as a
 defensive structural bound. The current canonical projection envelope limits

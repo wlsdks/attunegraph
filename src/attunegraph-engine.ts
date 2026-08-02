@@ -489,7 +489,7 @@ function storeEnvelope(value: unknown): CanonicalImmutableEnvelopeResult {
     }
   }
   try {
-    return canonicalizeImmutableEnvelope(value, "attunegraph-frozen", spec);
+    return mintCanonicalImmutableEnvelopeFromFrozenUnsignedForInternalUse(value, spec);
   } catch (cause) {
     throw new AttuneGraphError("CORRUPT_STORE", "Store returned an unsafe projection", { cause });
   }

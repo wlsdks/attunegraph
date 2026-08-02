@@ -67,7 +67,7 @@ priced away.
 | Reduce duplicate canonical receipt parsing, serialization, or hashing during admission | `measure-first` | The supplied receipt is canonicalized and the normalized result is independently resealed; a safe implementation may share immutable intermediate bytes | Reject unless receipt ID/canonical JSON remain exact for every remint test and paired `decision-query@1` admission/end-to-end evidence isolates fewer canonical byte passes without moving work outside the timer |
 | Add package-private phase counters for decision-query production and admission | `measure-first` | Attribution is required before choosing another optimization; wall time alone cannot identify traversal, serialization, hashing, or transport | Reject the counter design if it changes public output, observes secret/source payloads, is unbounded, or cannot be recomputed from a deterministic fixture |
 | Seed the prepared Working Graph plan from the already admitted projection after a successful CAS or exact replay/winner convergence | `now` | Deletes the first post-commit full projection read and repeat admission while retaining one exact-head check before every reuse | Reject on any mixed-generation cache use, missed epoch invalidation, or result/receipt byte drift; the deterministic part-count cell must remain at zero full reads for the seeded first query and one for the equivalent cold-handle query |
-| Remove the SQLite parent backend's extra JSON stringify/parse detachment | `measure-first` | Worker structured clone and protocol admission may already provide an independent detached value, making the parent copy a duplicate byte pass | Reject unless malformed-worker, mutation-isolation, frozen-result, and Engine store-admission tests remain exact; falsify as immaterial if a near-envelope-cap cold read improves CPU by less than 5% |
+| Remove the SQLite parent backend's extra JSON stringify/parse detachment | `now` | Worker structured clone plus `parseWorkerResponse -> parseWorkerResult -> parseProjection` already descriptor-admit, rebuild, and deeply freeze a new parent-side projection, so the parent copy was one duplicate stringify/parse pass | Reject unless malformed-worker/protocol fail-stop, direct-backend mutation isolation, deep freezing, and Engine canonical Store admission remain exact; the deterministic intrinsic counter must retain the two protocol-size stringifications and remove exactly one stringify plus one parse |
 | Add an optional atomic head-pinned projection read backend primitive | `measure-first` | SQLite can observe the current head and its journal row in one statement, potentially replacing two worker requests; generic backends can retain the retry fallback | Reject on any writer/reader interleaving divergence, changed snapshot conflict, or weakened current-head semantics; falsify if cold preparation does not fall from two requests to one |
 | Replace indexed portable validation's per-projection lookup plus write with a conditional UPSERT | `measure-first` | One statement may encode new-scope generation one and exact next-generation advancement without changing the transaction boundary | Reject on any replay, generation-gap, interleaving, error-code, abort, or rollback difference; falsify if a 10K one-scope matrix does not reduce statement executions or improve the boundary by at least 15% |
 | Lazily cache decision-code-unit-sorted adjacency buckets per prepared exact head | `measure-first` | Repeated queries currently copy and sort the same bounded bucket even though its head and comparator are immutable | Reject unless results and receipts are byte-identical and exact-head invalidation remains complete; falsify if warm comparator work does not approach zero, one-query latency regresses over 5%, or retained heap grows over 15% |
@@ -126,6 +126,24 @@ The equivalent cold-handle first query records one `readHead` plus one full
 projection read. The harness fails unless cold, seeded, and repeated results
 and receipts are byte-identical. These operation counts validate the deleted
 part; they are not elapsed-time or speed evidence.
+
+### SQLite parent read detachment
+
+The narrow `local.test.ts` intrinsic-counter cell scopes `JSON.stringify` and
+`JSON.parse` replacement to one parent-side direct SQLite backend read and
+restores both intrinsics in `finally`. Before the deletion it observes three
+parent stringifications and one parent parse. After deletion it requires two
+stringifications and zero parses: the request and response protocol-envelope
+size checks remain, while exactly one projection stringify/parse detachment is
+gone. Worker transport still incurs structured-clone/protocol serialization;
+this counter neither measures that work nor supports a latency claim.
+
+The returned projection is not trusted as authoritative merely because it is
+frozen. Worker response parsing has already reconstructed it through the
+closed projection grammar, and the Engine remains the canonical Store
+admission boundary before graph semantics use persisted state. Direct-backend
+tests additionally require new object identities across reads, deep freezing,
+mutation rejection, and unchanged bytes after the rejected mutation.
 
 ### Paired performance evidence
 
