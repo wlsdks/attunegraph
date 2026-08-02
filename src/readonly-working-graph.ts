@@ -23,6 +23,7 @@ import {
 import { AttuneGraphError } from "./attunegraph-error.js";
 import { openAttuneGraph } from "./attunegraph-engine.js";
 import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V1 } from "./attunegraph-physical-schema-v1.mjs";
+import { decodeAttuneGraphProjectionJson } from "./attunegraph-projection-codec.mjs";
 
 export interface ReadLocalAttuneGraphWorkingGraphOptions {
   readonly command: AttuneGraphExecuteCommand;
@@ -97,7 +98,10 @@ function exactOptions(
   });
 }
 
-function projectionRow(value: unknown): AttuneGraphStoredProjection {
+function exactRow(
+  value: unknown,
+  fields: readonly string[]
+): Readonly<Record<string, unknown>> {
   if (
     value === undefined
     || value === null
@@ -107,25 +111,86 @@ function projectionRow(value: unknown): AttuneGraphStoredProjection {
   ) {
     throw new AttuneGraphAdminReadonlyError("CORRUPT_STORE");
   }
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new AttuneGraphAdminReadonlyError("CORRUPT_STORE");
+  }
   const descriptors = Object.getOwnPropertyDescriptors(value);
   const keys = Reflect.ownKeys(descriptors);
-  const descriptor = descriptors.projectionJson;
   if (
-    keys.length !== 1
-    || keys[0] !== "projectionJson"
-    || descriptor === undefined
-    || !Object.hasOwn(descriptor, "value")
-    || typeof descriptor.value !== "string"
-    || Buffer.byteLength(descriptor.value, "utf8")
-      > ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.maxProjectionBytes * 4
+    keys.length !== fields.length
+    || keys.some((key) => typeof key !== "string" || !fields.includes(key))
+    || fields.some((field) => {
+      const descriptor = descriptors[field];
+      return descriptor === undefined
+        || !descriptor.enumerable
+        || !Object.hasOwn(descriptor, "value");
+    })
   ) {
     throw new AttuneGraphAdminReadonlyError("CORRUPT_STORE");
   }
+  return Object.freeze(Object.fromEntries(
+    fields.map((field) => [field, descriptors[field]!.value])
+  ));
+}
+
+function projectionJson(value: unknown): AttuneGraphStoredProjection {
+  if (
+    typeof value !== "string"
+    || Buffer.byteLength(value, "utf8")
+      > ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.maxProjectionBytes * 4
+  ) throw new AttuneGraphAdminReadonlyError("CORRUPT_STORE");
+  let projection: unknown;
   try {
-    return JSON.parse(descriptor.value) as AttuneGraphStoredProjection;
+    projection = JSON.parse(value);
   } catch {
     throw new AttuneGraphAdminReadonlyError("CORRUPT_STORE");
   }
+  return projection as AttuneGraphStoredProjection;
+}
+
+function projectionV1Row(value: unknown): AttuneGraphStoredProjection {
+  const row = exactRow(value, ["projectionJson"]);
+  return projectionJson(row.projectionJson);
+}
+
+function projectionV2Row(value: unknown): AttuneGraphStoredProjection {
+  const row = exactRow(value, [
+    "projectionEncoding",
+    "projectionPayload",
+    "projectionUncompressedBytes",
+    "projectionPayloadSha256",
+    "projectionFingerprint"
+  ]);
+  if (
+    typeof row.projectionUncompressedBytes !== "bigint"
+    || row.projectionUncompressedBytes < 1n
+    || row.projectionUncompressedBytes > BigInt(Number.MAX_SAFE_INTEGER)
+  ) throw new AttuneGraphAdminReadonlyError("CORRUPT_STORE");
+  let decoded: string;
+  try {
+    decoded = decodeAttuneGraphProjectionJson({
+      encoding: row.projectionEncoding,
+      payload: row.projectionPayload,
+      payloadFingerprint: row.projectionPayloadSha256,
+      uncompressedBytes: Number(row.projectionUncompressedBytes)
+    });
+  } catch {
+    throw new AttuneGraphAdminReadonlyError("CORRUPT_STORE");
+  }
+  const projection = projectionJson(decoded);
+  if (
+    typeof row.projectionFingerprint !== "string"
+    || row.projectionFingerprint.length < 1
+    || row.projectionFingerprint.length > 512
+    || projection === null
+    || typeof projection !== "object"
+    || Array.isArray(projection)
+    || nodeTypes.isProxy(projection)
+    || Object.getOwnPropertyDescriptor(projection, "projectionFingerprint")?.value
+      !== row.projectionFingerprint
+  ) throw new AttuneGraphAdminReadonlyError("CORRUPT_STORE");
+  return projection;
 }
 
 async function releaseLease(
@@ -174,11 +239,12 @@ export async function readLocalAttuneGraphWorkingGraph(
     });
     database.enableLoadExtension(false);
     const inspector = createAttuneGraphAdminReadOnlyInspector(database);
+    const physicalProfile = inspector.inspectSummary().userVersion;
     const head = inspector.inspectHead(normalized.scope);
     if (!head.found) {
       throw new AttuneGraphAdminReadonlyError("SOURCE_NOT_FOUND");
     }
-    const statement = database.prepare(`
+    const statement = database.prepare(physicalProfile === 1 ? `
       SELECT j.projection_json AS projectionJson
       FROM attunegraph_projection_head AS h
       INNER JOIN attunegraph_projection_journal AS j
@@ -188,11 +254,25 @@ export async function readLocalAttuneGraphWorkingGraph(
        AND j.commit_id = h.commit_id
       WHERE h.source_id = ? AND h.thread_id = ?
       LIMIT 2
+    ` : `
+      SELECT j.projection_encoding AS projectionEncoding,
+             j.projection_payload AS projectionPayload,
+             j.projection_uncompressed_bytes AS projectionUncompressedBytes,
+             j.projection_payload_sha256 AS projectionPayloadSha256,
+             j.projection_fingerprint AS projectionFingerprint
+      FROM attunegraph_projection_head AS h
+      INNER JOIN attunegraph_projection_journal AS j
+        ON j.source_id = h.source_id
+       AND j.thread_id = h.thread_id
+       AND j.generation = h.generation
+       AND j.commit_id = h.commit_id
+      WHERE h.source_id = ? AND h.thread_id = ?
+      LIMIT 2
     `);
-    const projection = projectionRow(statement.get(
-      normalized.scope.sourceId,
-      normalized.scope.threadId
-    ));
+    const row = statement.get(normalized.scope.sourceId, normalized.scope.threadId);
+    const projection = physicalProfile === 1
+      ? projectionV1Row(row)
+      : projectionV2Row(row);
     const store = createAttuneGraphStore({
       async read(scope) {
         return scope.sourceId === normalized.scope.sourceId

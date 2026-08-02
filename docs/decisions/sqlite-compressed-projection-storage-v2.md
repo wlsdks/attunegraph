@@ -1,6 +1,6 @@
 # SQLite compressed projection storage v2
 
-Status: implemented, uncommitted evaluation candidate (2026-08-02)
+Status: shipped in `d61a172` (2026-08-02)
 
 ## Decision
 
@@ -101,3 +101,26 @@ cell and binds its corpus seed/hash, exact args, observed time, dirty base
 revision/tree, host/runtime, rows/pages/files, and a bounded SHA-256 provenance
 record for the full underlying scale report. Missing or incoherent provenance
 fails closed.
+
+## Decision log
+
+### 2026-08-02: preserve explicit physical-profile reads
+
+The admin read-only Working Graph path must select its SQL statement from the
+validated `user_version` returned by the read-only inspector. Physical v1 reads
+the legacy TEXT column exactly; physical v2 reads the five declared compressed
+projection fields and passes them through the shared bounded codec before the
+existing semantic projection admission.
+
+Column probing, exception-driven fallback, and opportunistic migration were
+rejected. They can blur an unknown or corrupt store into a different profile,
+make damage look like compatibility, and weaken the guarantee that a result is
+bound to the exact physical schema already admitted by the inspector. A v2
+payload with an unknown encoding, invalid length or hash, corrupt compressed
+bytes, trailing input, invalid UTF-8, or mismatched semantic fingerprint remains
+`CORRUPT_STORE`; it is never retried as v1.
+
+This decision should be revisited only when a versioned public migration or
+portable rebuild workflow is implemented. Such a workflow must still perform
+an explicit source-profile admission and atomic target activation rather than
+turning the ordinary read path into a heuristic migrator.

@@ -1,7 +1,7 @@
 # Storage engine and temporal layout research
 
 Status: accepted direction; only the explicitly named baseline capabilities are
-shipped. Physical schema v2 is an uncommitted evaluation candidate.
+shipped. Physical schema v2 shipped in `d61a172`.
 Last reviewed: 2026-08-02.
 
 ## Decision
@@ -147,7 +147,7 @@ but not the source of truth.
 | --- | --- | --- |
 | Removing the parent duplicate JSON detachment | `shipped` on baseline | Deterministic intrinsic part count and existing full gates on the landed revision. |
 | Reusing a post-CAS prepared plan | `shipped` on baseline | Exact operation-count benchmark and byte-identical receipts on the landed revision. |
-| Physical schema v2 compression | `built, full-gates-passed, uncommitted` | 17.18x representative payload density, 7.19x 313-row DB density, 101-sample p50/p95 gate, and separate 10K/100K/1M settled-size runs; independent evaluator and landing still required. |
+| Physical schema v2 compression | `verified-current` | Shipped in `d61a172` after independent evaluation; 17.18x representative payload density, 7.19x 313-row DB density, 101-sample p50/p95 gate, and separate 10K/100K/1M settled-size runs. |
 | Normalized current-head index | `roadmap` | Requires a versioned schema, atomic journal/head/index activation, stale/corrupt fail-closed tests, and paired 1M/10M evidence. |
 | Anchor+delta history | `roadmap` | Requires a workload-derived checkpoint policy, bounded reconstruction, exact replay, revocation propagation, and portable rebuild tests. |
 | Ladybug/Cozo measured comparison | `evidence missing` | Install pinned versions and compare identical storage, semantic, and agent pipeline layers without importing their code. |
