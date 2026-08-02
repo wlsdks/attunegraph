@@ -722,10 +722,13 @@ budget decisions, diagnostics, or final results.
 
 The deterministic acceptance surface requires:
 
-- unchanged-head sequential reads perform one full projection admission and
-  one cheap exact-head check per execute;
-- a successful local write and a different handle's committed write both force
-  the next execute to reload and rebuild exactly once;
+- a cold handle performs one full projection admission plus one exact-head
+  check, while a handle that just committed or exactly converged on a replay
+  or CAS winner seeds that admitted projection and performs only the exact-head
+  check on its first and repeated reads;
+- a successful local write invalidates older local preparation before seeding
+  the admitted commit, while a different handle's committed write forces the
+  next execute to reload and rebuild exactly once;
 - the same prepared head produces different correct results across validity
   boundaries and token budgets;
 - a head that never matches the admitted projection retries once and returns
@@ -733,6 +736,12 @@ The deterministic acceptance surface requires:
 - adapters without the optional capability preserve full-read behavior;
 - every existing semantic, authority, projection, and workload anchor remains
   byte-identical.
+
+Run `pnpm benchmark:prepared-plan-seed-parts` for the reproducible operation
+counts. Its `attunegraph-prepared-plan-seed-part-count@1` report is permanently
+measurement-only and claim-ineligible: it proves the seeded boundary removes
+one full backend read relative to an equivalent cold handle, and it makes no
+wall-clock speed claim.
 
 The relevant performance cell is a batch of agent decisions against one
 unchanged head. Cold and warm results are reported separately. A single-seed

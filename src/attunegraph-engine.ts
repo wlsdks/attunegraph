@@ -681,6 +681,14 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
         throw new AttuneGraphError("STORE_FAILURE", "store head read failed", { cause });
       }
     };
+  const seedPreparedWorkingGraph = (
+    projection: AttuneGraphStoredProjection
+  ): void => {
+    invalidateWorkingGraphPlan();
+    if (readHead !== undefined) {
+      preparedWorkingGraph = prepareWorkingGraph(projection);
+    }
+  };
   const readHeadPinnedProjection = async (): Promise<AttuneGraphStoredProjection | undefined> => {
     if (readHead === undefined) return read();
     for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -745,6 +753,7 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
           "stored replay does not match the requested canonical projection"
         );
       }
+      seedPreparedWorkingGraph(current);
       return freezeSnapshot(current.snapshot);
     }
     if (
@@ -819,11 +828,12 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
         && winner.canonicalProjection === observation.canonicalProjection
         && winner.projectionFingerprint === observation.observationId
       ) {
+        seedPreparedWorkingGraph(winner);
         return freezeSnapshot(winner.snapshot);
       }
       attuneGraphError("SNAPSHOT_CONFLICT", "projection compare-and-swap failed");
     }
-    invalidateWorkingGraphPlan();
+    seedPreparedWorkingGraph(proposed);
     return freezeSnapshot(nextSnapshot);
   };
   return Object.freeze({

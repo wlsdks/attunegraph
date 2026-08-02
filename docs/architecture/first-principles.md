@@ -242,7 +242,9 @@ Shipped in the current core:
   `authorized | undetermined`, and a content-addressed result-bounded receipt;
 - in-memory and worker-isolated local SQLite profiles;
 - canonical portable artifacts and a read-only offline Admin;
-- head-pinned prepared plans with fail-closed snapshot mismatch handling;
+- head-pinned prepared plans seeded only from an admitted committed or exactly
+  converged projection, with an exact-head check before reuse and fail-closed
+  snapshot mismatch handling;
 - exact-head `revocation-impact@1` planning with normalized bounded selectors,
   deterministic dependency witnesses, partiality, and content-addressed
   receipts; and `revocation-transition@1`, a one-CAS source-authoritative V2

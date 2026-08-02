@@ -628,7 +628,7 @@ it("reuses one admitted Working Graph plan while the exact Store head is unchang
   const second = await execute();
 
   expect(JSON.stringify(second)).toBe(JSON.stringify(first));
-  expect({ headReads, projectionReads }).toEqual({ headReads: 2, projectionReads: 1 });
+  expect({ headReads, projectionReads }).toEqual({ headReads: 2, projectionReads: 0 });
   await attuneGraph.close();
 });
 
@@ -836,7 +836,7 @@ it("re-evaluates temporal validity for every execute while reusing the same prep
   expect(before).toMatchObject({ status: "abstained", workingGraph: { assertions: [] } });
   expect(after).toMatchObject({ status: "complete" });
   expect(after.workingGraph.assertions.map((item) => item.id)).toEqual(["future-validity"]);
-  expect({ headReads, projectionReads }).toEqual({ headReads: 2, projectionReads: 1 });
+  expect({ headReads, projectionReads }).toEqual({ headReads: 2, projectionReads: 0 });
   await graph.close();
 });
 

@@ -144,6 +144,168 @@ it("executes object and AttuneQL forms as one deterministic evidence-only contra
   await graph.close();
 });
 
+it("seeds the exact committed plan for the first query and still re-admits a changed head", async () => {
+  const backing = new InMemoryAttuneGraphStoreBackend();
+  let compareAndSwaps = 0;
+  let headReads = 0;
+  let projectionReads = 0;
+  const graph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore({
+      async read(scope) {
+        projectionReads += 1;
+        return backing.read(scope);
+      },
+      async readHead(scope) {
+        headReads += 1;
+        return backing.readHead(scope);
+      },
+      async compareAndSwap(scope, expected, proposed) {
+        compareAndSwaps += 1;
+        return backing.compareAndSwap(scope, expected, proposed);
+      }
+    })
+  });
+
+  await graph.projectAgainstHead(observation("prepared-plan-seed"));
+  expect({ compareAndSwaps, headReads, projectionReads }).toEqual({
+    compareAndSwaps: 1,
+    headReads: 0,
+    projectionReads: 1
+  });
+
+  const first = await graph.query(objectQuery());
+  const repeated = await graph.query(objectQuery());
+  expect(JSON.stringify(repeated)).toBe(JSON.stringify(first));
+  expect({ compareAndSwaps, headReads, projectionReads }).toEqual({
+    compareAndSwaps: 1,
+    headReads: 2,
+    projectionReads: 1
+  });
+
+  const cold = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(backing)
+  });
+  expect(JSON.stringify(await cold.query(objectQuery()))).toBe(JSON.stringify(first));
+  await cold.close();
+
+  const writer = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(backing)
+  });
+  await writer.projectAgainstHead(observation("prepared-plan-changed-head"));
+  const changed = await graph.query(objectQuery());
+  expect(changed.snapshot).toMatchObject({ generation: 2 });
+  expect({ compareAndSwaps, headReads, projectionReads }).toEqual({
+    compareAndSwaps: 1,
+    headReads: 3,
+    projectionReads: 2
+  });
+  const changedCold = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(backing)
+  });
+  expect(JSON.stringify(await changedCold.query(objectQuery())))
+    .toBe(JSON.stringify(changed));
+
+  await Promise.all([graph.close(), writer.close(), changedCold.close()]);
+});
+
+it("seeds exact replay and concurrent identical-winner plans without a post-convergence full read", async () => {
+  const replayBacking = new InMemoryAttuneGraphStoreBackend();
+  let replayHeadReads = 0;
+  let replayProjectionReads = 0;
+  let replaySwaps = 0;
+  const replayGraph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore({
+      async read(scope) {
+        replayProjectionReads += 1;
+        return replayBacking.read(scope);
+      },
+      async readHead(scope) {
+        replayHeadReads += 1;
+        return replayBacking.readHead(scope);
+      },
+      async compareAndSwap(scope, expected, proposed) {
+        replaySwaps += 1;
+        return replayBacking.compareAndSwap(scope, expected, proposed);
+      }
+    })
+  });
+  const replayCommand = observation("prepared-plan-replay");
+  const committed = await replayGraph.projectAgainstHead(replayCommand);
+  const replayed = await replayGraph.projectAgainstHead(replayCommand);
+  expect(replayed).toEqual(committed);
+  expect({ replayProjectionReads, replaySwaps }).toEqual({
+    replayProjectionReads: 2,
+    replaySwaps: 1
+  });
+  replayHeadReads = 0;
+  replayProjectionReads = 0;
+  await replayGraph.query(objectQuery());
+  expect({ replayHeadReads, replayProjectionReads }).toEqual({
+    replayHeadReads: 1,
+    replayProjectionReads: 0
+  });
+  await replayGraph.close();
+
+  const concurrentBacking = new InMemoryAttuneGraphStoreBackend();
+  let initialReads = 0;
+  const barrier = (() => {
+    let release: (() => void) | undefined;
+    const promise = new Promise<void>((resolve) => { release = resolve; });
+    return { promise, release: () => release?.() };
+  })();
+  const counters: [
+    { headReads: number; projectionReads: number },
+    { headReads: number; projectionReads: number }
+  ] = [
+    { headReads: 0, projectionReads: 0 },
+    { headReads: 0, projectionReads: 0 }
+  ];
+  const openContender = (index: 0 | 1) => openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore({
+      async read(scope) {
+        counters[index].projectionReads += 1;
+        initialReads += 1;
+        if (initialReads <= 2) {
+          if (initialReads === 2) barrier.release();
+          await barrier.promise;
+        }
+        return concurrentBacking.read(scope);
+      },
+      async readHead(scope) {
+        counters[index].headReads += 1;
+        return concurrentBacking.readHead(scope);
+      },
+      compareAndSwap: concurrentBacking.compareAndSwap.bind(concurrentBacking)
+    })
+  });
+  const [left, right] = await Promise.all([openContender(0), openContender(1)]);
+  const same = observation("prepared-plan-concurrent-winner");
+  const [leftSnapshot, rightSnapshot] = await Promise.all([
+    left.projectAgainstHead(same),
+    right.projectAgainstHead(same)
+  ]);
+  expect(rightSnapshot).toEqual(leftSnapshot);
+  expect(counters.map(({ projectionReads }) => projectionReads).sort())
+    .toEqual([1, 2]);
+  const readsBeforeQueries = counters.map(({ projectionReads }) => projectionReads);
+
+  const [leftResult, rightResult] = await Promise.all([
+    left.query(objectQuery()),
+    right.query(objectQuery())
+  ]);
+  expect(JSON.stringify(rightResult)).toBe(JSON.stringify(leftResult));
+  expect(counters.map(({ headReads }) => headReads)).toEqual([1, 1]);
+  expect(counters.map(({ projectionReads }) => projectionReads))
+    .toEqual(readsBeforeQueries);
+  await Promise.all([left.close(), right.close()]);
+});
+
 it("settles partial evidence by locale-independent code-unit order", async () => {
   const single = await openAttuneGraph({
     scope: SCOPE,
@@ -290,6 +452,6 @@ it("rejects hostile input, scope drift, and exact-head drift before returning ev
     }
   }))).rejects.toMatchObject({ code: "SNAPSHOT_CONFLICT" });
   expect(headReads).toBeGreaterThan(0);
-  expect(reads).toBeGreaterThan(0);
+  expect(reads).toBe(0);
   await graph.close();
 });

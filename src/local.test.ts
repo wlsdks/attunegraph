@@ -214,7 +214,7 @@ it("uses exact SQLite head reads to reuse one Working Graph plan per open handle
   const second = await graph.execute(execute());
 
   expect(JSON.stringify(second)).toBe(JSON.stringify(first));
-  expect(requests).toEqual(["readHead", "read", "readHead"]);
+  expect(requests).toEqual(["readHead", "readHead"]);
   requests.length = 0;
   await graph.query(decisionQuery());
   expect(requests).toEqual(["readHead"]);

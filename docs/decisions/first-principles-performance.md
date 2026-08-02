@@ -66,7 +66,7 @@ priced away.
 | Fuse admission safe-JSON inspection with normalization | `measure-first` | Could remove one object-graph walk, but descriptor, proxy, alias, sparse-array, hidden-field, and malformed-Unicode rejection must remain exact | First add per-phase descriptor/normalization counters; reject if any hostile-input case changes or paired admission measurements do not isolate a consistent reduction |
 | Reduce duplicate canonical receipt parsing, serialization, or hashing during admission | `measure-first` | The supplied receipt is canonicalized and the normalized result is independently resealed; a safe implementation may share immutable intermediate bytes | Reject unless receipt ID/canonical JSON remain exact for every remint test and paired `decision-query@1` admission/end-to-end evidence isolates fewer canonical byte passes without moving work outside the timer |
 | Add package-private phase counters for decision-query production and admission | `measure-first` | Attribution is required before choosing another optimization; wall time alone cannot identify traversal, serialization, hashing, or transport | Reject the counter design if it changes public output, observes secret/source payloads, is unbounded, or cannot be recomputed from a deterministic fixture |
-| Seed the prepared Working Graph plan from the already admitted projection after a successful CAS | `measure-first` | Could delete the first post-commit full projection read and repeat admission while retaining the exact-head check | Reject on any mixed-generation cache use or semantic-anchor drift; falsify as immaterial if paired `projectAgainstHead -> first query` evidence removes no full read or improves the boundary by less than 10% |
+| Seed the prepared Working Graph plan from the already admitted projection after a successful CAS or exact replay/winner convergence | `now` | Deletes the first post-commit full projection read and repeat admission while retaining one exact-head check before every reuse | Reject on any mixed-generation cache use, missed epoch invalidation, or result/receipt byte drift; the deterministic part-count cell must remain at zero full reads for the seeded first query and one for the equivalent cold-handle query |
 | Remove the SQLite parent backend's extra JSON stringify/parse detachment | `measure-first` | Worker structured clone and protocol admission may already provide an independent detached value, making the parent copy a duplicate byte pass | Reject unless malformed-worker, mutation-isolation, frozen-result, and Engine store-admission tests remain exact; falsify as immaterial if a near-envelope-cap cold read improves CPU by less than 5% |
 | Add an optional atomic head-pinned projection read backend primitive | `measure-first` | SQLite can observe the current head and its journal row in one statement, potentially replacing two worker requests; generic backends can retain the retry fallback | Reject on any writer/reader interleaving divergence, changed snapshot conflict, or weakened current-head semantics; falsify if cold preparation does not fall from two requests to one |
 | Replace indexed portable validation's per-projection lookup plus write with a conditional UPSERT | `measure-first` | One statement may encode new-scope generation one and exact next-generation advancement without changing the transaction boundary | Reject on any replay, generation-gap, interleaving, error-code, abort, or rollback difference; falsify if a 10K one-scope matrix does not reduce statement executions or improve the boundary by at least 15% |
@@ -117,6 +117,15 @@ part-count reduction, require byte-identical projection, semantic, authority,
 scope-isolation, output-byte, token, ref, visit, truncation, and terminal-state
 anchors. Add counters for the exact part being removed; a wall-time change
 without its corresponding count change does not validate the hypothesis.
+
+`pnpm benchmark:prepared-plan-seed-parts` is the deterministic measurement-only
+cell for `projectAgainstHead -> first exact-head decision-query@1`. It records
+one full projection read plus one CAS for projection, then one `readHead` and
+zero full projection reads for both the seeded first query and repeated query.
+The equivalent cold-handle first query records one `readHead` plus one full
+projection read. The harness fails unless cold, seeded, and repeated results
+and receipts are byte-identical. These operation counts validate the deleted
+part; they are not elapsed-time or speed evidence.
 
 ### Paired performance evidence
 
