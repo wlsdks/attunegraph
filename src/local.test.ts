@@ -30,7 +30,16 @@ import { runAttuneGraphStoreConformance } from "./attunegraph-testing.js";
 import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V1 } from "./attunegraph-physical-schema-v1.mjs";
 import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V2 } from "./attunegraph-physical-schema-v2.mjs";
 import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V3 } from "./attunegraph-physical-schema-v3.mjs";
-import { verifyAttuneGraphCurrentHeadIndexScope } from "./attunegraph-current-head-index.mjs";
+import {
+  ATTUNEGRAPH_CURRENT_DECISION_ENDPOINT_PREDICATES_FOR_MEASUREMENT,
+  ATTUNEGRAPH_CURRENT_DECISION_ENDPOINT_SOURCE_REFS_FOR_MEASUREMENT,
+  readAttuneGraphCurrentDecisionEndpointForMeasurement,
+  verifyAttuneGraphCurrentHeadIndexScope
+} from "./attunegraph-current-head-index.mjs";
+import {
+  ACTIVATION_PREDICATES,
+  MAX_GRAPH_ASSERTION_SOURCE_REFS
+} from "./constants.js";
 import { createAttuneGraphAdminReadOnlyInspector } from "./attunegraph-admin-readonly-inspector.mjs";
 import { canonicalAssertion, normalizeGraphAssertion } from "./validation.js";
 
@@ -323,6 +332,157 @@ it("materializes the exact current-head assertion, endpoint, provenance, and der
     { type: "table", name: "attunegraph_current_manifest" },
     { type: "table", name: "attunegraph_current_source_ref" }
   ]);
+});
+
+it("reads a bounded temporally eligible decision endpoint with exact code-unit ordering", async () => {
+  expect(ATTUNEGRAPH_CURRENT_DECISION_ENDPOINT_PREDICATES_FOR_MEASUREMENT)
+    .toEqual(ACTIVATION_PREDICATES);
+  expect(ATTUNEGRAPH_CURRENT_DECISION_ENDPOINT_SOURCE_REFS_FOR_MEASUREMENT)
+    .toBe(MAX_GRAPH_ASSERTION_SOURCE_REFS);
+  const databasePath = await temporaryDatabase("normalized-decision-endpoint-v3.sqlite");
+  const graph = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  const seed = { id: SCOPE.threadId, kind: "thread" as const };
+  const base = command("normalized-decision-endpoint").observation.assertions[0]!;
+  const assertion = (
+    id: string,
+    subject: typeof base.subject,
+    object: typeof base.object,
+    temporal: Readonly<{ validFrom?: string; validTo?: string }> = {}
+  ) => ({
+    ...JSON.parse(JSON.stringify(base)),
+    id,
+    subject: { ...subject },
+    object: { ...object },
+    sourceRefs: [{ namespace: "example.endpoint", id: `source:${id}` }],
+    ...temporal
+  });
+  const supplementaryFirst = {
+    ...assertion(
+      "assertion-\u{10000}",
+      { id: "artifact:supplementary", kind: "artifact" },
+      seed
+    ),
+    sourceRefs: [
+      { namespace: "example.endpoint", id: "source:supplementary:0" },
+      { namespace: "example.endpoint", id: "source:supplementary:1" }
+    ]
+  };
+  const bmpSecond = assertion(
+    "assertion-\uE000",
+    { id: "artifact:bmp", kind: "artifact" },
+    seed
+  );
+  const expired = assertion(
+    "assertion-expired",
+    { id: "artifact:expired", kind: "artifact" },
+    seed,
+    { validTo: NOW }
+  );
+  const future = assertion(
+    "assertion-future",
+    { id: "artifact:future", kind: "artifact" },
+    seed,
+    { validFrom: "2026-07-31T00:00:00.000Z" }
+  );
+  const input = command("normalized-decision-endpoint");
+  const snapshot = await graph.project({
+    ...input,
+    observation: {
+      ...input.observation,
+      assertions: [bmpSecond, expired, future, supplementaryFirst]
+    }
+  } as AttuneGraphProjectCommand);
+  await graph.close();
+
+  const database = new DatabaseSync(databasePath, { readBigInts: true });
+  try {
+    const result = readAttuneGraphCurrentDecisionEndpointForMeasurement(database, {
+      scope: SCOPE,
+      seed,
+      asOf: NOW
+    });
+    expect(result).toMatchObject({
+      schema: "attunegraph-current-decision-endpoint-measurement@1",
+      measurementOnly: true,
+      scanStatus: "built-unverified",
+      verificationLimitations: [
+        "selected-bucket-and-source-ref-tail-completeness-not-proven-by-v3"
+      ],
+      snapshot,
+      projectionFingerprint: snapshot.commitId.replace("attunegraph-commit:", ""),
+      scannedAssertions: 2
+    });
+    expect(result.assertions.map((entry) => entry.id)).toEqual([
+      supplementaryFirst.id,
+      bmpSecond.id
+    ]);
+    expect(result.assertions.map((entry) => entry.sourceRefs[0]?.id)).toEqual([
+      "source:supplementary:0",
+      `source:${bmpSecond.id}`
+    ]);
+
+    const subjectLookup = readAttuneGraphCurrentDecisionEndpointForMeasurement(database, {
+      scope: SCOPE,
+      seed: supplementaryFirst.subject,
+      asOf: NOW
+    });
+    expect(subjectLookup.assertions.map((entry) => entry.id)).toEqual([
+      supplementaryFirst.id
+    ]);
+
+    const overBudget = readAttuneGraphCurrentDecisionEndpointForMeasurement(database, {
+      scope: SCOPE,
+      seed,
+      asOf: NOW,
+      maxCandidateAssertions: 1
+    });
+    expect(overBudget).toMatchObject({
+      scanStatus: "abstained",
+      abstentionReason: "candidate-scan-budget",
+      scannedAssertions: 2,
+      assertions: []
+    });
+
+    database.prepare(`
+      DELETE FROM attunegraph_current_source_ref
+      WHERE source_id_value = ?
+    `).run("source:supplementary:1");
+    const missingTrailingRef = readAttuneGraphCurrentDecisionEndpointForMeasurement(database, {
+      scope: SCOPE,
+      seed,
+      asOf: NOW
+    });
+    expect(missingTrailingRef).toMatchObject({
+      scanStatus: "built-unverified",
+      verificationLimitations: [
+        "selected-bucket-and-source-ref-tail-completeness-not-proven-by-v3"
+      ]
+    });
+    expect(missingTrailingRef.assertions.find((entry) => entry.id === supplementaryFirst.id)
+      ?.sourceRefs.map((sourceRef) => sourceRef.id)).toEqual(["source:supplementary:0"]);
+
+    database.prepare(`
+      UPDATE attunegraph_current_source_ref SET source_ref_ordinal = 1
+      WHERE source_id_value = ?
+    `).run("source:supplementary:0");
+    expect(() => readAttuneGraphCurrentDecisionEndpointForMeasurement(database, {
+      scope: SCOPE,
+      seed,
+      asOf: NOW
+    })).toThrow(/source-ref ordinals are invalid/u);
+
+    database.prepare(`
+      DELETE FROM attunegraph_current_manifest
+      WHERE source_id = ? AND thread_id = ?
+    `).run(SCOPE.sourceId, SCOPE.threadId);
+    expect(() => readAttuneGraphCurrentDecisionEndpointForMeasurement(database, {
+      scope: SCOPE,
+      seed,
+      asOf: NOW
+    })).toThrow(/current-head index integer is invalid/u);
+  } finally {
+    database.close();
+  }
 });
 
 it("replaces all prior current-index rows for one scope without disturbing another scope", async () => {

@@ -148,7 +148,7 @@ but not the source of truth.
 | Removing the parent duplicate JSON detachment | `shipped` on baseline | Deterministic intrinsic part count and existing full gates on the landed revision. |
 | Reusing a post-CAS prepared plan | `shipped` on baseline | Exact operation-count benchmark and byte-identical receipts on the landed revision. |
 | Physical schema v2 compression | `verified-current` | Shipped in `d61a172` after independent evaluation; 17.18x representative payload density, 7.19x 313-row DB density, 101-sample p50/p95 gate, and separate 10K/100K/1M settled-size runs. |
-| Normalized current-head index | `built candidate` | Physical v3, atomic journal/head/index activation, structural store-open admission, explicit full Admin plus per-scope normalized validation, crash recovery, and 10K v2/v3 materialization evidence are built. No query path, 100K/1M result, threshold, migration, or latency improvement is claimed. |
+| Normalized current-head index | `built-unverified query candidate` | Physical v3, atomic journal/head/index activation, structural store-open admission, explicit full Admin plus per-scope normalized validation, and crash recovery are built. A package-private endpoint and degree-sweep harness now show where normalized reconstruction can remove canonical decode work. No Engine/public fast path, full Working Graph result, 100K/1M query qualification, or latency claim exists. |
 | Anchor+delta history | `roadmap` | Requires a workload-derived checkpoint policy, bounded reconstruction, exact replay, revocation propagation, and portable rebuild tests. |
 | Ladybug/Cozo measured comparison | `evidence missing` | Install pinned versions and compare identical storage, semantic, and agent pipeline layers without importing their code. |
 | Lower agent token cost or fewer errors | `evidence missing` | Same-model, same-budget LongMemEval-style and clean-room agent studies with exact evidence sufficiency and abstention. |
@@ -157,3 +157,36 @@ The reviewed papers and product docs support the direction, not a superiority
 claim. AttuneGraph does not currently claim to be faster than a general graph
 database, to exceed a readiness score, or to improve an agent until the named
 reproducible gates pass.
+
+## Normalized endpoint algorithm decision (2026-08-02)
+
+The query atom is not “a 100K graph.” It is one exact scope and one endpoint.
+The current legal corpus shards 100K assertions into 3,125 scopes of at most
+32 assertions because the canonical projection envelope remains 16 KiB. On
+that shape SQLite 3.53 selected the `(index_id, assertion_ordinal)` primary key
+instead of the subject/object indexes. A read-only forced-index prototype was
+slower on both a one-edge endpoint and a 32-edge hub, so plan appearance is not
+an optimization authority. The forced layout remains a conditional prototype
+only if a future legal per-scope envelope establishes a different crossover.
+
+The repository benchmark compares three byte-identical endpoint results on one
+read-only connection: full canonical projection decode, strict normalized-row
+reconstruction, and an adaptive measurement that allows eight candidates
+before falling back to canonical decode. It sweeps endpoint degrees
+1/2/4/8/12/16/24/32 in rotating measurement order. Development measurements
+put the normalized/full p50 crossover near degree 16; this is a workload
+observation, not a shipped threshold. Always-normalized is rejected because
+dense source-ref reconstruction and reverse materialization cost more than one
+small projection decode. Always-full also leaves a repeatable sparse advantage
+unused.
+
+The next candidate is therefore an exact-head-pinned sparse-to-dense reader:
+read bounded endpoint buckets lazily, then reconstruct the full projection at
+most once when cumulative work crosses an evidence-derived bound. It may ship
+only after the same traversal, temporal eligibility, provenance, token bytes,
+status, abstention, and receipt are byte-identical to the canonical path. The
+current v3 manifest does not independently prove selected-bucket or selected
+source-ref tail completeness and does not carry source freshness for an Engine
+query. The primitive therefore reports `built-unverified`, and this slice
+remains measurement-only rather than pretending that a partial fast path is
+shipped.

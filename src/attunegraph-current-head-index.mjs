@@ -8,6 +8,16 @@ import { parseCanonicalAssertion } from "./attunegraph-local-projection.mjs";
 const DIGEST_DOMAIN = "attunegraph.current-head-index.v1";
 const MAX_CURRENT_SCOPES = 1_000_000;
 const MAX_CURRENT_ROWS_PER_SCOPE = 1_000_000;
+const MAX_DECISION_ENDPOINT_CANDIDATES = 128;
+export const ATTUNEGRAPH_CURRENT_DECISION_ENDPOINT_SOURCE_REFS_FOR_MEASUREMENT = 128;
+// This source .mjs is loaded directly by the Worker before TypeScript output
+// exists. local.test.ts guards byte-for-byte drift from ACTIVATION_PREDICATES.
+export const ATTUNEGRAPH_CURRENT_DECISION_ENDPOINT_PREDICATES_FOR_MEASUREMENT = Object.freeze([
+  "SUPPORTED_BY", "DERIVED_FROM", "REVISION_OF", "SUPERSEDES", "GOVERNED_BY",
+  "AUTHORIZED_BY", "PRODUCED_OUTCOME", "PROPOSES_POLICY", "SCOPED_TO",
+  "NEXT_STEP_FOR", "CONTEXT_FOR", "LINKED_TO", "DELIVERED_FOR", "OBSERVED_DURING",
+  "PRECEDED", "CORRELATES_WITH", "PERFORMED"
+]);
 
 /** @typedef {Readonly<{
  * assertionOrdinal: number; assertionId: string; subjectKind: string; subjectId: string;
@@ -176,6 +186,286 @@ export function reconstructAttuneGraphCurrentAssertion(row, sourceRefs) {
       version: row.derivationVersion
     }
   }, `current assertion[${row.assertionOrdinal.toString()}]`);
+}
+
+/** @param {unknown} value @param {string} label */
+function canonicalInstant(value, label) {
+  const text = exactText(value);
+  if (!Number.isFinite(Date.parse(text)) || new Date(text).toISOString() !== text) {
+    throw new TypeError(`${label} is invalid`);
+  }
+  return text;
+}
+
+/** @param {unknown} value @param {string} label */
+function nullableCanonicalInstant(value, label) {
+  return value === null ? null : canonicalInstant(value, label);
+}
+
+/** @param {unknown} value @param {string} label @param {readonly string[]} allowed
+ * @param {readonly string[]} [required] @returns {Record<string, unknown>} */
+function exactInputRecord(value, label, allowed, required = allowed) {
+  if (
+    value === null || typeof value !== "object" || Array.isArray(value)
+    || nodeTypes.isProxy(value)
+  ) throw new TypeError(`${label} is invalid`);
+  const prototype = Object.getPrototypeOf(value);
+  if (prototype !== Object.prototype && prototype !== null) {
+    throw new TypeError(`${label} is invalid`);
+  }
+  const keys = Reflect.ownKeys(value);
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  if (
+    keys.some((key) => typeof key !== "string" || !allowed.includes(key))
+    || required.some((key) => !keys.includes(key))
+    || keys.some((key) => {
+      if (typeof key !== "string") return true;
+      const descriptor = descriptors[key];
+      return descriptor === undefined || !("value" in descriptor);
+    })
+  ) throw new TypeError(`${label} is invalid`);
+  return Object.fromEntries(keys.map((key) => {
+    if (typeof key !== "string") throw new TypeError(`${label} is invalid`);
+    const descriptor = descriptors[key];
+    if (descriptor === undefined || !("value" in descriptor)) {
+      throw new TypeError(`${label} is invalid`);
+    }
+    return [key, descriptor.value];
+  }));
+}
+
+/** @param {unknown} value */
+function currentAssertionRow(value) {
+  const current = rowRecord(value, "decision endpoint assertion row");
+  return Object.freeze({
+    assertionOrdinal: exactInteger(current.assertionOrdinal),
+    assertionId: exactText(current.assertionId),
+    subjectKind: exactText(current.subjectKind),
+    subjectId: exactText(current.subjectId),
+    objectKind: exactText(current.objectKind),
+    objectId: exactText(current.objectId),
+    predicate: exactText(current.predicate),
+    epistemicClass: exactText(current.epistemicClass),
+    validFrom: nullableCanonicalInstant(current.validFrom, "decision endpoint validFrom"),
+    validTo: nullableCanonicalInstant(current.validTo, "decision endpoint validTo"),
+    recordedAt: canonicalInstant(current.recordedAt, "decision endpoint recordedAt"),
+    supersededAt: nullableCanonicalInstant(
+      current.supersededAt,
+      "decision endpoint supersededAt"
+    ),
+    derivationKind: exactText(current.derivationKind),
+    derivationVersion: exactText(current.derivationVersion),
+    derivationRunId: nullableText(current.derivationRunId)
+  });
+}
+
+/** @param {unknown} value */
+function currentSourceRefRow(value) {
+  const current = rowRecord(value, "decision endpoint source-ref row");
+  return Object.freeze({
+    assertionOrdinal: exactInteger(current.assertionOrdinal),
+    sourceRefOrdinal: exactInteger(current.sourceRefOrdinal),
+    sourceNamespace: exactText(current.sourceNamespace),
+    sourceIdValue: exactText(current.sourceIdValue),
+    sourceVersion: nullableText(current.sourceVersion)
+  });
+}
+
+/**
+ * Package-private measurement primitive for one decision-query frontier step.
+ * It never claims to be a complete Working Graph or a completeness-proven
+ * endpoint. V3 has no assertion-local source-ref count/digest, so returned
+ * candidates stay explicitly built-unverified. A hub above the explicit
+ * candidate bound abstains instead of returning a truncated candidate set.
+ * @param {CurrentIndexDatabase} database
+ * @param {Readonly<{
+ *   scope: { sourceId: string; threadId: string };
+ *   seed: { kind: string; id: string };
+ *   asOf: string;
+ *   maxCandidateAssertions?: number;
+ * }>} input
+ */
+export function readAttuneGraphCurrentDecisionEndpointForMeasurement(database, input) {
+  const options = exactInputRecord(
+    input,
+    "decision endpoint input",
+    ["scope", "seed", "asOf", "maxCandidateAssertions"],
+    ["scope", "seed", "asOf"]
+  );
+  const scope = exactInputRecord(
+    options.scope,
+    "decision endpoint scope",
+    ["sourceId", "threadId"]
+  );
+  const seed = exactInputRecord(options.seed, "decision endpoint seed", ["kind", "id"]);
+  const sourceId = exactText(scope.sourceId);
+  const threadId = exactText(scope.threadId);
+  const seedKind = exactText(seed.kind);
+  const seedId = exactText(seed.id);
+  const asOf = canonicalInstant(options.asOf, "decision endpoint asOf");
+  const maximum = options.maxCandidateAssertions === undefined
+    ? MAX_DECISION_ENDPOINT_CANDIDATES
+    : exactInteger(options.maxCandidateAssertions, 1);
+  if (maximum > MAX_DECISION_ENDPOINT_CANDIDATES) {
+    throw new TypeError("decision endpoint candidate bound is invalid");
+  }
+
+  const heads = database.prepare(`
+    SELECT m.index_id AS indexId, h.generation, h.commit_id AS commitId,
+           j.projection_fingerprint AS projectionFingerprint,
+           m.index_revision AS indexRevision, m.assertion_count AS assertionCount,
+           m.source_ref_count AS sourceRefCount, m.index_digest AS indexDigest
+    FROM attunegraph_projection_head AS h
+    LEFT JOIN attunegraph_projection_journal AS j
+      ON j.source_id = h.source_id AND j.thread_id = h.thread_id
+     AND j.generation = h.generation AND j.commit_id = h.commit_id
+    LEFT JOIN attunegraph_current_manifest AS m
+      ON m.source_id = h.source_id AND m.thread_id = h.thread_id
+     AND m.generation = h.generation AND m.commit_id = h.commit_id
+     AND m.projection_fingerprint = j.projection_fingerprint
+    WHERE h.source_id = ? AND h.thread_id = ? LIMIT 2
+  `).all(sourceId, threadId);
+  if (!Array.isArray(heads) || heads.length > 1) {
+    throw new Error("decision endpoint head identity is invalid");
+  }
+  if (heads.length === 0) {
+    const orphanManifest = database.prepare(`
+      SELECT 1 AS invalid FROM attunegraph_current_manifest
+      WHERE source_id = ? AND thread_id = ? LIMIT 1
+    `).get(sourceId, threadId);
+    if (orphanManifest !== undefined) {
+      throw new Error("decision endpoint manifest exists without an exact head");
+    }
+    return Object.freeze({
+      schema: "attunegraph-current-decision-endpoint-measurement@1",
+      measurementOnly: true,
+      scanStatus: "complete",
+      snapshot: null,
+      projectionFingerprint: null,
+      scannedAssertions: 0,
+      assertions: Object.freeze([])
+    });
+  }
+  const head = rowRecord(heads[0], "decision endpoint head row");
+  const indexId = exactInteger(head.indexId, 1);
+  const assertionCount = exactInteger(head.assertionCount);
+  const sourceRefCount = exactInteger(head.sourceRefCount);
+  if (
+    exactText(head.indexRevision) !== ATTUNEGRAPH_CURRENT_HEAD_INDEX_REVISION
+    || assertionCount > MAX_CURRENT_ROWS_PER_SCOPE
+    || sourceRefCount > MAX_CURRENT_ROWS_PER_SCOPE
+    || !/^sha256:[0-9a-f]{64}$/u.test(exactText(head.indexDigest))
+  ) throw new Error("decision endpoint manifest identity is invalid");
+  const snapshot = Object.freeze({
+    schemaVersion: 1,
+    scope: Object.freeze({ sourceId, threadId }),
+    generation: exactInteger(head.generation, 1),
+    commitId: exactText(head.commitId)
+  });
+  const projectionFingerprint = exactText(head.projectionFingerprint);
+  const predicatePlaceholders = ATTUNEGRAPH_CURRENT_DECISION_ENDPOINT_PREDICATES_FOR_MEASUREMENT
+    .map(() => "?").join(", ");
+  const candidateValues = [
+    BigInt(indexId), seedKind, seedId, seedKind, seedId,
+    ...ATTUNEGRAPH_CURRENT_DECISION_ENDPOINT_PREDICATES_FOR_MEASUREMENT,
+    asOf, asOf, asOf, asOf, BigInt(maximum + 1)
+  ];
+  const assertions = database.prepare(`
+    SELECT assertion_ordinal AS assertionOrdinal, assertion_id AS assertionId,
+           subject_kind AS subjectKind, subject_id AS subjectId,
+           object_kind AS objectKind, object_id AS objectId, predicate,
+           epistemic_class AS epistemicClass, valid_from AS validFrom,
+           valid_to AS validTo, recorded_at AS recordedAt,
+           superseded_at AS supersededAt, derivation_kind AS derivationKind,
+           derivation_version AS derivationVersion, derivation_run_id AS derivationRunId
+    FROM attunegraph_current_assertion
+    WHERE index_id = ?
+      AND ((subject_kind = ? AND subject_id = ?) OR (object_kind = ? AND object_id = ?))
+      AND predicate IN (${predicatePlaceholders})
+      AND recorded_at <= ?
+      AND (superseded_at IS NULL OR superseded_at > ?)
+      AND (valid_from IS NULL OR valid_from <= ?)
+      AND (valid_to IS NULL OR valid_to > ?)
+    ORDER BY assertion_ordinal LIMIT ?
+  `).all(...candidateValues).map(currentAssertionRow);
+  if (assertions.length > maximum) {
+    return Object.freeze({
+      schema: "attunegraph-current-decision-endpoint-measurement@1",
+      measurementOnly: true,
+      scanStatus: "abstained",
+      abstentionReason: "candidate-scan-budget",
+      snapshot,
+      projectionFingerprint,
+      scannedAssertions: assertions.length,
+      assertions: Object.freeze([])
+    });
+  }
+  const sourceRefs = assertions.length === 0 ? [] : database.prepare(`
+    SELECT assertion_ordinal AS assertionOrdinal, source_ref_ordinal AS sourceRefOrdinal,
+           source_namespace AS sourceNamespace, source_id_value AS sourceIdValue,
+           source_version AS sourceVersion
+    FROM attunegraph_current_source_ref
+    WHERE index_id = ? AND assertion_ordinal IN (${assertions.map(() => "?").join(", ")})
+    ORDER BY assertion_ordinal, source_ref_ordinal LIMIT ?
+  `).all(
+    BigInt(indexId),
+    ...assertions.map((assertion) => BigInt(assertion.assertionOrdinal)),
+    BigInt(maximum * ATTUNEGRAPH_CURRENT_DECISION_ENDPOINT_SOURCE_REFS_FOR_MEASUREMENT + 1)
+  )
+    .map(currentSourceRefRow);
+  if (
+    sourceRefs.length
+      > maximum * ATTUNEGRAPH_CURRENT_DECISION_ENDPOINT_SOURCE_REFS_FOR_MEASUREMENT
+  ) throw new Error("decision endpoint source-ref bound is invalid");
+  const refsByAssertion = new Map();
+  for (const sourceRef of sourceRefs) {
+    const current = refsByAssertion.get(sourceRef.assertionOrdinal);
+    if (current === undefined) {
+      if (sourceRef.sourceRefOrdinal !== 0) {
+        throw new Error("decision endpoint source-ref ordinals are invalid");
+      }
+      refsByAssertion.set(sourceRef.assertionOrdinal, [sourceRef]);
+    } else {
+      if (sourceRef.sourceRefOrdinal !== current.length) {
+        throw new Error("decision endpoint source-ref ordinals are invalid");
+      }
+      current.push(sourceRef);
+    }
+  }
+  const admitted = assertions.map((assertion) => {
+    const assertionSourceRefs = refsByAssertion.get(assertion.assertionOrdinal) ?? [];
+    const reconstructed = reconstructAttuneGraphCurrentAssertion(assertion, assertionSourceRefs);
+    if (
+      JSON.stringify(materializeAssertion(reconstructed, assertion.assertionOrdinal))
+        !== JSON.stringify(assertion)
+    ) throw new Error("decision endpoint assertion row is not canonical");
+    const reconstructedSourceRefs = reconstructed.sourceRefs.map((sourceRef, sourceRefOrdinal) => ({
+      assertionOrdinal: assertion.assertionOrdinal,
+      sourceRefOrdinal,
+      sourceNamespace: sourceRef.namespace,
+      sourceIdValue: sourceRef.id,
+      sourceVersion: sourceRef.version ?? null
+    }));
+    if (JSON.stringify(reconstructedSourceRefs) !== JSON.stringify(assertionSourceRefs)) {
+      throw new Error("decision endpoint source-ref rows are not canonical");
+    }
+    return reconstructed;
+  }).sort((left, right) =>
+    (left.predicate < right.predicate ? -1 : left.predicate > right.predicate ? 1 : 0)
+    || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)
+  );
+  return Object.freeze({
+    schema: "attunegraph-current-decision-endpoint-measurement@1",
+    measurementOnly: true,
+    scanStatus: "built-unverified",
+    verificationLimitations: Object.freeze([
+      "selected-bucket-and-source-ref-tail-completeness-not-proven-by-v3"
+    ]),
+    snapshot,
+    projectionFingerprint,
+    scannedAssertions: assertions.length,
+    assertions: Object.freeze(admitted)
+  });
 }
 
 /**

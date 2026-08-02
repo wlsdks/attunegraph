@@ -1110,3 +1110,40 @@ carries a SHA-256 over the UTF-8 `JSON.stringify` body without the identity fiel
 an unchanged report with those admissions is revision-bound materialization
 evidence; its source-state and report-body hashes belong with that run rather
 than being hard-coded as candidate constants.
+
+## Normalized decision endpoint degree sweep
+
+`pnpm benchmark:normalized-decision-endpoint` is a measurement-only comparison
+of one exact current-head query atom. It creates valid production projections
+with 32 assertions, then sweeps endpoint degrees 1, 2, 4, 8, 12, 16, 24, and
+32. Every cell requires byte-identical ordered assertions between:
+
+- full compressed-projection decode, JSON parse, and canonical projection
+  admission;
+- package-private normalized assertion/source-ref reconstruction, explicitly
+  marked `built-unverified` because v3 cannot prove selected-bucket or trailing
+  source-ref completeness; and
+- an experimental sparse-first path that falls back to canonical decode above
+  eight admitted candidates.
+
+The three operations run in a rotating round-robin order for 20 warmups and
+200 measured samples by default. The report records p50/p95/p99, exact dirty or
+clean source provenance, Node and SQLite versions, semantic identity, the path
+selected by the adaptive cell, and a SHA-256 over the report body. The paired
+test uses three samples only to guard the harness and semantics; it is not tail
+evidence.
+
+This benchmark deliberately does not include Worker/Engine transport, cold
+open, the complete Working Graph BFS, public Store Adapter behavior, or an
+agent SLA. The adaptive cell also pays a dense fallback probe that has not yet
+been fused with full decode. Results therefore select the next prototype; they
+do not establish a shipped fast path or a graph-database comparison.
+
+The current legal 16-KiB projection envelope keeps the deterministic workload
+at no more than 32 assertions per scope. SQLite may rationally scan that small
+scope through the primary key instead of the subject/object indexes. A
+100K-total-assertion development corpus (3,125 such scopes) and a forced-index
+prototype found the forced plan slower, so the repository does not pin a query
+plan merely because it mentions an adjacency index. Plan, latency, operation
+count, and semantic identity must be evaluated together if the legal per-scope
+shape changes.
