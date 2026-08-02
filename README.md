@@ -12,6 +12,7 @@ as a typed object or bounded AttuneQL and returns an explicit `complete`,
 
 <p align="center">
   <a href="#quick-start-from-source">Quick start</a> ·
+  <a href="#agent-bootstrap-contract">Agent bootstrap</a> ·
   <a href="#what-ships-today">Shipped contracts</a> ·
   <a href="#current-measured-baseline">Measured baseline</a> ·
   <a href="BENCHMARKS.md">Benchmarks</a>
@@ -20,6 +21,73 @@ as a typed object or bounded AttuneQL and returns an explicit `complete`,
 <p align="center">
   <img src="docs/assets/attunegraph-overview.svg" width="100%" alt="Host-owned sources flow through AttuneGraph's exact-head temporal and provenance graph into a bounded decision query with an explicit complete, partial, or abstained result." />
 </p>
+
+## Quick start from source
+
+Requires Node.js 22.12 or newer. Node.js 24.15 or newer is required for the
+local SQLite and Admin profiles.
+
+```sh
+git clone https://github.com/wlsdks/attunegraph.git
+cd attunegraph
+corepack enable
+pnpm install --frozen-lockfile
+pnpm example
+```
+
+The example projects one source-linked observation, runs the bounded query
+below, and prints its explicit status, Working Graph, and receipt ID:
+
+```text
+EVIDENCE FOR thread("thread:incident-42")
+IN SCOPE("support-desk", "incident-42")
+AS OF "2026-07-31T09:00:00.000Z"
+AT CURRENT HEAD
+REQUIRE FRESH
+BUDGET 500 TOKENS;
+```
+
+AttuneQL is parsed into the same canonical typed query object; text is never
+executed directly. The standalone
+[`examples/basic-agent.mjs`](examples/basic-agent.mjs) contains the complete
+projection and query flow; the [typed API](#typed-api) explains transported
+result admission.
+
+### Agent bootstrap contract
+
+An AI coding agent can use this README as the setup contract. It should not
+wait for a human to choose ordinary implementation details:
+
+| If the target needs | Agent action |
+| --- | --- |
+| Evaluation or tests | Use the public in-memory testing Store |
+| Durable single-host operation | Use `@attunegraph/core/local` with a private absolute SQLite path on Node.js >=24.15 |
+| Markdown, PDF, Notion, tool results, or other host data | Keep raw bytes in the host and connect `@attunegraph/core/source-adapter` |
+| A non-SQLite Store | Implement `@attunegraph/core/backend` only when the host already has a measured reason |
+
+The package is **not on a registry yet**. Clone or pin this source checkout;
+do not install a similarly named package. Record `git rev-parse HEAD`, use only
+the [public interfaces](#public-interfaces), and validate the checkout before
+editing a host:
+
+```sh
+pnpm typecheck
+pnpm test:focused
+pnpm example
+pnpm example:source-adapter
+pnpm pack:dry-run
+```
+
+Then derive an explicit `scope`, exact `threadRoot`, source ownership, and—when
+actions are possible—authority policy from the host. New complete observations
+must use `canonical-projection@2`; queries must bind scope, time, head,
+freshness, and budget. Treat `partial`, `abstained`, stale, corrupt, or
+unsupported states as non-complete, and never treat a receipt as permission.
+Only ask a human when those semantic authorities cannot be determined safely.
+
+For distribution acceptance, `pnpm verify:clean-room-consumer` packs the
+artifact, installs it into a private temporary consumer, imports every public
+export, and rejects private source subpaths.
 
 AttuneGraph is not a smaller Neo4j. It decides which relationships an agent may use as evidence **now**, under time, provenance, freshness, and context budgets.
 
@@ -77,121 +145,45 @@ or weaken explanation, invalidation, or replay. Raw records stay at the source.
 
 ## What ships today
 
-| Area | Available now | Not claimed |
+| Contract | Available now | Explicit boundary |
 | --- | --- | --- |
-| Decision evidence | Fixed-profile `decision-query@1`, bounded AttuneQL, exact-head token-bounded Working Graph, evidence-only receipt | A proof-closed `DecisionContext` / `ContextReceipt` with completed authority and conflict evaluation |
-| Action authority | Typed `authority-query@1` with V2 exact-root proof, bitemporal filtering, fixed four-edge authority closure, `GOVERNED_BY` conflict abstention, and a result-bounded receipt | General policy evaluation, action execution, historical-head reads, or AttuneQL authority syntax |
-| Time and source | Validity, recording, supersession, freshness, exact source refs | Independent verification that an external source is true or current |
-| Storage | In-memory oracle and worker-isolated local SQLite | Distributed, multi-tenant, or hosted database |
-| Failure semantics | `complete`, `partial`, `abstained` | Universal relevance or answer correctness |
-| Revocation | Exact-head impact plan and guarded source-authoritative transition | Persisted receipt pins, retention, pruning, or compaction |
-| Portability | Canonical `.atgx` NDJSON and checked-in fixtures | Compatibility aliases for superseded identities |
-| Operations | Offline, read-only Admin inspection | Online repair or write administration |
-| Scale | Revision-bound measurement harnesses | Qualified 10M/50M production performance or an SLA |
-| Distribution | Source-checkout use and dry-run package verification | npm registry publication |
+| Decision evidence | `decision-query@1`, bounded AttuneQL, exact-head token-bounded Working Graph, receipt, and explicit `complete` / `partial` / `abstained` | No proof-closed `DecisionContext` with completed authority and conflict evaluation |
+| Action authority | Typed `authority-query@1`, bitemporal exact-root witnesses, conflict abstention, and a result-bounded receipt | No general policy engine, historical-head read, AttuneQL authority grammar, or action execution |
+| Time and provenance | Valid and recorded time, supersession, freshness, and exact source refs | Does not independently prove an external source true or current |
+| Embedded storage and portability | In-memory oracle, worker-isolated local SQLite, canonical `.atgx`, and fixtures | No distributed, multi-tenant, hosted database, or compatibility aliases for superseded identities |
+| Revocation and operations | Exact-head impact plan, guarded source-authoritative transition, and offline read-only Admin | No persisted receipt pins, pruning, compaction, online repair, or write administration |
+| Scale and distribution | Revision-bound measurement harnesses, source-checkout use, and dry-run package verification | No 10M/50M qualification, production SLA, or npm registry publication |
 
 See the [first-principles contract](docs/architecture/first-principles.md) for
 the problem definition, graph inclusion rules, and explicit shipped versus
 directional boundary.
 
-## Quick start from source
+## Typed API
 
-Requires Node.js 22.12 or newer. Node.js 24.15 or newer is required for the
-local SQLite and Admin profiles and their checked release gate.
-
-```sh
-git clone https://github.com/wlsdks/attunegraph.git
-cd attunegraph
-corepack enable
-pnpm install --frozen-lockfile
-pnpm example
-```
-
-The example projects one source-linked observation and compiles bounded
-decision evidence. The equivalent public API is:
+AttuneQL and typed Decision Query share one canonical execution path:
 
 ```ts
-import {
-  admitDecisionQueryResult,
-  openAttuneGraph,
-  parseAttuneQL
-} from "@attunegraph/core";
-import { createInMemoryAttuneGraphStore } from "@attunegraph/core/testing";
-
-const scope = { sourceId: "notes", threadId: "trip-planning" };
-const threadRoot = { kind: "thread" as const, id: "thread:trip-planning" };
-const now = "2026-08-01T09:00:00.000Z";
-
-const graph = await openAttuneGraph({
+const result = await graph.query({
+  operator: "decision-query@1",
   scope,
-  store: createInMemoryAttuneGraphStore()
+  seed: threadRoot,
+  asOf: now,
+  head: { mode: "current" },
+  freshness: { require: "fresh" },
+  budget: { maxEstimatedTokens: 2000 }
 });
-
-await graph.project({
-  operator: "canonical-projection@2",
-  observation: {
-    schemaVersion: 2,
-    observationKey: "notes-sync-42",
-    scope,
-    threadRoot,
-    observedAt: now,
-    sourceFreshness: { state: "fresh", observedAt: now },
-    assertions: [{
-      schemaVersion: 1,
-      id: "trip-linked-to-hotel-comparison",
-      subject: { kind: "artifact", id: "hotel-comparison" },
-      predicate: "LINKED_TO",
-      object: { ...threadRoot },
-      epistemicClass: "source-observed",
-      sourceRefs: [{ namespace: "example.notes", id: "travel.md#hotels" }],
-      recordedAt: now,
-      derivation: { kind: "projection", version: "example@1" }
-    }]
-  }
-});
-
-const query = parseAttuneQL(`
-  EVIDENCE FOR thread("thread:trip-planning")
-  IN SCOPE("notes", "trip-planning")
-  AS OF "2026-08-01T09:00:00.000Z"
-  AT CURRENT HEAD
-  REQUIRE FRESH
-  BUDGET 2000 TOKENS;
-`);
-
-const result = await graph.query(query);
-const admitted = admitDecisionQueryResult(
-  JSON.parse(JSON.stringify(result))
-);
-
-console.log(admitted.status, admitted.workingGraph, admitted.receipt.receiptId);
-await graph.close();
 ```
 
-`canonical-projection@2` admits only the declared thread-root component before
-Store I/O. AttuneQL is parsed into the same canonical query object used by the
-typed API; the parser never executes text directly. See
-[`examples/basic-agent.mjs`](examples/basic-agent.mjs).
+Transported full results can be re-admitted with
+`admitDecisionQueryResult(JSON.parse(JSON.stringify(result)))`. Admission
+recomputes the bounded Working Graph and receipt from the supplied bytes; it
+does not re-read the Store or prove external truth, permission, or authority.
+See the [first-principles contract](docs/architecture/first-principles.md) for
+the full closure and limit rules.
 
-`admitDecisionQueryResult(JSON.parse(JSON.stringify(result)))` is the root
-interface for admitting a transported full `decision-query@1` result. It
-returns a detached, deeply frozen result only after closing the safe-JSON
-shape, normalizing every full assertion, recomputing the Working Graph token
-estimate from the full assertion JSON bytes, rechecking bitemporal eligibility,
-deriving refs and witnesses, reconciling terminal status, and resealing the
-exact receipt. Receipt revision 2 includes a separately domain-separated
-`selectedWorkingGraphId` over the normalized assertions in producer order and
-the seed. Receipt ID and canonical JSON must therefore match the normalized
-full result exactly, including same-length assertion-content changes.
-
-This proves closure of the supplied result bytes under the declared query,
-snapshot, time, freshness, and budget. It does not re-read the Store, so it
-does not prove that the exact head is still current after production. It also
-does not prove external source truth, permission or action authority, or a
-whole-agent token bound. The current canonical projection envelope limits one
-stored projection string to 16 KiB. Consequently, the admission contract's
-nominal 64-assertion/65-ref structural ceiling is not currently reachable by a
-live projection; it is a defensive structural limit, not a scale feature.
+Callers choose the anchor, scope, time, head posture, freshness, and budgets.
+They cannot choose relationship families, omit counterevidence, add writes, or
+turn graph proximity into permission.
 
 For an action-permission decision, use the typed authority operator. It has no
 text grammar and never executes an action:
@@ -293,62 +285,19 @@ source refs match exactly; versionless refs match every version with the same
 namespace and ID. Dependency cycles terminate, equal shortest witnesses settle
 lexicographically, and either work cap produces `partial`.
 
-An impact receipt is not authority to delete. Its only guarded write path asks
-the source owner for a newer complete `canonical-projection@2` observation and
-proves exact survivor subtraction against the current V2 head:
+An impact receipt is not deletion authority. The guarded transition accepts
+only a newer, fresh `canonical-projection@2` replacement from the source owner,
+preserves the predecessor's exact V2 thread root, and proves that the
+replacement contains exactly the surviving assertions—no additions, edits, or
+extra deletions. A stale plan fails closed. One exact-head CAS may commit; an
+identical concurrent winner may return `converged`, while a later retry fails
+instead of claiming predecessor proof without a persisted receipt pin.
 
-```text
-current V2 head --plan--> complete impact receipt
-       |                         |
-       +--authoritative fresh V2 replacement, same thread root
-                                 |
-  replacement assertions = current assertions - planned impact assertions
-                                 |
-                    one exact-head CAS --> transition receipt
-```
-
-```ts
-const transition = await graph.applyRevocationTransition({
-  operator: "revocation-transition@1",
-  receiptCanonicalJson: plan.receipt.canonicalJson,
-  replacement: {
-    operator: "canonical-projection@2",
-    observation: sourceOwnerFreshReplacement
-  }
-});
-```
-
-The replacement must be fresh at its observation time, strictly newer than the
-predecessor, preserve its exact V2 thread root, and contain neither additions,
-edits, nor extra deletions. A stale plan fails closed. One CAS may commit; a
-concurrent identical winner can return `converged`. A later retry fails rather
-than claiming predecessor proof without a persisted receipt pin.
-
-This is not graph-owned delete: source systems remain authoritative, and the
-transition receipt binds the source observation that they supplied. Persisted
-receipt pins, historical receipt lookup, retention, pruning, and SQLite
-compaction remain explicitly unshipped. The legacy process-local
-`InMemoryAttuneGraphDataStore.forget()` remains a physical-delete utility, not
-this durable protocol.
-
-AttuneQL deliberately exposes one bounded evidence grammar rather than general
-graph traversal:
-
-```text
-EVIDENCE FOR <kind>(<id>)
-IN SCOPE(<source-id>, <thread-id>)
-AS OF <canonical-ISO-instant>
-AT CURRENT HEAD | AT HEAD <generation> <commit-id>
-REQUIRE FRESH
-BUDGET <tokens> TOKENS;
-```
-
-Callers choose the anchor, scope, time, head posture, and token budget. They
-cannot choose relationship families, omit counterevidence, add writes, or turn
-graph proximity into permission. The receipt is evidence-only: it is not action
-authority, a retention pin, or proof that conflict and authority evaluation
-finished. Arbitrary Cypher-style traversal and mutation remain deliberately
-unshipped.
+The source system remains authoritative and the transition receipt binds its
+replacement observation. Persisted receipt pins, historical lookup, retention,
+pruning, and SQLite compaction remain unshipped. The process-local
+`InMemoryAttuneGraphDataStore.forget()` is a physical-delete utility, not this
+durable protocol.
 
 ## Admin and portable artifacts
 
@@ -395,17 +344,8 @@ persisted-contract revisions, not product maturity labels. They change only
 when existing bytes would otherwise be interpreted with different semantics.
 The package version in `package.json` is the product version.
 
-### Decision Query receipt revision 2 migration
-
-New `decision-query@1` results carry `receipt.contractRevision === 2` and a
-`selectedWorkingGraphId`. The receipt ID is sealed under
-`attunegraph.decision-query-receipt.v2`; the selected graph ID is sealed under
-the independent `attunegraph.selected-working-graph.v1` domain over normalized
-ordered assertions plus seed. Revision-1 Decision Query receipts are rejected
-by full-result admission. There is no receipt-only converter or compatibility
-alias: re-run the query against the intended head and transport the complete
-new result. This is a receipt wire migration; it does not rename the
-`decision-query@1` operator or make an old exact head available after retention.
+Receipt wire changes never silently reinterpret old bytes. Migration actions
+and compatibility breaks are recorded in the [changelog](CHANGELOG.md).
 
 ## Benchmarks and verification
 
@@ -442,15 +382,5 @@ budget, and partiality semantics.
 | [Contributing](CONTRIBUTING.md) | How should changes be proposed and verified? |
 | [Security](SECURITY.md) | How should vulnerabilities be reported? |
 
-## Development
-
-```sh
-pnpm install --frozen-lockfile
-pnpm typecheck
-pnpm test:focused
-pnpm build
-pnpm example
-```
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the full workflow. AttuneGraph is
-licensed under [Apache-2.0](LICENSE).
+Development workflow: [CONTRIBUTING.md](CONTRIBUTING.md) · License:
+[Apache-2.0](LICENSE)
