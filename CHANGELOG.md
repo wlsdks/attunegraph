@@ -4,6 +4,19 @@ All notable changes to AttuneGraph are recorded here.
 
 ## [Unreleased]
 
+### Changed
+
+- Bump Decision Query receipts to wire `contractRevision: 2` and the
+  `attunegraph.decision-query-receipt.v2` hash domain. Each receipt now carries
+  a separately domain-separated `selectedWorkingGraphId` that content-binds
+  normalized selected assertion bytes in producer order plus the seed, so
+  full-result admission rejects same-length content drift. Admission also
+  closes producer diagnostics exactly: no token cut means considered equals
+  selected, a token cut requires at least one rejected considered assertion,
+  and refs beyond the visited cap require traversal truncation. Revision-1
+  receipts are not converted; consumers must re-run the query and transport
+  the complete revision-2 result.
+
 ### Added
 
 - Add `decision-query@1`, the first agent-native evidence compiler over the

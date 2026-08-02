@@ -158,10 +158,12 @@ fail-closed qualifier contract.
 
 ## Agent decision-read workload
 
-`agent-decision-read@1` measures the public `working-graph@1` execute path on
-the `in-memory-semantic-reference` profile. It is not a SQLite, custom-backend,
-or hosted-service benchmark and it does not join the performance qualification
-matrix. Every report is `measurementOnly: true` and `claimEligible: false`.
+`agent-decision-read@1` retains the public `working-graph@1` execute lane and
+adds a distinct public `decision-query@1` production, JSON transport, and
+full-result admission lane on the `in-memory-semantic-reference` profile. It
+is not a SQLite, custom-backend, hosted-service, or whole-agent benchmark and
+it does not join the performance qualification matrix. Every report is
+`measurementOnly: true` and `claimEligible: false`.
 
 Run the fixed workload with evidence outside the repository:
 
@@ -179,16 +181,25 @@ measured repetition, projects each case through generation 8 with
 `batchExecuteMilliseconds` is the sum of those per-seed durations.
 `batchWallMilliseconds` covers the whole seed loop, including correctness
 checks, hashing, serialization, and sample allocation. Preparation latency is
-reported separately. Six cases cover this exact matrix:
+reported separately. The additive lane then queries the exact generation-8
+head for the same seed, `asOf`, freshness requirement, and token budget. Its
+timers separately wrap producer `graph.query`, JSON stringify-plus-parse,
+`admitDecisionQueryResult`, and an independently executed
+query-plus-transport-plus-admission path. The second producer run must be
+byte-identical to the first. Admission must deep-exactly match the producer and
+preserve `receiptId`, `canonicalJson`, and receipt revision 2's
+`selectedWorkingGraphId` over normalized ordered assertions plus seed.
 
-| Case | Scenario | Independent executes | Expected outcome |
-| --- | --- | ---: | --- |
-| `wide-hot-complete-1` | 32 active hot edges | 1 | complete, fresh |
-| `wide-hot-token-partial-4` | 32 active hot edges | 4 | token-budget partial, fresh |
-| `wide-hot-complete-32` | 32 active hot edges | 32 | complete, fresh |
-| `deep-cold-complete-1` | bounded cold chain | 1 | complete, fresh |
-| `deep-cold-traversal-partial-4` | four over-depth cold chains | 4 | traversal-budget partial, stale |
-| `deep-cold-valid-time-abstain-32` | expired, future, post-cutoff, and superseded edges | 32 | abstained, stale |
+Six cases cover this exact matrix:
+
+| Case | Scenario | Seeds | Execute outcome | Decision-query outcome |
+| --- | --- | ---: | --- | --- |
+| `wide-hot-complete-1` | 32 active hot edges | 1 | complete, fresh | complete |
+| `wide-hot-token-partial-4` | 32 active hot edges | 4 | token-budget partial, fresh | token-budget partial |
+| `wide-hot-complete-32` | 32 active hot edges | 32 | complete, fresh | complete |
+| `deep-cold-complete-1` | bounded cold chain | 1 | complete, fresh | complete |
+| `deep-cold-traversal-partial-4` | four over-depth cold chains | 4 | traversal-budget partial, stale | abstained, `source-not-fresh` |
+| `deep-cold-valid-time-abstain-32` | expired, future, post-cutoff, and superseded edges | 32 | abstained, stale | abstained, `source-not-fresh` |
 
 The 1/4/32 values are batches of independent single-seed Engine `execute`
 calls. They are not one multi-seed query and do not claim the separate data-
@@ -199,19 +210,29 @@ assertion inputs; 154 must not be read as the total preparation work. The
 report retains per-seed Engine latency, summed execute duration, whole-loop
 wall time, considered/visited/emitted assertions, estimated tokens, maximum
 depth, output bytes, status, freshness, truncation reasons, deterministic
-semantic hashes, and exact generation/latest-commit invariants. Repository
+semantic hashes, and exact generation/latest-commit invariants. The separate
+decision-query fields retain producer, transport, admission, and end-to-end
+latency; terminal status and abstention reason; receipt and transported-output
+bytes; assertion and source witness counts; admission exactness; and a second
+fixed semantic anchor. Repository
 commit/tree/clean state, lockfile hash, host, Node, pnpm, arguments, and
 workload hash bind the measurement configuration. Non-empty CLI arguments are
 parsed again by the strict validator and must agree with the workload, warmup,
 and repetition fields. An empty argument list denotes a programmatic run whose
 validated options remain authoritative.
 
-The `agent-decision-read@1` schema pins every case's semantic hash, latest-head
-commit ID, and non-timing counter/output-byte samples. A deliberate Engine
-semantic change therefore requires a new workload version rather than silently
-rewriting the meaning of `@1`. `validateAgentDecisionReadReportSchema` checks
-that fixed semantic contract and report self-consistency. It does not claim
-that self-reported provenance is externally authoritative.
+The revision-2 receipt wire intentionally changes every decision-query receipt
+and transported-output byte anchor. The `@2` report constants bind those new
+values; the original Working Graph execute anchors remain unchanged.
+
+The `attunegraph-agent-decision-read-benchmark@2` report schema pins both
+lanes' per-case semantic hashes, latest-head commit IDs, and non-timing
+counter/output-byte samples while preserving the original execute fields and
+anchors. A deliberate Engine semantic change therefore requires a new
+workload version rather than silently rewriting the meaning of
+`agent-decision-read@1`. `validateAgentDecisionReadReportSchema` checks that
+fixed semantic contract and report self-consistency. It does not claim that
+self-reported provenance is externally authoritative.
 `verifyAgentDecisionReadReportAuthority` additionally requires caller-supplied
 expected repository, host, and CLI configuration values. The CLI captures
 the initial repository identity and host, uses them to construct the report,
@@ -243,6 +264,13 @@ and overwrite configurations fail before evidence is written. On POSIX, a new
 report is created with mode `0600`. Windows still uses exclusive creation and
 refuses overwrite, but Node mode bits do not establish Windows ACLs; the host's
 ACL policy governs access there.
+
+The report binds its measurement exclusions as part of the exact schema. It
+does not measure model inference or a host agent's total token use, and it does
+not establish live head currency after the producer returns, external source
+truth, permission or action authority, or competitor superiority. The
+decision-query receipt remains evidence-only; admission proves closure of the
+transported result, not any of those external properties.
 
 ## Offline performance regression verifier
 

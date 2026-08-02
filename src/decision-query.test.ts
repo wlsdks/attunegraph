@@ -133,9 +133,13 @@ it("executes object and AttuneQL forms as one deterministic evidence-only contra
   ]);
   expect(objectResult.receipt.receiptId).toMatch(/^attunegraph-decision-query:/u);
   expect(JSON.parse(objectResult.receipt.canonicalJson)).toMatchObject({
+    contractRevision: 2,
     receiptId: objectResult.receipt.receiptId,
+    selectedWorkingGraphId: objectResult.receipt.selectedWorkingGraphId,
     use: "evidence-only"
   });
+  expect(objectResult.receipt.selectedWorkingGraphId)
+    .toMatch(/^attunegraph-selected-working-graph:sha256:[a-f0-9]{64}$/u);
   expect(Object.isFrozen(objectResult.receipt)).toBe(true);
   await graph.close();
 });

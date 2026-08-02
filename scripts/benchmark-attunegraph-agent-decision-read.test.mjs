@@ -136,6 +136,17 @@ describe("AttuneGraph agent decision-read benchmark", () => {
     const second = await runAgentDecisionReadWorkload(workload);
     const semantic = (run) => run.cases.map((entry) => ({
       anchorSha256: entry.anchorSha256,
+      decisionQueryAnchorSha256: entry.decisionQueryAnchorSha256,
+      decisionQuerySamples: entry.decisionQuerySamples.map((sample) => ({
+        abstentionReasons: sample.abstentionReasons,
+        admissionExact: sample.admissionExact,
+        anchorSha256: sample.anchorSha256,
+        assertionWitnesses: sample.assertionWitnesses,
+        outputBytes: sample.outputBytes,
+        receiptBytes: sample.receiptBytes,
+        sourceWitnesses: sample.sourceWitnesses,
+        status: sample.status
+      })),
       generation: entry.generation,
       name: entry.name,
       samples: entry.samples.map((sample) => ({
@@ -168,6 +179,24 @@ describe("AttuneGraph agent decision-read benchmark", () => {
       && sample.visitedRefs === 1
       && sample.truncationReasons.length === 0
     )).toBe(true);
+    expect(first.cases.map((entry) => ({
+      abstentionReasons: [...new Set(entry.decisionQuerySamples.flatMap(
+        (sample) => sample.abstentionReasons
+      ))],
+      admissionsExact: entry.decisionQuerySamples.every((sample) => sample.admissionExact),
+      name: entry.name,
+      statuses: [...new Set(entry.decisionQuerySamples.map((sample) => sample.status))],
+      witnesses: [...new Set(entry.decisionQuerySamples.map(
+        (sample) => sample.assertionWitnesses
+      ))]
+    }))).toEqual([
+      { abstentionReasons: [], admissionsExact: true, name: "wide-hot-complete-1", statuses: ["complete"], witnesses: [32] },
+      { abstentionReasons: [], admissionsExact: true, name: "wide-hot-token-partial-4", statuses: ["partial"], witnesses: [2] },
+      { abstentionReasons: [], admissionsExact: true, name: "wide-hot-complete-32", statuses: ["complete"], witnesses: [32] },
+      { abstentionReasons: [], admissionsExact: true, name: "deep-cold-complete-1", statuses: ["complete"], witnesses: [2] },
+      { abstentionReasons: ["source-not-fresh"], admissionsExact: true, name: "deep-cold-traversal-partial-4", statuses: ["abstained"], witnesses: [0] },
+      { abstentionReasons: ["source-not-fresh"], admissionsExact: true, name: "deep-cold-valid-time-abstain-32", statuses: ["abstained"], witnesses: [0] }
+    ]);
   });
 
   it("emits a strict measurement-only report with honest tail eligibility", async () => {
@@ -183,7 +212,19 @@ describe("AttuneGraph agent decision-read benchmark", () => {
     expect(report).toMatchObject({
       claimEligible: false,
       configuration: {
-        decisionSemantics: "independent-single-seed-execute-batch",
+        decisionSemantics: "independent-single-seed-execute-and-decision-query@1",
+        measurementBoundary: {
+          admission: "admitDecisionQueryResult(JSON.parse(JSON.stringify(producerResult)))",
+          decisionQueryEndToEnd: "graph.query plus JSON encode/parse plus admission",
+          excluded: [
+            "agent-model-token-use",
+            "source-truth-or-permission-or-action-authority",
+            "competitor-comparison"
+          ],
+          producer: "graph.query(decision-query@1)",
+          transport: "JSON.stringify plus JSON.parse",
+          workingGraphExecute: "graph.execute(working-graph@1)"
+        },
         profile: "in-memory-semantic-reference",
         repetitions: 1,
         tailEligibility: {
@@ -200,7 +241,7 @@ describe("AttuneGraph agent decision-read benchmark", () => {
         commit: expect.stringMatching(/^[a-f0-9]{40}$/u),
         tree: expect.stringMatching(/^[a-f0-9]{40}$/u)
       },
-      schema: "attunegraph-agent-decision-read-benchmark@1",
+      schema: "attunegraph-agent-decision-read-benchmark@2",
       workload: {
         generation: 8,
         projectedAssertionInputs: 1_232,
@@ -212,6 +253,8 @@ describe("AttuneGraph agent decision-read benchmark", () => {
       "claimEligible",
       "configuration",
       "correctness",
+      "decisionQueryCorrectness",
+      "decisionQueryMetrics",
       "host",
       "measurementOnly",
       "metrics",
@@ -221,6 +264,16 @@ describe("AttuneGraph agent decision-read benchmark", () => {
       "workload"
     ]);
     expect(report.correctness.allAnchorsMatched).toBe(true);
+    expect(report.decisionQueryCorrectness).toMatchObject({
+      allAdmissionsExact: true,
+      allAnchorsMatched: true
+    });
+    expect(report.decisionQueryCorrectness.cases[4]).toMatchObject({
+      abstentionReasons: ["source-not-fresh"],
+      allAdmissionsExact: true,
+      expectedStatus: "abstained",
+      observedStatuses: ["abstained"]
+    });
     expect(report.correctness.cases[1]).toMatchObject({
       observedSourceFreshness: ["fresh"],
       observedStatuses: ["partial"],
@@ -275,6 +328,17 @@ describe("AttuneGraph agent decision-read benchmark", () => {
       Array.from({ length: 4 }, () => 2)
     );
     expect(report.metrics.cases[4].estimatedTokens.sampleCount).toBe(4);
+    expect(report.decisionQueryMetrics.cases).toHaveLength(6);
+    expect(report.decisionQueryMetrics.cases[2]).toMatchObject({
+      admissionMilliseconds: { sampleCount: 32, p95: null, p99: null },
+      endToEndMilliseconds: { sampleCount: 32, p95: null, p99: null },
+      name: "wide-hot-complete-32",
+      producerMilliseconds: { sampleCount: 32, p95: null, p99: null },
+      transportMilliseconds: { sampleCount: 32, p95: null, p99: null }
+    });
+    expect(report.decisionQueryMetrics.cases[4].assertionWitnesses.samples).toEqual(
+      Array.from({ length: 4 }, () => 0)
+    );
     expect(validateAgentDecisionReadReportSchema(report)).toBe(report);
 
     const extraConfiguration = structuredClone(report);
@@ -331,6 +395,20 @@ describe("AttuneGraph agent decision-read benchmark", () => {
       `attunegraph-commit:attunegraph-observation:${"0".repeat(64)}`;
     expect(() => validateAgentDecisionReadReportSchema(arbitraryHead))
       .toThrow(/correctness.cases\[0\]/u);
+
+    const inexactAdmission = structuredClone(report);
+    inexactAdmission.decisionQueryCorrectness.cases[0].allAdmissionsExact = false;
+    expect(() => validateAgentDecisionReadReportSchema(inexactAdmission))
+      .toThrow(/decisionQueryCorrectness/u);
+
+    const gamedReceiptBytes = structuredClone(report);
+    const receiptBytes = gamedReceiptBytes.decisionQueryMetrics.cases[0].receiptBytes;
+    receiptBytes.samples[0] += 1;
+    receiptBytes.min = receiptBytes.samples[0];
+    receiptBytes.max = receiptBytes.samples[0];
+    receiptBytes.p50 = receiptBytes.samples[0];
+    expect(() => validateAgentDecisionReadReportSchema(gamedReceiptBytes))
+      .toThrow(/receiptBytes/u);
 
     const contradictoryArgv = structuredClone(report);
     contradictoryArgv.configuration.argv = [

@@ -150,6 +150,19 @@ AttuneQL grammar. Its content-addressed receipt explicitly labels authority and
 conflict evaluation as `not-performed`. It is therefore evidence for a host
 decision, not a claim that the full Decision Context contract is complete.
 
+The root `admitDecisionQueryResult` boundary is narrower again: it admits one
+transported full result without consulting the Store. Safe detached JSON is
+normalized into production assertions; exact full-assertion JSON bytes
+recompute the token estimate; bitemporal eligibility, refs, witnesses,
+terminal status, and receipt closure are derived again; and the returned graph
+is deeply frozen. Receipt wire revision 2 adds a domain-separated
+`selectedWorkingGraphId` over normalized assertions in producer order plus the
+seed, so equal-length content substitution is not hidden behind unchanged
+assertion IDs or counters. This proves internal closure of those supplied
+bytes. It does not prove that the producer head is still current, that an
+external source is true, that an action is authorized, or that a host agent
+stayed within an end-to-end token budget.
+
 The typed `authority-query@1` operator is a second narrow step. It answers only
 whether one exact action is currently authorized for one exact V2 thread root.
 It requires the fixed outgoing chains `action GOVERNED_BY policy`,
@@ -234,6 +247,19 @@ Shipped in the current core:
   deterministic dependency witnesses, partiality, and content-addressed
   receipts; and `revocation-transition@1`, a one-CAS source-authoritative V2
   replacement that proves exact survivor subtraction, never graph-owned delete.
+
+Built and focused-verified on the current development branch, but pending FULL
+gates, independent evaluation, landing, and release integration:
+
+- root-public `admitDecisionQueryResult` for safe detached full-result
+  admission, exact token/bitemporal/ref/status/witness closure, and receipt
+  revision-2 content resealing after JSON transport.
+
+The admission parser accepts at most 64 assertions and 65 returned refs as a
+defensive structural bound. The current canonical projection envelope limits
+one stored projection string to 16 KiB, and the required assertion shape makes
+that nominal maximum unreachable through live projection today. This is a
+limit to audit and preserve, not evidence of 64-assertion live capacity.
 
 Directional, not yet shipped as a complete public contract:
 

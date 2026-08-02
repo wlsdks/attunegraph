@@ -85,7 +85,11 @@ The example projects one source-linked observation and compiles bounded
 decision evidence. The equivalent public API is:
 
 ```ts
-import { openAttuneGraph, parseAttuneQL } from "@attunegraph/core";
+import {
+  admitDecisionQueryResult,
+  openAttuneGraph,
+  parseAttuneQL
+} from "@attunegraph/core";
 import { createInMemoryAttuneGraphStore } from "@attunegraph/core/testing";
 
 const scope = { sourceId: "notes", threadId: "trip-planning" };
@@ -130,8 +134,11 @@ const query = parseAttuneQL(`
 `);
 
 const result = await graph.query(query);
+const admitted = admitDecisionQueryResult(
+  JSON.parse(JSON.stringify(result))
+);
 
-console.log(result.status, result.workingGraph, result.receipt.receiptId);
+console.log(admitted.status, admitted.workingGraph, admitted.receipt.receiptId);
 await graph.close();
 ```
 
@@ -139,6 +146,26 @@ await graph.close();
 Store I/O. AttuneQL is parsed into the same canonical query object used by the
 typed API; the parser never executes text directly. See
 [`examples/basic-agent.mjs`](examples/basic-agent.mjs).
+
+`admitDecisionQueryResult(JSON.parse(JSON.stringify(result)))` is the root
+interface for admitting a transported full `decision-query@1` result. It
+returns a detached, deeply frozen result only after closing the safe-JSON
+shape, normalizing every full assertion, recomputing the Working Graph token
+estimate from the full assertion JSON bytes, rechecking bitemporal eligibility,
+deriving refs and witnesses, reconciling terminal status, and resealing the
+exact receipt. Receipt revision 2 includes a separately domain-separated
+`selectedWorkingGraphId` over the normalized assertions in producer order and
+the seed. Receipt ID and canonical JSON must therefore match the normalized
+full result exactly, including same-length assertion-content changes.
+
+This proves closure of the supplied result bytes under the declared query,
+snapshot, time, freshness, and budget. It does not re-read the Store, so it
+does not prove that the exact head is still current after production. It also
+does not prove external source truth, permission or action authority, or a
+whole-agent token bound. The current canonical projection envelope limits one
+stored projection string to 16 KiB. Consequently, the admission contract's
+nominal 64-assertion/65-ref structural ceiling is not currently reachable by a
+live projection; it is a defensive structural limit, not a scale feature.
 
 For an action-permission decision, use the typed authority operator. It has no
 text grammar and never executes an action:
@@ -315,7 +342,7 @@ identities are rejected rather than silently reinterpreted.
 
 | Import | Use |
 | --- | --- |
-| `@attunegraph/core` | Engine lifecycle, projection, Decision Query, AttuneQL, Working Graph, Revocation Impact |
+| `@attunegraph/core` | Engine lifecycle, projection, Decision Query, transported full-result admission, AttuneQL, Working Graph, Revocation Impact |
 | `@attunegraph/core/source-adapter` | Typed host-source ingestion |
 | `@attunegraph/core/local` | Durable worker-isolated SQLite |
 | `@attunegraph/core/admin` | Offline read-only inspection |
@@ -341,6 +368,18 @@ Identifiers such as `working-graph@1` and `canonical-projection@2` are wire or
 persisted-contract revisions, not product maturity labels. They change only
 when existing bytes would otherwise be interpreted with different semantics.
 The package version in `package.json` is the product version.
+
+### Decision Query receipt revision 2 migration
+
+New `decision-query@1` results carry `receipt.contractRevision === 2` and a
+`selectedWorkingGraphId`. The receipt ID is sealed under
+`attunegraph.decision-query-receipt.v2`; the selected graph ID is sealed under
+the independent `attunegraph.selected-working-graph.v1` domain over normalized
+ordered assertions plus seed. Revision-1 Decision Query receipts are rejected
+by full-result admission. There is no receipt-only converter or compatibility
+alias: re-run the query against the intended head and transport the complete
+new result. This is a receipt wire migration; it does not rename the
+`decision-query@1` operator or make an old exact head available after retention.
 
 ## Benchmarks and verification
 
@@ -368,6 +407,7 @@ budget, and partiality semantics.
 | Document | Question answered |
 | --- | --- |
 | [First principles](docs/architecture/first-principles.md) | Why does this database exist, and what belongs in the graph? |
+| [First-principles performance](docs/decisions/first-principles-performance.md) | Which implementation parts are candidates now, which require measurement, and what would falsify them? |
 | [Source adapters](SOURCE-ADAPTERS.md) | How does a host connect structured and unstructured sources? |
 | [Portable format](PORTABLE-FORMAT.md) | How are `.atgx` artifacts framed and admitted? |
 | [Benchmarks](BENCHMARKS.md) | What is measured, and which claims are forbidden? |

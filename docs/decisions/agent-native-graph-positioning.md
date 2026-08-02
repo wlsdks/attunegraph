@@ -1,7 +1,7 @@
 # Agent-native graph positioning
 
 Status: accepted direction; implementation claims remain evidence-gated.
-Last reviewed: 2026-08-01.
+Last reviewed: 2026-08-02.
 
 ## Decision
 
@@ -72,7 +72,8 @@ AttuneGraph case.
 | Capability | State on this branch | Evidence boundary |
 | --- | --- | --- |
 | Existing `decision-query@1` evidence retrieval | `shipped` on the baseline | Existing focused tests; authority and conflict remain explicitly not performed. |
-| `authority-query@1` current-world four-edge proof | `built, focused-verified` | New public-interface tests cover explicit witnesses, conflict, V1 root abstention, future posture, temporal exclusion, hypotheses, token truncation, exact-current-head replay, hostile input, and memory/SQLite byte parity. It is not shipped until FULL gates, independent evaluation, rebase, and release integration pass. |
+| `authority-query@1` current-world four-edge proof | `shipped` on the current baseline | Public-interface tests cover explicit witnesses, conflict, V1 root abstention, future posture, temporal exclusion, hypotheses, token truncation, exact-current-head replay, hostile input, and memory/SQLite byte parity. |
+| Transported full `decision-query@1` result admission | `built, focused-verified` | Root-public `admitDecisionQueryResult` closes safe detached JSON, full assertion-byte tokens, bitemporal eligibility, diagnostics, refs, status, witnesses, and receipt revision 2's domain-separated ordered assertion-content-plus-seed ID. It remains pending FULL gates, independent evaluation, landing, and release integration. |
 | Historical-head query | `roadmap` | The current Store Adapter exposes the current projection only; exact mode checks current-head equality and is not retention. |
 | Causal proof beyond explicit authority witness ordering | `roadmap` | No shipped causal-closure semantics. |
 | 10K current exact-head measurement | `evidence missing for qualification` | A local measurement exists, but it is not attested qualification or a cross-system comparison. |

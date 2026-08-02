@@ -137,10 +137,12 @@ export interface AttuneGraphDecisionQuery {
 }
 
 export interface AttuneGraphDecisionQueryReceipt {
-  readonly contractRevision: 1;
+  readonly contractRevision: 2;
   readonly receiptId: string;
   /** Exact canonical JSON whose content address is receiptId. */
   readonly canonicalJson: string;
+  /** Domain-separated content ID for normalized selected assertions in producer order plus seed. */
+  readonly selectedWorkingGraphId: string;
   readonly use: "evidence-only";
   readonly query: AttuneGraphDecisionQuery;
   readonly snapshot: AttuneGraphSnapshot | null;

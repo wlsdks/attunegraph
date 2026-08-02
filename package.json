@@ -19,6 +19,7 @@
     "README.md",
     "docs/architecture/first-principles.md",
     "docs/decisions/agent-native-graph-positioning.md",
+    "docs/decisions/first-principles-performance.md",
     "BENCHMARKS.md",
     "PERFORMANCE-QUALIFICATION.md",
     "READINESS.md",

@@ -14,6 +14,7 @@ export { AttuneGraphDataError, type AttuneGraphDataErrorCode } from "./error.js"
 export { AttuneGraphError, type AttuneGraphErrorCode } from "./attunegraph-error.js";
 export { AttuneQLSyntaxError, parseAttuneQL } from "./attuneql.js";
 export { createAttuneGraphEngine, openAttuneGraph } from "./attunegraph-engine.js";
+export { admitDecisionQueryResult } from "./decision-query.js";
 export type {
   AttuneGraph,
   AttuneGraphAuthorityConflict,

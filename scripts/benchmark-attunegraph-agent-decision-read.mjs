@@ -8,7 +8,7 @@ import { dirname, isAbsolute, normalize, relative, resolve } from "node:path";
 import { performance } from "node:perf_hooks";
 import { fileURLToPath } from "node:url";
 
-import { openAttuneGraph } from "@attunegraph/core";
+import { admitDecisionQueryResult, openAttuneGraph } from "@attunegraph/core";
 import { createInMemoryAttuneGraphStore } from "@attunegraph/core/testing";
 import { isDirectEntrypoint } from "./direct-entrypoint.mjs";
 
@@ -84,6 +84,68 @@ const EXPECTED_CASE_SEMANTICS = Object.freeze({
     maxDepthReached: 2,
     outputBytes: 1_453,
     visitedRefs: 3
+  })
+});
+const EXPECTED_DECISION_QUERY_CASE_SEMANTICS = Object.freeze({
+  "deep-cold-complete-1": Object.freeze({
+    abstentionReasons: Object.freeze([]),
+    admissionExact: true,
+    anchorSha256: "sha256:a54f9b9ca13b32e75271f5c2137ea51d7fa7f9e5c37fc8c23f1b7da26acfa081",
+    assertionWitnesses: 2,
+    outputBytes: 4_631,
+    receiptBytes: 1_494,
+    sourceWitnesses: 2,
+    status: "complete"
+  }),
+  "deep-cold-traversal-partial-4": Object.freeze({
+    abstentionReasons: Object.freeze(["source-not-fresh"]),
+    admissionExact: true,
+    anchorSha256: "sha256:7a46cab3cfcb3275c8600b81bb10db68af2343ecaaa48e9635447af4056b0192",
+    assertionWitnesses: 0,
+    outputBytes: 3_545,
+    receiptBytes: 1_366,
+    sourceWitnesses: 0,
+    status: "abstained"
+  }),
+  "deep-cold-valid-time-abstain-32": Object.freeze({
+    abstentionReasons: Object.freeze(["source-not-fresh"]),
+    admissionExact: true,
+    anchorSha256: "sha256:f8b76ef6c337797d8b4fd8088a217abfadb7a4344a803eb515129a56a009785f",
+    assertionWitnesses: 0,
+    outputBytes: 3_559,
+    receiptBytes: 1_371,
+    sourceWitnesses: 0,
+    status: "abstained"
+  }),
+  "wide-hot-complete-1": Object.freeze({
+    abstentionReasons: Object.freeze([]),
+    admissionExact: true,
+    anchorSha256: "sha256:2b763f80ca1b657b16e9257fe6567fdfb8b4045cb7edb519cf43c74d3185e51e",
+    assertionWitnesses: 32,
+    outputBytes: 22_208,
+    receiptBytes: 3_985,
+    sourceWitnesses: 32,
+    status: "complete"
+  }),
+  "wide-hot-complete-32": Object.freeze({
+    abstentionReasons: Object.freeze([]),
+    admissionExact: true,
+    anchorSha256: "sha256:6bb21a43383f8efe46367810b5b835e85936b65fcbc55a0c95d0eeedee860b9e",
+    assertionWitnesses: 32,
+    outputBytes: 22_505,
+    receiptBytes: 4_052,
+    sourceWitnesses: 32,
+    status: "complete"
+  }),
+  "wide-hot-token-partial-4": Object.freeze({
+    abstentionReasons: Object.freeze([]),
+    admissionExact: true,
+    anchorSha256: "sha256:d3d7258f19cb07aff10500bc138997b04f77ade7ea555d2c6843fc8e4a5ee101",
+    assertionWitnesses: 2,
+    outputBytes: 4_684,
+    receiptBytes: 1_514,
+    sourceWitnesses: 2,
+    status: "partial"
   })
 });
 
@@ -351,6 +413,89 @@ function semanticAnchor(result) {
   });
 }
 
+function decisionQueryAnchor(result) {
+  return Object.freeze({
+    abstentionReasons: Object.freeze([...result.receipt.diagnostics.abstentionReasons]),
+    assertionIds: Object.freeze([...result.receipt.witness.assertionIds]),
+    canonicalJsonSha256: sha256(result.receipt.canonicalJson),
+    receiptId: result.receipt.receiptId,
+    sourceRefs: Object.freeze(result.receipt.witness.sourceRefs.map((entry) =>
+      `${entry.namespace}:${entry.id}:${entry.version ?? ""}`
+    )),
+    status: result.status
+  });
+}
+
+function exactJsonMatch(left, rightJson) {
+  return JSON.stringify(left) === rightJson;
+}
+
+async function runDecisionQuerySample(graph, entry, snapshot, seedIndex) {
+  const query = Object.freeze({
+    operator: "decision-query@1",
+    scope: entry.scope,
+    seed: entry.seeds[seedIndex],
+    asOf: NOW,
+    head: Object.freeze({
+      mode: "exact",
+      generation: snapshot.generation,
+      commitId: snapshot.commitId
+    }),
+    freshness: Object.freeze({ require: "fresh" }),
+    budget: Object.freeze({ maxEstimatedTokens: entry.maxEstimatedTokens })
+  });
+
+  const producerStartedAt = performance.now();
+  const producerResult = await graph.query(query);
+  const producerMilliseconds = performance.now() - producerStartedAt;
+
+  const transportStartedAt = performance.now();
+  const producerJson = JSON.stringify(producerResult);
+  const transportedResult = JSON.parse(producerJson);
+  const transportMilliseconds = performance.now() - transportStartedAt;
+
+  const admissionStartedAt = performance.now();
+  const admittedResult = admitDecisionQueryResult(transportedResult);
+  const admissionMilliseconds = performance.now() - admissionStartedAt;
+
+  const endToEndStartedAt = performance.now();
+  const endToEndProducerResult = await graph.query(query);
+  const endToEndJson = JSON.stringify(endToEndProducerResult);
+  const endToEndAdmittedResult = admitDecisionQueryResult(JSON.parse(endToEndJson));
+  const endToEndMilliseconds = performance.now() - endToEndStartedAt;
+
+  const admissionExact = exactJsonMatch(admittedResult, producerJson)
+    && admittedResult.receipt.receiptId === producerResult.receipt.receiptId
+    && admittedResult.receipt.canonicalJson === producerResult.receipt.canonicalJson
+    && exactJsonMatch(endToEndAdmittedResult, endToEndJson)
+    && endToEndAdmittedResult.receipt.receiptId
+      === endToEndProducerResult.receipt.receiptId
+    && endToEndAdmittedResult.receipt.canonicalJson
+      === endToEndProducerResult.receipt.canonicalJson
+    && endToEndJson === producerJson;
+  if (!admissionExact) {
+    throw new Error(`decision-query admission diverged for ${entry.name} seed ${seedIndex.toString()}`);
+  }
+
+  const anchor = decisionQueryAnchor(producerResult);
+  return Object.freeze({
+    abstentionReasons: anchor.abstentionReasons,
+    admissionExact,
+    admissionMilliseconds,
+    anchorSha256: sha256(JSON.stringify(anchor)),
+    assertionWitnesses: anchor.assertionIds.length,
+    endToEndMilliseconds,
+    outputBytes: Buffer.byteLength(producerJson, "utf8"),
+    producerMilliseconds,
+    receiptBytes: Buffer.byteLength(producerResult.receipt.canonicalJson, "utf8"),
+    receiptId: producerResult.receipt.receiptId,
+    seedIndex,
+    sourceWitnesses: anchor.sourceRefs.length,
+    status: anchor.status,
+    transportMilliseconds
+  });
+}
+
 async function runWorkloadCase(entry) {
   const graph = await openAttuneGraph({
     scope: entry.scope,
@@ -367,6 +512,7 @@ async function runWorkloadCase(entry) {
       throw new Error(`decision-read case ${entry.name} did not reach generation ${GENERATION.toString()}`);
     }
     const samples = [];
+    const decisionQuerySamples = [];
     const batchWallStartedAt = performance.now();
     for (let seedIndex = 0; seedIndex < entry.seeds.length; seedIndex += 1) {
       const startedAt = performance.now();
@@ -421,8 +567,19 @@ async function runWorkloadCase(entry) {
       (sum, sample) => sum + sample.executeMilliseconds,
       0
     );
+    for (let seedIndex = 0; seedIndex < entry.seeds.length; seedIndex += 1) {
+      decisionQuerySamples.push(await runDecisionQuerySample(
+        graph,
+        entry,
+        snapshot,
+        seedIndex
+      ));
+    }
     const anchorSha256 = sha256(JSON.stringify(
       samples.map((sample) => sample.anchorSha256)
+    ));
+    const decisionQueryAnchorSha256 = sha256(JSON.stringify(
+      decisionQuerySamples.map((sample) => sample.anchorSha256)
     ));
     const expectedSemantics = EXPECTED_CASE_SEMANTICS[entry.name];
     if (
@@ -442,11 +599,45 @@ async function runWorkloadCase(entry) {
         `decision-read semantic contract diverged for ${entry.name}; bump the workload version`
       );
     }
+    const expectedDecisionQuerySemantics = EXPECTED_DECISION_QUERY_CASE_SEMANTICS[entry.name];
+    if (
+      expectedDecisionQuerySemantics === undefined
+      || decisionQueryAnchorSha256 !== expectedDecisionQuerySemantics.anchorSha256
+      || decisionQuerySamples.some((sample) => [
+        "admissionExact",
+        "assertionWitnesses",
+        "outputBytes",
+        "receiptBytes",
+        "sourceWitnesses",
+        "status"
+      ].some((key) => sample[key] !== expectedDecisionQuerySemantics[key]))
+      || decisionQuerySamples.some((sample) =>
+        JSON.stringify(sample.abstentionReasons)
+          !== JSON.stringify(expectedDecisionQuerySemantics.abstentionReasons)
+      )
+    ) {
+      throw new Error(
+        `decision-query semantic contract diverged for ${entry.name}: ${JSON.stringify({
+          anchorSha256: decisionQueryAnchorSha256,
+          samples: decisionQuerySamples.map((sample) => ({
+            abstentionReasons: sample.abstentionReasons,
+            admissionExact: sample.admissionExact,
+            assertionWitnesses: sample.assertionWitnesses,
+            outputBytes: sample.outputBytes,
+            receiptBytes: sample.receiptBytes,
+            sourceWitnesses: sample.sourceWitnesses,
+            status: sample.status
+          }))
+        })}`
+      );
+    }
     return Object.freeze({
       anchorSha256,
       batchExecuteMilliseconds,
       batchWallMilliseconds,
       commitId: snapshot.commitId,
+      decisionQueryAnchorSha256,
+      decisionQuerySamples: Object.freeze(decisionQuerySamples),
       generation: snapshot.generation,
       name: entry.name,
       preparationMilliseconds,
@@ -625,6 +816,41 @@ function reportCorrectness(workload, runs) {
   });
 }
 
+function reportDecisionQueryCorrectness(workload, runs) {
+  const cases = workload.cases.map((entry, caseIndex) => {
+    const observed = runs.map((run) => run.cases[caseIndex]);
+    const first = observed[0];
+    const expectedSemantics = EXPECTED_DECISION_QUERY_CASE_SEMANTICS[entry.name];
+    const anchorsMatch = observed.every((item) =>
+      item.decisionQueryAnchorSha256 === first.decisionQueryAnchorSha256
+      && item.commitId === first.commitId
+      && item.generation === GENERATION
+    )
+      && first.decisionQueryAnchorSha256 === expectedSemantics.anchorSha256
+      && first.commitId === EXPECTED_CASE_SEMANTICS[entry.name].latestHeadCommitId;
+    const samples = observed.flatMap((item) => item.decisionQuerySamples);
+    return Object.freeze({
+      abstentionReasons: expectedSemantics.abstentionReasons,
+      admissions: samples.length,
+      allAdmissionsExact: samples.every((sample) => sample.admissionExact),
+      anchorSha256: first.decisionQueryAnchorSha256,
+      anchorsMatch,
+      expectedStatus: expectedSemantics.status,
+      generation: first.generation,
+      latestHeadCommitId: first.commitId,
+      name: entry.name,
+      observedStatuses: Object.freeze([
+        ...new Set(samples.map((sample) => sample.status))
+      ])
+    });
+  });
+  return Object.freeze({
+    allAdmissionsExact: cases.every((entry) => entry.allAdmissionsExact),
+    allAnchorsMatched: cases.every((entry) => entry.anchorsMatch),
+    cases: Object.freeze(cases)
+  });
+}
+
 function reportMetrics(workload, runs, independentRuns) {
   return Object.freeze({
     cases: Object.freeze(workload.cases.map((entry, caseIndex) => {
@@ -677,6 +903,49 @@ function reportMetrics(workload, runs, independentRuns) {
   });
 }
 
+function reportDecisionQueryMetrics(workload, runs, independentRuns) {
+  return Object.freeze({
+    cases: Object.freeze(workload.cases.map((entry, caseIndex) => {
+      const samples = runs.flatMap((run) => run.cases[caseIndex].decisionQuerySamples);
+      return Object.freeze({
+        admissionMilliseconds: summarizeDistribution(
+          samples.map((sample) => sample.admissionMilliseconds),
+          independentRuns
+        ),
+        assertionWitnesses: summarizeDistribution(
+          samples.map((sample) => sample.assertionWitnesses),
+          independentRuns
+        ),
+        endToEndMilliseconds: summarizeDistribution(
+          samples.map((sample) => sample.endToEndMilliseconds),
+          independentRuns
+        ),
+        name: entry.name,
+        outputBytes: summarizeDistribution(
+          samples.map((sample) => sample.outputBytes),
+          independentRuns
+        ),
+        producerMilliseconds: summarizeDistribution(
+          samples.map((sample) => sample.producerMilliseconds),
+          independentRuns
+        ),
+        receiptBytes: summarizeDistribution(
+          samples.map((sample) => sample.receiptBytes),
+          independentRuns
+        ),
+        sourceWitnesses: summarizeDistribution(
+          samples.map((sample) => sample.sourceWitnesses),
+          independentRuns
+        ),
+        transportMilliseconds: summarizeDistribution(
+          samples.map((sample) => sample.transportMilliseconds),
+          independentRuns
+        )
+      });
+    }))
+  });
+}
+
 export async function runAgentDecisionReadBenchmark(options, runtime = {}) {
   validateBenchmarkOptions(options);
   const workload = createAgentDecisionReadWorkload();
@@ -689,14 +958,31 @@ export async function runAgentDecisionReadBenchmark(options, runtime = {}) {
     runs.push(await runWorkload(workload));
   }
   const correctness = reportCorrectness(workload, runs);
-  if (!correctness.allAnchorsMatched) {
+  const decisionQueryCorrectness = reportDecisionQueryCorrectness(workload, runs);
+  if (
+    !correctness.allAnchorsMatched
+    || !decisionQueryCorrectness.allAnchorsMatched
+    || !decisionQueryCorrectness.allAdmissionsExact
+  ) {
     throw new Error("agent decision-read correctness anchors diverged across repetitions");
   }
   const report = Object.freeze({
     claimEligible: false,
     configuration: Object.freeze({
       argv: Object.freeze([...(runtime.argv ?? [])]),
-      decisionSemantics: "independent-single-seed-execute-batch",
+      decisionSemantics: "independent-single-seed-execute-and-decision-query@1",
+      measurementBoundary: Object.freeze({
+        admission: "admitDecisionQueryResult(JSON.parse(JSON.stringify(producerResult)))",
+        decisionQueryEndToEnd: "graph.query plus JSON encode/parse plus admission",
+        excluded: Object.freeze([
+          "agent-model-token-use",
+          "source-truth-or-permission-or-action-authority",
+          "competitor-comparison"
+        ]),
+        producer: "graph.query(decision-query@1)",
+        transport: "JSON.stringify plus JSON.parse",
+        workingGraphExecute: "graph.execute(working-graph@1)"
+      }),
       monotonicClock: "performance.now",
       profile: "in-memory-semantic-reference",
       repetitions: options.repetitions,
@@ -709,12 +995,18 @@ export async function runAgentDecisionReadBenchmark(options, runtime = {}) {
       workload: options.workload
     }),
     correctness,
+    decisionQueryCorrectness,
+    decisionQueryMetrics: reportDecisionQueryMetrics(
+      workload,
+      runs,
+      options.repetitions
+    ),
     host: runtime.host ?? hostIdentity(),
     measurementOnly: true,
     metrics: reportMetrics(workload, runs, options.repetitions),
     observedAt: (runtime.now ?? new Date()).toISOString(),
     repository: runtime.repository ?? captureAgentDecisionReadRepositoryIdentity(),
-    schema: "attunegraph-agent-decision-read-benchmark@1",
+    schema: "attunegraph-agent-decision-read-benchmark@2",
     workload: reportWorkload(workload)
   });
   return validateAgentDecisionReadReportSchema(report);
@@ -782,6 +1074,8 @@ export function validateAgentDecisionReadReportSchema(value) {
     "claimEligible",
     "configuration",
     "correctness",
+    "decisionQueryCorrectness",
+    "decisionQueryMetrics",
     "host",
     "measurementOnly",
     "metrics",
@@ -791,7 +1085,7 @@ export function validateAgentDecisionReadReportSchema(value) {
     "workload"
   ]);
   if (
-    report.schema !== "attunegraph-agent-decision-read-benchmark@1"
+    report.schema !== "attunegraph-agent-decision-read-benchmark@2"
     || report.measurementOnly !== true
     || report.claimEligible !== false
   ) {
@@ -801,6 +1095,7 @@ export function validateAgentDecisionReadReportSchema(value) {
   const configuration = exactRecord(report.configuration, "configuration", [
     "argv",
     "decisionSemantics",
+    "measurementBoundary",
     "monotonicClock",
     "profile",
     "repetitions",
@@ -813,12 +1108,44 @@ export function validateAgentDecisionReadReportSchema(value) {
     "configuration.argv"
   );
   if (
-    configuration.decisionSemantics !== "independent-single-seed-execute-batch"
+    configuration.decisionSemantics
+      !== "independent-single-seed-execute-and-decision-query@1"
     || configuration.monotonicClock !== "performance.now"
     || configuration.profile !== "in-memory-semantic-reference"
     || configuration.workload !== WORKLOAD
   ) {
     invalidReport("configuration");
+  }
+  const measurementBoundary = exactRecord(
+    configuration.measurementBoundary,
+    "configuration.measurementBoundary",
+    [
+      "admission",
+      "decisionQueryEndToEnd",
+      "excluded",
+      "producer",
+      "transport",
+      "workingGraphExecute"
+    ]
+  );
+  if (
+    measurementBoundary.admission
+      !== "admitDecisionQueryResult(JSON.parse(JSON.stringify(producerResult)))"
+    || measurementBoundary.decisionQueryEndToEnd
+      !== "graph.query plus JSON encode/parse plus admission"
+    || JSON.stringify(exactStringArray(
+      measurementBoundary.excluded,
+      "configuration.measurementBoundary.excluded"
+    )) !== JSON.stringify([
+      "agent-model-token-use",
+      "source-truth-or-permission-or-action-authority",
+      "competitor-comparison"
+    ])
+    || measurementBoundary.producer !== "graph.query(decision-query@1)"
+    || measurementBoundary.transport !== "JSON.stringify plus JSON.parse"
+    || measurementBoundary.workingGraphExecute !== "graph.execute(working-graph@1)"
+  ) {
+    invalidReport("configuration.measurementBoundary");
   }
   exactInteger(configuration.repetitions, "configuration.repetitions", 1);
   exactInteger(configuration.warmups, "configuration.warmups");
@@ -956,6 +1283,62 @@ export function validateAgentDecisionReadReportSchema(value) {
     }
   }
 
+  const decisionQueryCorrectness = exactRecord(
+    report.decisionQueryCorrectness,
+    "decisionQueryCorrectness",
+    ["allAdmissionsExact", "allAnchorsMatched", "cases"]
+  );
+  if (
+    decisionQueryCorrectness.allAdmissionsExact !== true
+    || decisionQueryCorrectness.allAnchorsMatched !== true
+    || !Array.isArray(decisionQueryCorrectness.cases)
+    || decisionQueryCorrectness.cases.length !== workload.cases.length
+  ) {
+    invalidReport("decisionQueryCorrectness");
+  }
+  for (let index = 0; index < decisionQueryCorrectness.cases.length; index += 1) {
+    const entry = exactRecord(
+      decisionQueryCorrectness.cases[index],
+      `decisionQueryCorrectness.cases[${index}]`,
+      [
+        "abstentionReasons",
+        "admissions",
+        "allAdmissionsExact",
+        "anchorSha256",
+        "anchorsMatch",
+        "expectedStatus",
+        "generation",
+        "latestHeadCommitId",
+        "name",
+        "observedStatuses"
+      ]
+    );
+    const workloadCase = workload.cases[index];
+    const expectedSemantics = EXPECTED_DECISION_QUERY_CASE_SEMANTICS[entry.name];
+    if (
+      entry.name !== workloadCase.name
+      || expectedSemantics === undefined
+      || entry.anchorSha256 !== expectedSemantics.anchorSha256
+      || entry.anchorsMatch !== true
+      || entry.allAdmissionsExact !== true
+      || entry.admissions !== workloadCase.seedCount * configuration.repetitions
+      || entry.expectedStatus !== expectedSemantics.status
+      || entry.generation !== workload.generation
+      || entry.latestHeadCommitId
+        !== EXPECTED_CASE_SEMANTICS[entry.name].latestHeadCommitId
+      || JSON.stringify(exactStringArray(
+        entry.abstentionReasons,
+        `decisionQueryCorrectness.cases[${index}].abstentionReasons`
+      )) !== JSON.stringify(expectedSemantics.abstentionReasons)
+      || JSON.stringify(exactStringArray(
+        entry.observedStatuses,
+        `decisionQueryCorrectness.cases[${index}].observedStatuses`
+      )) !== JSON.stringify([expectedSemantics.status])
+    ) {
+      invalidReport(`decisionQueryCorrectness.cases[${index}]`);
+    }
+  }
+
   const metrics = exactRecord(report.metrics, "metrics", ["cases"]);
   if (!Array.isArray(metrics.cases) || metrics.cases.length !== workload.cases.length) {
     invalidReport("metrics.cases");
@@ -1045,6 +1428,63 @@ export function validateAgentDecisionReadReportSchema(value) {
       (sample, repetition) => sample < expectedBatchExecute[repetition]
     )) {
       invalidReport(`metrics.cases[${index}].batchWallMilliseconds`);
+    }
+  }
+
+  const decisionQueryMetrics = exactRecord(
+    report.decisionQueryMetrics,
+    "decisionQueryMetrics",
+    ["cases"]
+  );
+  if (
+    !Array.isArray(decisionQueryMetrics.cases)
+    || decisionQueryMetrics.cases.length !== workload.cases.length
+  ) {
+    invalidReport("decisionQueryMetrics.cases");
+  }
+  const decisionMetricKeys = [
+    "admissionMilliseconds",
+    "assertionWitnesses",
+    "endToEndMilliseconds",
+    "outputBytes",
+    "producerMilliseconds",
+    "receiptBytes",
+    "sourceWitnesses",
+    "transportMilliseconds"
+  ];
+  for (let index = 0; index < decisionQueryMetrics.cases.length; index += 1) {
+    const entry = exactRecord(
+      decisionQueryMetrics.cases[index],
+      `decisionQueryMetrics.cases[${index}]`,
+      ["name", ...decisionMetricKeys]
+    );
+    if (entry.name !== workload.cases[index].name) {
+      invalidReport(`decisionQueryMetrics.cases[${index}].name`);
+    }
+    for (const key of decisionMetricKeys) {
+      validateDistribution(
+        entry[key],
+        `decisionQueryMetrics.cases[${index}].${key}`,
+        configuration.repetitions
+      );
+    }
+    const expectedSampleCount = workload.cases[index].seedCount
+      * configuration.repetitions;
+    if (decisionMetricKeys.some((key) =>
+      entry[key].sampleCount !== expectedSampleCount
+    )) {
+      invalidReport(`decisionQueryMetrics.cases[${index}].sampleCount`);
+    }
+    const expectedSemantics = EXPECTED_DECISION_QUERY_CASE_SEMANTICS[entry.name];
+    for (const key of [
+      "assertionWitnesses",
+      "outputBytes",
+      "receiptBytes",
+      "sourceWitnesses"
+    ]) {
+      if (entry[key].samples.some((sample) => sample !== expectedSemantics[key])) {
+        invalidReport(`decisionQueryMetrics.cases[${index}].${key}`);
+      }
     }
   }
 

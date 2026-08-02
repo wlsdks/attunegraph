@@ -271,8 +271,8 @@ describe("production AttuneGraph portable fixture integration", () => {
       "MAX_GRAPH_ASSERTION_SOURCE_REFS", "MAX_GRAPH_QUERY_ASSERTIONS",
       "MAX_GRAPH_QUERY_CONSIDERED_ASSERTIONS", "MAX_GRAPH_QUERY_DEPTH",
       "MAX_GRAPH_QUERY_SEEDS", "MAX_GRAPH_QUERY_VISITED_REFS",
-      "compileActivationSubgraph", "createAttuneGraphEngine", "openAttuneGraph",
-      "parseAttuneQL"
+      "admitDecisionQueryResult", "compileActivationSubgraph",
+      "createAttuneGraphEngine", "openAttuneGraph", "parseAttuneQL"
     ]);
     expect(Object.keys(admin).sort()).toEqual([
       "AttuneGraphAdminReadonlyError",

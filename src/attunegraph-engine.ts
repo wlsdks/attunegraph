@@ -8,7 +8,6 @@ import {
   type CanonicalImmutableEnvelopeResult
 } from "./canonical-immutable-envelope.js";
 import {
-  ACTIVATION_PREDICATES,
   GRAPH_ASSERTION_SOURCE_NAMESPACE,
   MAX_ACTIVATION_ESTIMATED_TOKENS
 } from "./constants.js";
@@ -52,11 +51,13 @@ import {
 import { registeredAttuneGraphStoreBackend } from "./attunegraph-store-internal.js";
 import { graphRefKey, instantEpoch, normalizeGraphAssertionBatch } from "./validation.js";
 import type { GraphAssertion, GraphRef } from "./types.js";
+import {
+  compileWorkingGraph,
+  dedupeGraphAssertions,
+  emptyWorkingGraph,
+  prepareWorkingGraph
+} from "./working-graph.js";
 
-const MAX_WORKING_DEPTH = 2;
-const MAX_WORKING_CONSIDERED = 128;
-const MAX_WORKING_VISITED = 64;
-const MAX_WORKING_ASSERTIONS = 64;
 const MAX_STORED_PROJECTION_TEXT =
   CANONICAL_IMMUTABLE_ENVELOPE_LIMITS.maxStringCodeUnits;
 const MAX_STORED_PROJECTION_BYTES =
@@ -160,21 +161,6 @@ function canonicalEnvelope(
   }
 }
 
-function dedupeAssertions(
-  assertions: readonly GraphAssertion[],
-  code: AttuneGraphError["code"]
-): readonly GraphAssertion[] {
-  const byId = new Map<string, GraphAssertion>();
-  for (const assertion of assertions) {
-    const existing = byId.get(assertion.id);
-    if (existing && JSON.stringify(existing) !== JSON.stringify(assertion)) {
-      attuneGraphError(code, `assertion id ${assertion.id} has conflicting content`);
-    }
-    if (!existing) byId.set(assertion.id, assertion);
-  }
-  return Object.freeze([...byId.values()].sort((left, right) => left.id.localeCompare(right.id)));
-}
-
 function requireThreadRootedObservation(
   assertions: readonly GraphAssertion[],
   threadRoot: GraphRef,
@@ -248,7 +234,7 @@ function normalizedObservationFromEnvelope(
     throw new AttuneGraphError(code, "source observation assertions are invalid", { cause });
   }
   const hasDuplicateAssertionIds = new Set(normalizedAssertions.map((assertion) => assertion.id)).size !== normalizedAssertions.length;
-  const assertions = dedupeAssertions(normalizedAssertions, code);
+  const assertions = dedupeGraphAssertions(normalizedAssertions, code);
   let threadRoot: GraphRef | undefined;
   if (version === 2) {
     const rootInput = record(
@@ -567,7 +553,7 @@ function normalizeStoredProjectionShared(
   if (rawObservedAt !== observation.observedAt || JSON.stringify(rawFreshness) !== JSON.stringify(observation.sourceFreshness)) attuneGraphError("CORRUPT_STORE", "stored projection metadata does not match its canonical observation");
   if (!Array.isArray(input.assertions)) attuneGraphError("CORRUPT_STORE", "stored projection.assertions must be an array");
   let rawAssertions: readonly GraphAssertion[];
-  try { rawAssertions = dedupeAssertions(normalizeGraphAssertionBatch(input.assertions), "CORRUPT_STORE"); } catch (cause) { if (cause instanceof AttuneGraphError) throw cause; throw new AttuneGraphError("CORRUPT_STORE", "stored projection assertions are invalid", { cause }); }
+  try { rawAssertions = dedupeGraphAssertions(normalizeGraphAssertionBatch(input.assertions), "CORRUPT_STORE"); } catch (cause) { if (cause instanceof AttuneGraphError) throw cause; throw new AttuneGraphError("CORRUPT_STORE", "stored projection assertions are invalid", { cause }); }
   if (JSON.stringify(rawAssertions) !== observation.assertionFingerprint) attuneGraphError("CORRUPT_STORE", "stored projection assertions do not match its canonical observation");
   const projection = Object.freeze({
     schemaVersion: 1,
@@ -599,184 +585,6 @@ export function normalizeStoredProjectionForPortableDecoder(
   envelope: CanonicalImmutableEnvelopeResult
 ): NormalizedStoredProjectionAdmission {
   return normalizeStoredProjectionShared(envelope, undefined);
-}
-
-interface PreparedDecisionEligibility {
-  /** Fast same-now interval: max(recordedAt, validFrom) <= now < min(supersededAt, validTo). */
-  readonly eligibleFrom: number;
-  readonly eligibleTo: number;
-}
-
-function prepareDecisionEligibility(assertion: GraphAssertion): PreparedDecisionEligibility {
-  const recordedAt = instantEpoch(assertion.recordedAt);
-  const supersededAt = assertion.supersededAt ? instantEpoch(assertion.supersededAt) : Infinity;
-  const validFrom = assertion.validFrom ? instantEpoch(assertion.validFrom) : -Infinity;
-  const validTo = assertion.validTo ? instantEpoch(assertion.validTo) : Infinity;
-  return Object.freeze({
-    eligibleFrom: Math.max(recordedAt, validFrom),
-    eligibleTo: Math.min(supersededAt, validTo)
-  });
-}
-
-function assertionEligible(
-  eligibility: PreparedDecisionEligibility,
-  validAt: number
-): boolean {
-  return eligibility.eligibleFrom <= validAt && validAt < eligibility.eligibleTo;
-}
-
-function compareAssertions(left: GraphAssertion, right: GraphAssertion): number {
-  return left.predicate.localeCompare(right.predicate) || left.id.localeCompare(right.id);
-}
-
-function compareCodeUnits(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
-
-function compareDecisionAssertions(left: GraphAssertion, right: GraphAssertion): number {
-  return compareCodeUnits(left.predicate, right.predicate)
-    || compareCodeUnits(left.id, right.id);
-}
-
-const WORKING_GRAPH_ASSERTIONS_PREFIX_BYTES = Buffer.byteLength("{\"assertions\":[", "utf8");
-const WORKING_GRAPH_SEED_PREFIX_BYTES = Buffer.byteLength("],\"seed\":", "utf8");
-
-function jsonBytes(value: unknown): number {
-  return Buffer.byteLength(JSON.stringify(value), "utf8");
-}
-
-function estimateWorkingGraphTokens(
-  assertionBytes: number,
-  assertionCount: number,
-  seedBytes: number
-): number {
-  const commaBytes = Math.max(0, assertionCount - 1);
-  const bytes = WORKING_GRAPH_ASSERTIONS_PREFIX_BYTES
-    + assertionBytes
-    + commaBytes
-    + WORKING_GRAPH_SEED_PREFIX_BYTES
-    + seedBytes
-    + 1;
-  return Math.ceil(bytes / 4);
-}
-
-interface PreparedWorkingGraph {
-  /** Only execution metadata is retained; canonical/source projection text stays in the Store. */
-  readonly snapshot: AttuneGraphSnapshot;
-  readonly sourceFreshness: AttuneGraphSourceFreshness;
-  readonly assertionBytes: ReadonlyMap<string, number>;
-  readonly eligibility: ReadonlyMap<string, PreparedDecisionEligibility>;
-  readonly adjacency: ReadonlyMap<string, readonly GraphAssertion[]>;
-}
-
-function prepareWorkingGraph(projection: AttuneGraphStoredProjection): PreparedWorkingGraph {
-  const usable = dedupeAssertions(projection.assertions, "CORRUPT_STORE")
-    .filter((assertion) => ACTIVATION_PREDICATES.includes(assertion.predicate))
-    .sort(compareAssertions);
-  const assertionBytes = new Map(usable.map((assertion) => [assertion.id, jsonBytes(assertion)]));
-  const eligibility = new Map(usable.map((assertion) => [
-    assertion.id,
-    prepareDecisionEligibility(assertion)
-  ]));
-  const adjacency = new Map<string, GraphAssertion[]>();
-  for (const assertion of usable) {
-    const subjectKey = graphRefKey(assertion.subject);
-    const objectKey = graphRefKey(assertion.object);
-    const subjectAssertions = adjacency.get(subjectKey);
-    if (subjectAssertions) subjectAssertions.push(assertion);
-    else adjacency.set(subjectKey, [assertion]);
-    if (objectKey !== subjectKey) {
-      const objectAssertions = adjacency.get(objectKey);
-      if (objectAssertions) objectAssertions.push(assertion);
-      else adjacency.set(objectKey, [assertion]);
-    }
-  }
-  return {
-    snapshot: freezeSnapshot(projection.snapshot),
-    sourceFreshness: Object.freeze({ ...projection.sourceFreshness }),
-    assertionBytes,
-    eligibility,
-    adjacency
-  };
-}
-
-function compileWorkingGraph(
-  prepared: PreparedWorkingGraph,
-  command: ReturnType<typeof normalizeExecute>,
-  ordering: "legacy-locale" | "decision-code-unit" = "legacy-locale"
-): AttuneGraphOperatorResult["workingGraph"] & { readonly status: AttuneGraphOperatorResult["status"] } {
-  const eligible = (assertion: GraphAssertion): boolean => {
-    const eligibility = prepared.eligibility.get(assertion.id);
-    if (eligibility === undefined) attuneGraphError("CORRUPT_STORE", "Working Graph assertion eligibility is unavailable");
-    return assertionEligible(eligibility, command.nowEpoch);
-  };
-  const seedBytes = jsonBytes(command.seed);
-  const queue: Array<{ ref: GraphRef; depth: number }> = [{ ref: command.seed, depth: 0 }];
-  const visited = new Set<string>([graphRefKey(command.seed)]);
-  const selected: GraphAssertion[] = [];
-  const selectedIds = new Set<string>();
-  let considered = 0;
-  let maxDepthReached = 0;
-  let traversalTruncated = false;
-  let tokenTruncated = false;
-  let selectedAssertionBytes = 0;
-  while (queue.length > 0) {
-    const current = queue.shift();
-    if (!current) break;
-    maxDepthReached = Math.max(maxDepthReached, current.depth);
-    const currentKey = graphRefKey(current.ref);
-    const storedReachable = prepared.adjacency.get(currentKey) ?? [];
-    const reachable = ordering === "decision-code-unit"
-      ? [...storedReachable].sort(compareDecisionAssertions)
-      : storedReachable;
-    if (current.depth >= MAX_WORKING_DEPTH) {
-      if (reachable.some((assertion) => eligible(assertion) && !selectedIds.has(assertion.id))) traversalTruncated = true;
-      continue;
-    }
-    for (const assertion of reachable) {
-      if (selectedIds.has(assertion.id)) continue;
-      if (!eligible(assertion)) continue;
-      if (considered >= MAX_WORKING_CONSIDERED || selected.length >= MAX_WORKING_ASSERTIONS) { traversalTruncated = true; break; }
-      considered += 1;
-      const candidateBytes = prepared.assertionBytes.get(assertion.id);
-      if (candidateBytes === undefined) attuneGraphError("CORRUPT_STORE", "Working Graph assertion bytes are unavailable");
-      if (estimateWorkingGraphTokens(selectedAssertionBytes + candidateBytes, selected.length + 1, seedBytes) > command.maxEstimatedTokens) { tokenTruncated = true; continue; }
-      selected.push(assertion);
-      selectedIds.add(assertion.id);
-      selectedAssertionBytes += candidateBytes;
-      for (const ref of [assertion.subject, assertion.object]) {
-        const key = graphRefKey(ref);
-        if (!visited.has(key)) {
-          if (visited.size >= MAX_WORKING_VISITED) { traversalTruncated = true; continue; }
-          visited.add(key);
-          queue.push({ ref, depth: current.depth + 1 });
-        }
-      }
-    }
-  }
-  const refs = [...new Map([command.seed, ...selected.flatMap((assertion) => [assertion.subject, assertion.object])].map((ref) => [graphRefKey(ref), Object.freeze({ ...ref })])).values()].sort((left, right) => ordering === "decision-code-unit"
-    ? compareCodeUnits(graphRefKey(left), graphRefKey(right))
-    : graphRefKey(left).localeCompare(graphRefKey(right)));
-  const truncationReasons = Object.freeze([...(tokenTruncated ? ["token-budget" as const] : []), ...(traversalTruncated ? ["traversal-budget" as const] : [])]);
-  const graph = Object.freeze({ assertions: Object.freeze([...selected]), refs: Object.freeze(refs), seed: Object.freeze({ ...command.seed }), diagnostics: Object.freeze({ consideredAssertions: considered, estimatedTokens: estimateWorkingGraphTokens(selectedAssertionBytes, selected.length, seedBytes), maxDepthReached, visitedRefs: visited.size, truncationReasons }) });
-  return Object.freeze({ ...graph, status: truncationReasons.length > 0 ? "partial" as const : selected.length === 0 ? "abstained" as const : "complete" as const });
-}
-
-function emptyWorkingGraph(seed: GraphRef): AttuneGraphOperatorResult["workingGraph"] {
-  const frozenSeed = Object.freeze({ ...seed });
-  const estimatedTokens = estimateWorkingGraphTokens(0, 0, jsonBytes(frozenSeed));
-  return Object.freeze({
-    assertions: Object.freeze([]),
-    refs: Object.freeze([frozenSeed]),
-    seed: frozenSeed,
-    diagnostics: Object.freeze({
-      consideredAssertions: 0,
-      estimatedTokens,
-      maxDepthReached: 0,
-      visitedRefs: 1,
-      truncationReasons: Object.freeze([])
-    })
-  });
 }
 
 function decisionQueryResult(input: Readonly<{
@@ -825,6 +633,7 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
   let inFlight = 0;
   let closePromise: Promise<void> | undefined;
   let resolveClose: (() => void) | undefined;
+  type PreparedWorkingGraph = ReturnType<typeof prepareWorkingGraph>;
   let preparedWorkingGraph: PreparedWorkingGraph | undefined;
   let preparingWorkingGraph: Promise<PreparedWorkingGraph | undefined> | undefined;
   let workingGraphPlanEpoch = 0;

@@ -32,6 +32,31 @@ RSS uses the larger of phase-boundary `process.memoryUsage().rss` and the proces
 water mark from `process.resourceUsage().maxRSS`, normalized from KiB to bytes. The method is
 recorded in every run. It is not an interval-sampled allocation trace.
 
+### Decision-query transport and admission companion
+
+`attunegraph-agent-decision-read-benchmark@2` is an additive, measurement-only
+companion; it is not one of the six qualification reports. It preserves the
+existing per-seed `working-graph@1` execute lane and adds an independently
+labelled `decision-query@1` lane. For the exact current head of each case, that
+lane records producer query time, JSON encode-plus-parse time, full-result
+`admitDecisionQueryResult` time, and a separately rerun end-to-end time. It
+also records terminal status, abstention reasons, receipt/output bytes,
+assertion/source witness counts, and whether the admitted result deep-exactly
+matches the producer while preserving `receiptId`, `canonicalJson`, and
+receipt revision 2's domain-separated `selectedWorkingGraphId`.
+
+Fresh complete/partial semantics remain bound to the existing cases. A stale
+or unknown source is a Decision Query abstention boundary, even where the raw
+Working Graph execute lane reports its own traversal or temporal result. The
+strict report schema pins both lanes' semantic anchors without converting the
+measurements into a qualification claim.
+
+The companion explicitly excludes model inference and whole-agent token use,
+post-production live-head currency, source truth, permission or action
+authority, and competitor comparison. Its output cannot satisfy or substitute
+for the six-report matrix below, calibrate an absolute threshold, or support a
+speed or superiority claim.
+
 Concurrent reports require at least two repetitions and the exact baseline-first, candidate-first
 alternation for every pair. The qualifier recomputes assertion throughput from ingestion latency,
 portable byte and assertion throughput from artifact size and encode/decode latency, and every
