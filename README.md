@@ -10,6 +10,17 @@ as a typed object or bounded AttuneQL and returns an explicit `complete`,
 
 **Project status:** usable from source today · not yet published to a package registry · no hosted service · Apache-2.0
 
+<p align="center">
+  <a href="#quick-start-from-source">Quick start</a> ·
+  <a href="#what-ships-today">Shipped contracts</a> ·
+  <a href="#current-measured-baseline">Measured baseline</a> ·
+  <a href="BENCHMARKS.md">Benchmarks</a>
+</p>
+
+<p align="center">
+  <img src="docs/assets/attunegraph-overview.svg" width="100%" alt="Host-owned sources flow through AttuneGraph's exact-head temporal and provenance graph into a bounded decision query with an explicit complete, partial, or abstained result." />
+</p>
+
 AttuneGraph is not a smaller Neo4j. It decides which relationships an agent may use as evidence **now**, under time, provenance, freshness, and context budgets.
 
 ## Current measured baseline
@@ -17,12 +28,19 @@ AttuneGraph is not a smaller Neo4j. It decides which relationships an agent may 
 The clean 2026-08-02 macOS arm64, Node 24.16 10K storage-primitive run gives a
 useful, deliberately narrow answer about the engine today:
 
-| What the evidence says | Current result |
-| --- | --- |
-| Raw indexed local reads | AttuneGraph v4 measured about **0.0162 ms adjacency** and **0.00317 ms degree** p50. In this cell, SQLite is not the limiting lookup component. |
-| Agent-safe result construction | Exact-head/source/provenance proof assembly measured about **0.991 ms** p50. Canonical reconstruction and proof work are the larger current read cost. |
-| Representation cost | The settled AttuneGraph database was **6,148,096 bytes**, versus **3,092,480** for LadybugDB and **1,748,992** for CozoDB in their native storage lanes. Representation density and ingest/write amplification still need work. |
-| Engineering decision | Keep SQLite as the authoritative embedded store for now; optimize proof assembly and representation before replacing the storage engine. Reconsider a derived read plane only when larger profiles prove it necessary. |
+<p align="center">
+  <img src="docs/assets/attunegraph-10k-baseline.svg" width="100%" alt="The clean 10K baseline shows fast AttuneGraph raw indexed adjacency, proof assembly as the larger read cost, and a larger settled database than the native LadybugDB and CozoDB lanes." />
+</p>
+
+- **Fast today:** raw indexed adjacency measured about **0.0162 ms p50**;
+  SQLite is not the limiting lookup component in this cell.
+- **Cost today:** exact-head/source/provenance proof assembly measured about
+  **0.991 ms p50**, while the settled AttuneGraph database used **6,148,096
+  bytes**. Reconstruction, write amplification, and representation density need
+  more work.
+- **Decision:** keep SQLite as the authoritative embedded store for now. A
+  derived read plane becomes a candidate only when larger profiles prove it is
+  necessary.
 
 The comparison used 10,000 assertions/edges and exact adjacency/degree oracles
 with LadybugDB 0.19.0 and CozoDB 0.7.6. Their native APIs do **not** provide the
@@ -49,20 +67,7 @@ fail because the relationships around that fact have changed.
 The database preserves only relationships whose loss would force reconstruction
 or weaken explanation, invalidation, or replay. Raw records stay at the source.
 
-## How it works
-
-```mermaid
-flowchart LR
-    S["Authoritative sources\nnotes · files · tools · apps"]
-    A["Host adapters\nparse · anchor · version"]
-    P["AttuneGraph\ntime · provenance · exact head"]
-    Q["Decision Query\nobject · AttuneQL"]
-    W["Working Graph\nbounded · deterministic"]
-    D["Agent decision\ncomplete · partial · abstained"]
-
-    S --> A --> P --> Q --> W --> D
-    P --> R["Revocation Impact\nread-only plan + receipt"]
-```
+## Ownership boundary
 
 | Boundary | Owner |
 | --- | --- |

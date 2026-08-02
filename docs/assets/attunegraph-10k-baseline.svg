@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="500" viewBox="0 0 1200 500" role="img" aria-labelledby="title desc">
+  <title id="title">AttuneGraph 10K storage-primitive baseline</title>
+  <desc id="desc">Three panels show native adjacency latency, AttuneGraph raw lookup versus proof assembly, and settled database size. The comparison is measurement-only because engine semantics differ.</desc>
+  <style>
+    .canvas { fill: #f8fafc; stroke: #e2e8f0; }
+    .panel { fill: #ffffff; stroke: #cbd5e1; }
+    .title { fill: #0f172a; font: 700 25px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .heading { fill: #0f172a; font: 700 16px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .label { fill: #334155; font: 600 12px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .body { fill: #64748b; font: 500 12px ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    .value { fill: #0f172a; font: 700 12px ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .axis { stroke: #cbd5e1; stroke-width: 1; }
+    .attune { fill: #4f46e5; }
+    .cozo { fill: #0891b2; }
+    .ladybug { fill: #d97706; }
+    .proof { fill: #8b5cf6; }
+    .track { fill: #e2e8f0; }
+    @media (prefers-color-scheme: dark) {
+      .canvas { fill: #0f172a; stroke: #334155; }
+      .panel { fill: #111827; stroke: #475569; }
+      .title, .heading, .value { fill: #f8fafc; }
+      .label { fill: #e2e8f0; }
+      .body { fill: #94a3b8; }
+      .axis { stroke: #475569; }
+      .track { fill: #334155; }
+      .attune { fill: #818cf8; }
+      .cozo { fill: #22d3ee; }
+      .ladybug { fill: #fbbf24; }
+      .proof { fill: #c4b5fd; }
+    }
+  </style>
+
+  <rect class="canvas" x="1" y="1" width="1198" height="498" rx="24"/>
+  <text class="title" x="44" y="48">10K storage-primitive baseline</text>
+  <text class="body" x="44" y="72">Clean macOS arm64 · Node 24.16 · five isolated rotating trials · p50 shown</text>
+
+  <rect class="panel" x="36" y="96" width="352" height="310" rx="18"/>
+  <text class="heading" x="58" y="128">Native adjacency latency</text>
+  <text class="body" x="58" y="149">Milliseconds · logarithmic axis</text>
+  <line class="axis" x1="124" y1="183" x2="344" y2="183"/>
+  <line class="axis" x1="124" y1="178" x2="124" y2="188"/>
+  <line class="axis" x1="234" y1="178" x2="234" y2="188"/>
+  <line class="axis" x1="344" y1="178" x2="344" y2="188"/>
+  <text class="body" x="111" y="204">0.01</text>
+  <text class="body" x="221" y="204">0.1</text>
+  <text class="body" x="337" y="204">1</text>
+  <text class="label" x="58" y="239">AttuneGraph</text>
+  <line class="axis" x1="124" y1="235" x2="149" y2="235"/>
+  <circle class="attune" cx="149" cy="235" r="7"/>
+  <text class="value" x="164" y="240">0.0162 ms</text>
+  <text class="label" x="58" y="287">CozoDB</text>
+  <line class="axis" x1="124" y1="283" x2="230" y2="283"/>
+  <circle class="cozo" cx="230" cy="283" r="7"/>
+  <text class="value" x="245" y="288">0.0922 ms</text>
+  <text class="label" x="58" y="335">LadybugDB</text>
+  <line class="axis" x1="124" y1="331" x2="326" y2="331"/>
+  <circle class="ladybug" cx="326" cy="331" r="7"/>
+  <text class="value" x="238" y="356">0.681 ms</text>
+  <text class="body" x="58" y="386">Raw indexed lookup is not the 10K bottleneck.</text>
+
+  <rect class="panel" x="424" y="96" width="352" height="310" rx="18"/>
+  <text class="heading" x="446" y="128">Where AttuneGraph spends time</text>
+  <text class="body" x="446" y="149">Milliseconds · separate semantic lanes</text>
+  <text class="label" x="446" y="203">Raw adjacency</text>
+  <rect class="track" x="446" y="216" width="286" height="20" rx="10"/>
+  <rect class="attune" x="446" y="216" width="5" height="20" rx="3"/>
+  <text class="value" x="446" y="257">0.0162 ms</text>
+  <text class="label" x="446" y="299">Proof assembly</text>
+  <rect class="track" x="446" y="312" width="286" height="20" rx="10"/>
+  <rect class="proof" x="446" y="312" width="283" height="20" rx="10"/>
+  <text class="value" x="446" y="353">0.991 ms</text>
+  <text class="body" x="446" y="386">Next target: reconstruction and proof work.</text>
+
+  <rect class="panel" x="812" y="96" width="352" height="310" rx="18"/>
+  <text class="heading" x="834" y="128">Settled database size</text>
+  <text class="body" x="834" y="149">Megabytes · native storage lanes</text>
+  <text class="label" x="834" y="199">CozoDB</text>
+  <rect class="track" x="834" y="212" width="286" height="18" rx="9"/>
+  <rect class="cozo" x="834" y="212" width="77" height="18" rx="9"/>
+  <text class="value" x="924" y="226">1.75 MB</text>
+  <text class="label" x="834" y="267">LadybugDB</text>
+  <rect class="track" x="834" y="280" width="286" height="18" rx="9"/>
+  <rect class="ladybug" x="834" y="280" width="136" height="18" rx="9"/>
+  <text class="value" x="983" y="294">3.09 MB</text>
+  <text class="label" x="834" y="335">AttuneGraph</text>
+  <rect class="track" x="834" y="348" width="286" height="18" rx="9"/>
+  <rect class="attune" x="834" y="348" width="270" height="18" rx="9"/>
+  <text class="value" x="1015" y="389">6.15 MB</text>
+
+  <text class="body" x="44" y="449">Measurement-only: native APIs do not share AttuneGraph's temporal, provenance, authority, budget, abstention, or receipt contract.</text>
+  <text class="body" x="44" y="472">This chart is not a product ranking or SLA. Larger, controlled-cold, equivalent-durability, update/delete, and recovery cells remain open.</text>
+</svg>

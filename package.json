@@ -17,6 +17,7 @@
   "files": [
     "dist",
     "README.md",
+    "docs/assets",
     "docs/architecture/first-principles.md",
     "docs/decisions/agent-native-graph-positioning.md",
     "docs/decisions/first-principles-performance.md",
