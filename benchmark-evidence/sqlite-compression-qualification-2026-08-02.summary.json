@@ -1,0 +1,118 @@
+{
+  "schema": "attunegraph-sqlite-compression-qualification-summary@1",
+  "measuredAt": "2026-08-02T05:47:49.506Z",
+  "provenance": {
+    "repository": {
+      "clean": false,
+      "commit": "2d95f300fda5c066412fafc38f5e5f3f588bd500",
+      "lockfileSha256": "sha256:c696e0cdde9b5e21ee598af9101b4611b5e60e4b75b14c5f5a36e47f8a6338c4",
+      "tree": "dc611c0c5f0cd7818763ca46f821c1470542e51f"
+    },
+    "host": {
+      "arch": "arm64",
+      "node": "24.16.0",
+      "platform": "darwin",
+      "sqlite": "3.53.0",
+      "zlib": "1.3.1-e00f703"
+    }
+  },
+  "corpus": {
+    "scale": 10000,
+    "representativeAssertionCount": 32,
+    "representativeRows": 313,
+    "maximumEngineAdmittedCanonicalProjectionBytes": 16373,
+    "engineCanonicalProjectionByteLimit": 16384
+  },
+  "selected": {
+    "codec": "deflateRaw-level-1",
+    "rawBytes": 30964,
+    "compressedBytes": 1802,
+    "payloadDensityImprovement": 17.183129855715872,
+    "rawDatabaseBytes": 10424320,
+    "compressedDatabaseBytes": 1449984,
+    "databaseDensityImprovement": 7.1892655367231635,
+    "compressionP50Microseconds": 27.95799999999815,
+    "decompressionP50Microseconds": 17.45800000000486
+  },
+  "endToEnd": {
+    "legacyV1": {
+      "projectionP50Microseconds": 4348.582999999962,
+      "projectionP95Microseconds": 5541.208000000552,
+      "warmReadP50Microseconds": 2645.74999999968,
+      "warmReadP95Microseconds": 2893.000000000029,
+      "coldReopenedReadP50Microseconds": 29177.208000000064,
+      "coldReopenedReadP95Microseconds": 31307.91599999975
+    },
+    "candidateV2": {
+      "projectionP50Microseconds": 4324.333000000479,
+      "projectionP95Microseconds": 5209.333999999217,
+      "warmReadP50Microseconds": 2735.1250000010623,
+      "warmReadP95Microseconds": 3030.6669999990845,
+      "coldReopenedReadP50Microseconds": 27462.375000000975,
+      "coldReopenedReadP95Microseconds": 29899.207999998907
+    },
+    "candidateToLegacyRatios": {
+      "projection": { "p50": 0.994423470818084, "p95": 0.9401080053300107, "p99": 0.8814911492133399 },
+      "warmRead": { "p50": 1.03378059151522, "p95": 1.0475862426543567, "p99": 1.003447856244641 },
+      "coldReopenedRead": { "p50": 0.9412269672958741, "p95": 0.9550047342659008, "p99": 0.9219955040314816 }
+    }
+  },
+  "selectedIntegrationGate": {
+    "ceiling": 1.2,
+    "gatePercentiles": ["p50", "p95"],
+    "monitoringPercentiles": ["p99"],
+    "passes": true
+  },
+  "settledScaleEvidence": [
+    {
+      "schema": "attunegraph-sqlite-compression-settled-scale@1",
+      "scale": 10000,
+      "observedAt": "2026-08-02T06:12:57.478Z",
+      "corpus": { "schema": "attunegraph-benchmark-corpus-manifest@1", "seed": "thread-rooted-hot-and-cold@1", "sha256": "sha256:d559ae4167c89b9b8ac782df5e493c17d4f6755dc6b0b8baebdb2a87984417e1", "assertionCount": 10000, "shardCount": 313, "maxAssertionsPerShard": 32 },
+      "command": { "executable": "corepack pnpm --silent benchmark:sqlite-compression-qualification", "args": ["--scale-evidence=all", "--json"], "benchmark": { "profile": "local-session", "repetitions": 1, "scale": 10000, "warmups": 0 } },
+      "repository": { "clean": false, "commit": "2d95f300fda5c066412fafc38f5e5f3f588bd500", "lockfileSha256": "sha256:c696e0cdde9b5e21ee598af9101b4611b5e60e4b75b14c5f5a36e47f8a6338c4", "tree": "dc611c0c5f0cd7818763ca46f821c1470542e51f" },
+      "host": { "arch": "arm64", "cpuCount": 12, "cpuModel": "Apple M2 Max", "node": "24.16.0", "os": "darwin", "pnpm": "10.18.0", "sqlite": "3.53.0", "totalMemoryBytes": 68719476736, "zlib": "1.3.1-e00f703" },
+      "storage": { "journalRows": 313, "pageSizeBytes": 4096, "pages": 390, "databaseBytes": 1597440, "writeAheadLogBytes": 0, "sharedMemoryBytes": 0, "userVersion": 2 },
+      "rawProvenance": { "schema": "attunegraph-scale-benchmark@1", "byteLength": 77967, "sha256": "sha256:2f97f9c9f69f6ad044f91d4ff4c3ef5d1b9e04e11836f41ae20910348c01e93d", "maximumBytes": 16777216 },
+      "claimEligible": false,
+      "measurementOnly": true
+    },
+    {
+      "schema": "attunegraph-sqlite-compression-settled-scale@1",
+      "scale": 100000,
+      "observedAt": "2026-08-02T06:13:26.711Z",
+      "corpus": { "schema": "attunegraph-benchmark-corpus-manifest@1", "seed": "thread-rooted-hot-and-cold@1", "sha256": "sha256:800f4d46c77049e4377c95009df4f3d7b318da8721418afc1838cbb44699de77", "assertionCount": 100000, "shardCount": 3125, "maxAssertionsPerShard": 32 },
+      "command": { "executable": "corepack pnpm --silent benchmark:sqlite-compression-qualification", "args": ["--scale-evidence=all", "--json"], "benchmark": { "profile": "local-session", "repetitions": 1, "scale": 100000, "warmups": 0 } },
+      "repository": { "clean": false, "commit": "2d95f300fda5c066412fafc38f5e5f3f588bd500", "lockfileSha256": "sha256:c696e0cdde9b5e21ee598af9101b4611b5e60e4b75b14c5f5a36e47f8a6338c4", "tree": "dc611c0c5f0cd7818763ca46f821c1470542e51f" },
+      "host": { "arch": "arm64", "cpuCount": 12, "cpuModel": "Apple M2 Max", "node": "24.16.0", "os": "darwin", "pnpm": "10.18.0", "sqlite": "3.53.0", "totalMemoryBytes": 68719476736, "zlib": "1.3.1-e00f703" },
+      "storage": { "journalRows": 3125, "pageSizeBytes": 4096, "pages": 3851, "databaseBytes": 15773696, "writeAheadLogBytes": 0, "sharedMemoryBytes": 0, "userVersion": 2 },
+      "rawProvenance": { "schema": "attunegraph-scale-benchmark@1", "byteLength": 753237, "sha256": "sha256:6a690b8d693dc9dd74e806e13739a140b12bb9557c5ff28b8cec5ef9f792f87f", "maximumBytes": 16777216 },
+      "claimEligible": false,
+      "measurementOnly": true
+    },
+    {
+      "schema": "attunegraph-sqlite-compression-settled-scale@1",
+      "scale": 1000000,
+      "observedAt": "2026-08-02T06:18:17.045Z",
+      "corpus": { "schema": "attunegraph-benchmark-corpus-manifest@1", "seed": "thread-rooted-hot-and-cold@1", "sha256": "sha256:fa410a4de98fd5fb1987d2f5bb5a146e7f2a0e7d8aabfad05e82536843c55709", "assertionCount": 1000000, "shardCount": 31250, "maxAssertionsPerShard": 32 },
+      "command": { "executable": "corepack pnpm --silent benchmark:sqlite-compression-qualification", "args": ["--scale-evidence=all", "--json"], "benchmark": { "profile": "local-session", "repetitions": 1, "scale": 1000000, "warmups": 0 } },
+      "repository": { "clean": false, "commit": "2d95f300fda5c066412fafc38f5e5f3f588bd500", "lockfileSha256": "sha256:c696e0cdde9b5e21ee598af9101b4611b5e60e4b75b14c5f5a36e47f8a6338c4", "tree": "dc611c0c5f0cd7818763ca46f821c1470542e51f" },
+      "host": { "arch": "arm64", "cpuCount": 12, "cpuModel": "Apple M2 Max", "node": "24.16.0", "os": "darwin", "pnpm": "10.18.0", "sqlite": "3.53.0", "totalMemoryBytes": 68719476736, "zlib": "1.3.1-e00f703" },
+      "storage": { "journalRows": 31250, "pageSizeBytes": 4096, "pages": 38440, "databaseBytes": 157450240, "writeAheadLogBytes": 0, "sharedMemoryBytes": 0, "userVersion": 2 },
+      "rawProvenance": { "schema": "attunegraph-scale-benchmark@1", "byteLength": 7535863, "sha256": "sha256:97b32bf62fd351dc422b3f9f89568f7e42a74da96cf0288b345bb11dbc560cbb", "maximumBytes": 16777216 },
+      "claimEligible": false,
+      "measurementOnly": true
+    }
+  ],
+  "proceed": true,
+  "rawEvidence": {
+    "checkedInHarness": "scripts/qualify-attunegraph-sqlite-compression.mjs",
+    "qualificationCommand": "corepack pnpm --silent benchmark:sqlite-compression-qualification -- --json",
+    "standardScaleCommand": "corepack pnpm --silent benchmark:sqlite-compression-qualification -- --scale-evidence=standard --json",
+    "millionScaleCommand": "corepack pnpm --silent benchmark:sqlite-compression-qualification -- --scale-evidence=all --json",
+    "storage": "caller-selected non-repository output path"
+  },
+  "claims": {
+    "ladybugParity": false
+  }
+}

@@ -14,6 +14,10 @@ import {
   ATTUNEGRAPH_PHYSICAL_SCHEMA_V1,
   classifyAttuneGraphPhysicalSchemaV1
 } from "./attunegraph-physical-schema-v1.mjs";
+import {
+  ATTUNEGRAPH_PHYSICAL_SCHEMA_V2,
+  classifyAttuneGraphPhysicalSchemaV2
+} from "./attunegraph-physical-schema-v2.mjs";
 
 it("defines and classifies the exact AttuneGraph v1 physical profile", () => {
   expect(ATTUNEGRAPH_PHYSICAL_SCHEMA_V1).toMatchObject({
@@ -61,6 +65,38 @@ it("defines and classifies the exact AttuneGraph v1 physical profile", () => {
   })).toEqual({ kind: "foreign-or-corrupt" });
 });
 
+it("classifies v2 exactly while the legacy v1 classifier remains future-only", () => {
+  const profile = {
+    applicationId: ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.applicationId,
+    userVersion: ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.userVersion,
+    objects: ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.objects,
+    headForeignKey: ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.headForeignKey
+  };
+  expect(classifyAttuneGraphPhysicalSchemaV1(profile)).toEqual({ kind: "future" });
+  expect(classifyAttuneGraphPhysicalSchemaV2(profile)).toEqual({ kind: "match" });
+  expect(Object.isFrozen(ATTUNEGRAPH_PHYSICAL_SCHEMA_V2)).toBe(true);
+});
+
+it("inspects an empty caller-owned AttuneGraph v2 database with its actual version", () => {
+  const database = new DatabaseSync(":memory:", { readBigInts: true });
+  database.exec(`
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.createJournal};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.createGenerationIndex};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.createHead};
+    PRAGMA application_id = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.applicationId};
+    PRAGMA user_version = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.userVersion};
+  `);
+  const inspector = createAttuneGraphAdminReadOnlyInspector(database);
+  expect(inspector.inspectSummary()).toMatchObject({
+    applicationId: 0x41544731,
+    userVersion: 2,
+    headRows: 0,
+    journalRows: 0
+  });
+  expect(inspector.verifyIntegrity()).toEqual({ verified: true });
+  database.close();
+});
+
 it("preserves FUTURE_STORE_STATE when serving sees a future version and wrong application ID", async () => {
   const directory = await realpath(
     await mkdtemp(join(tmpdir(), "attunegraph-combined-identity-"))
@@ -73,7 +109,7 @@ it("preserves FUTURE_STORE_STATE when serving sees a future version and wrong ap
       ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.createGenerationIndex};
       ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.createHead};
       PRAGMA application_id = 1;
-      PRAGMA user_version = 2;
+      PRAGMA user_version = 3;
     `);
     database.close();
     await chmod(databasePath, 0o600);
@@ -205,7 +241,7 @@ it("distinguishes a dangling head from a missing scope", () => {
 
 it("authenticates only same-module sanitized inspector failures", () => {
   const future = createFixtureDatabase();
-  future.exec("PRAGMA user_version = 2");
+  future.exec("PRAGMA user_version = 3");
   let failure: unknown;
   try {
     createAttuneGraphAdminReadOnlyInspector(future);

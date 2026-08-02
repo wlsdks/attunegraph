@@ -457,7 +457,7 @@ export async function openSqliteAttuneGraphStore(
       || profile.profileVersion !== 1
       || profile.protocolVersion !== PROTOCOL_VERSION
       || typeof profile.sqliteVersion !== "string"
-      || profile.userVersion !== 1
+      || (profile.userVersion !== 1 && profile.userVersion !== 2)
     ) {
       throw failStop(storeFailure("local AttuneGraph worker handshake is unsupported"));
     }

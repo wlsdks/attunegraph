@@ -1,4 +1,5 @@
 import {
+  chmod,
   lstat,
   mkdir,
   mkdtemp,
@@ -26,6 +27,8 @@ import { openLocalAttuneGraph, openLocalAttuneGraphSession } from "./local.js";
 import { openLocalAttuneGraphSessionForTesting } from "./local-session-internal.js";
 import { openSqliteAttuneGraphStore } from "./attunegraph-sqlite-store.js";
 import { runAttuneGraphStoreConformance } from "./attunegraph-testing.js";
+import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V1 } from "./attunegraph-physical-schema-v1.mjs";
+import { ATTUNEGRAPH_PHYSICAL_SCHEMA_V2 } from "./attunegraph-physical-schema-v2.mjs";
 
 const NOW = "2026-07-30T00:00:00.000Z";
 const SCOPE: AttuneGraphScope = {
@@ -166,6 +169,95 @@ it("persists and reopens byte-identical Engine snapshots and results", async () 
   await expect(reopened.projectAgainstHead(input)).rejects.toMatchObject({ code: "CLOSED" });
   await expect(reopened.execute(execute())).rejects.toMatchObject({ code: "CLOSED" });
   await expect(reopened.query(decisionQuery())).rejects.toMatchObject({ code: "CLOSED" });
+});
+
+it("creates physical schema v2 with exact compressed projection metadata", async () => {
+  const databasePath = await temporaryDatabase();
+  const graph = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  const snapshot = await graph.project(command("physical-v2"));
+  await graph.close();
+
+  const database = new DatabaseSync(databasePath, { readBigInts: true, readOnly: true });
+  const version = database.prepare("PRAGMA user_version").get();
+  const columns = database.prepare(
+    "SELECT name FROM pragma_table_info('attunegraph_projection_journal') ORDER BY cid"
+  ).all().map((row) => row.name);
+  const row = database.prepare(`
+    SELECT typeof(projection_payload) AS payloadType,
+           projection_encoding AS encoding,
+           projection_uncompressed_bytes AS uncompressedBytes,
+           projection_payload_sha256 AS payloadSha256,
+           projection_fingerprint AS projectionFingerprint
+    FROM attunegraph_projection_journal
+  `).get();
+  database.close();
+
+  expect(version).toEqual({ user_version: 2n });
+  expect(columns).toContain("projection_payload");
+  expect(columns).not.toContain("projection_json");
+  expect(row).toMatchObject({
+    payloadType: "blob",
+    encoding: "deflate-raw@1",
+    payloadSha256: expect.stringMatching(/^sha256:[0-9a-f]{64}$/u),
+    projectionFingerprint: snapshot.commitId.replace("attunegraph-commit:", "")
+  });
+  expect(row?.uncompressedBytes).toEqual(expect.any(BigInt));
+});
+
+it("opens and keeps writing exact physical schema v1 without automatic migration", async () => {
+  const databasePath = await temporaryDatabase("legacy-v1.sqlite");
+  const fixture = new DatabaseSync(databasePath);
+  fixture.exec(`
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.createJournal};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.createGenerationIndex};
+    ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.createHead};
+    PRAGMA application_id = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.applicationId};
+    PRAGMA user_version = ${ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.userVersion};
+  `);
+  fixture.close();
+  await chmod(databasePath, 0o600);
+
+  const graph = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  const snapshot = await graph.project(command("legacy-v1-write"));
+  const result = await graph.execute(execute());
+  await graph.close();
+
+  const database = new DatabaseSync(databasePath, { readBigInts: true, readOnly: true });
+  expect(database.prepare("PRAGMA user_version").get()).toEqual({ user_version: 1n });
+  const columns = database.prepare(
+    "SELECT name FROM pragma_table_info('attunegraph_projection_journal') ORDER BY cid"
+  ).all().map((row) => row.name);
+  expect(columns).toContain("projection_json");
+  expect(columns).not.toContain("projection_payload");
+  database.close();
+
+  const reopened = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  await expect(reopened.head()).resolves.toEqual(snapshot);
+  expect(JSON.stringify(await reopened.execute(execute()))).toBe(JSON.stringify(result));
+  await reopened.close();
+});
+
+it("fails closed on v2 trailing bytes even when their payload hash is recomputed", async () => {
+  const databasePath = await temporaryDatabase("trailing-v2.sqlite");
+  const graph = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  await graph.project(command("trailing-v2"));
+  await graph.close();
+
+  const database = new DatabaseSync(databasePath);
+  const row = database.prepare(
+    "SELECT projection_payload AS payload FROM attunegraph_projection_journal"
+  ).get() as { payload: Uint8Array };
+  const trailing = Buffer.concat([Buffer.from(row.payload), Buffer.from([0xde, 0xad])]);
+  const payloadSha256 = `sha256:${createHash("sha256").update(trailing).digest("hex")}`;
+  database.prepare(`
+    UPDATE attunegraph_projection_journal
+    SET projection_payload = ?, projection_payload_sha256 = ?
+  `).run(trailing, payloadSha256);
+  database.close();
+
+  const reopened = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  await expect(reopened.execute(execute())).rejects.toMatchObject({ code: "CORRUPT_STORE" });
+  await reopened.close();
 });
 
 it("keeps AttuneQL and object decision queries byte-identical across memory and local reopen", async () => {

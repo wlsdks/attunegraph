@@ -18,7 +18,7 @@ export type AttuneGraphAdminErrorCode =
 
 export interface AttuneGraphAdminStoreSummary {
   readonly applicationId: 0x41544731;
-  readonly userVersion: 1;
+  readonly userVersion: 1 | 2;
   readonly protocolVersion: 1;
   readonly sqliteVersion: string;
   readonly headRows: number;

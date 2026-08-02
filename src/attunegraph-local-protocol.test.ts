@@ -229,18 +229,20 @@ it.each([
 });
 
 it("accepts exact initialize and close terminal envelopes", () => {
-  expect(parseWorkerResponse({
-    protocolVersion: 1,
-    id: 1,
-    ok: true,
-    result: {
-      applicationId: 0x41544731,
-      profileVersion: 1,
+  for (const userVersion of [1, 2]) {
+    expect(parseWorkerResponse({
       protocolVersion: 1,
-      sqliteVersion: "3.51.3",
-      userVersion: 1
-    }
-  }, "initialize")).toMatchObject({ ok: true, id: 1 });
+      id: 1,
+      ok: true,
+      result: {
+        applicationId: 0x41544731,
+        profileVersion: 1,
+        protocolVersion: 1,
+        sqliteVersion: "3.51.3",
+        userVersion
+      }
+    }, "initialize")).toMatchObject({ ok: true, id: 1, result: { userVersion } });
+  }
   expect(parseWorkerResponse({
     protocolVersion: 1,
     id: 2,

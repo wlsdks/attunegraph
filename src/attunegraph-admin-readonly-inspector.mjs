@@ -9,6 +9,10 @@ import {
   ATTUNEGRAPH_PHYSICAL_SCHEMA_V1,
   classifyAttuneGraphPhysicalSchemaV1
 } from "./attunegraph-physical-schema-v1.mjs";
+import {
+  ATTUNEGRAPH_PHYSICAL_SCHEMA_V2,
+  classifyAttuneGraphPhysicalSchemaV2
+} from "./attunegraph-physical-schema-v2.mjs";
 
 const isProxy = nodeTypes.isProxy;
 const SQLITE_BUSY = 5;
@@ -19,7 +23,7 @@ const MAX_SCHEMA_SQL_BYTES = 4_096;
 const MAX_METADATA_BYTES = 512;
 
 /** @typedef {"FUTURE_STORE_STATE" | "CORRUPT_STORE" | "STORE_BUSY" | "WORKER_FAILURE"} InspectorFailureCode */
-/** @typedef {Readonly<{applicationId: 0x41544731, userVersion: 1, protocolVersion: 1, sqliteVersion: string, headRows: number, journalRows: number, maxGeneration: number}>} AdminSummaryResult */
+/** @typedef {Readonly<{applicationId: 0x41544731, userVersion: 1 | 2, protocolVersion: 1, sqliteVersion: string, headRows: number, journalRows: number, maxGeneration: number}>} AdminSummaryResult */
 /** @typedef {Readonly<{found: false}> | Readonly<{found: true, head: Readonly<{scope: Readonly<{sourceId: string, threadId: string}>, generation: number, commitId: string, projectionFingerprint: string}>}>} AdminHeadResult */
 /** @typedef {Readonly<{verified: true}>} AdminIntegrityResult */
 
@@ -345,9 +349,17 @@ function admitScope(value) {
 
 /** @param {ReturnType<typeof databaseCapabilities>} database */
 function assertMatchingPhysicalProfile(database) {
-  const classification = classifyAttuneGraphPhysicalSchemaV1(readPhysicalProfile(database));
+  const profile = readPhysicalProfile(database);
+  if (
+    profile.applicationId === ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.applicationId
+    && profile.userVersion > ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.userVersion
+  ) failInspector("FUTURE_STORE_STATE");
+  const classification = profile.userVersion === ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.userVersion
+    ? classifyAttuneGraphPhysicalSchemaV1(profile)
+    : classifyAttuneGraphPhysicalSchemaV2(profile);
   if (classification.kind === "future") failInspector("FUTURE_STORE_STATE");
   if (classification.kind !== "match") failInspector("CORRUPT_STORE");
+  return profile;
 }
 
 /** @param {unknown} database */
@@ -374,7 +386,7 @@ export function createAttuneGraphAdminReadOnlyInspector(database) {
       || boundedInteger(trustedSchema.trusted_schema, 0) !== 0
       || boundedInteger(foreignKeys.foreign_keys, 0) !== 1
     ) failInspector("WORKER_FAILURE");
-    assertMatchingPhysicalProfile(capabilities);
+    const physicalProfile = assertMatchingPhysicalProfile(capabilities);
     const sqliteVersionRow = admitRecord(
       getRow(capabilities, "SELECT sqlite_version() AS sqliteVersion"),
       ["sqliteVersion"]
@@ -393,8 +405,8 @@ export function createAttuneGraphAdminReadOnlyInspector(database) {
           COALESCE((SELECT MAX(generation) FROM attunegraph_projection_journal), 0) AS maxGeneration
       `), ["headRows", "journalRows", "maxGeneration"]);
       return /** @type {AdminSummaryResult} */ (admitResult("inspectSummary", {
-        applicationId: ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.applicationId,
-        userVersion: ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.userVersion,
+        applicationId: ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.applicationId,
+        userVersion: /** @type {1 | 2} */ (physicalProfile.userVersion),
         protocolVersion: ADMIN_PROTOCOL_VERSION,
         sqliteVersion,
         headRows: boundedInteger(row.headRows, 0),

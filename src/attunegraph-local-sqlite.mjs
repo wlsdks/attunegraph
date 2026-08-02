@@ -18,6 +18,14 @@ import {
   ATTUNEGRAPH_PHYSICAL_SCHEMA_V1,
   classifyAttuneGraphPhysicalSchemaV1
 } from "./attunegraph-physical-schema-v1.mjs";
+import {
+  ATTUNEGRAPH_PHYSICAL_SCHEMA_V2,
+  classifyAttuneGraphPhysicalSchemaV2
+} from "./attunegraph-physical-schema-v2.mjs";
+import {
+  decodeAttuneGraphProjectionJson,
+  encodeAttuneGraphProjectionJson
+} from "./attunegraph-projection-codec.mjs";
 import { parseProjection } from "./attunegraph-local-projection.mjs";
 import {
   assertNodeProfile,
@@ -36,6 +44,8 @@ const SQLITE_NOTADB = 26;
 let database;
 /** @type {ReturnType<typeof prepareStatements>} */
 let statements;
+/** @type {1 | 2} */
+let physicalSchemaVersion;
 let initialized = false;
 let closing = false;
 /** @typedef {"before-commit" | "after-commit-before-ack" | "hang-read" | "hang-close"} TestFault */
@@ -249,17 +259,20 @@ function assertExactSchema(applicationId, userVersion) {
     onDelete: physicalText(row.onDelete, MAX_TEXT),
     match: physicalText(row.match, MAX_TEXT)
   })));
-  const classification = classifyAttuneGraphPhysicalSchemaV1(Object.freeze({
+  const admitted = Object.freeze({
     applicationId,
     userVersion,
     objects: admittedObjects,
     headForeignKey: admittedForeignKeys
-  }));
+  });
+  const classification = userVersion === ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.userVersion
+    ? classifyAttuneGraphPhysicalSchemaV1(admitted)
+    : classifyAttuneGraphPhysicalSchemaV2(admitted);
   if (classification.kind === "future") {
     fail("FUTURE_STORE_STATE", "local AttuneGraph store has a future physical schema");
   }
   if (classification.kind !== "match") {
-    fail("CORRUPT_STORE", "local AttuneGraph schema does not match physical profile v1");
+    fail("CORRUPT_STORE", `local AttuneGraph schema does not match physical profile v${userVersion.toString()}`);
   }
 }
 
@@ -304,9 +317,9 @@ function initializeSchema(wasEmpty) {
     }
     execSql("BEGIN IMMEDIATE", "schema transaction");
     try {
-      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.createJournal, "journal schema creation");
-      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.createGenerationIndex, "journal index creation");
-      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.createHead, "head schema creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.createJournal, "journal schema creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.createGenerationIndex, "journal index creation");
+      execSql(ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.createHead, "head schema creation");
       execSql(`PRAGMA application_id = ${APPLICATION_ID}`);
       execSql(`PRAGMA user_version = ${USER_VERSION}`);
       execSql("COMMIT", "schema commit");
@@ -319,8 +332,8 @@ function initializeSchema(wasEmpty) {
       throw cause;
     }
     return Object.freeze({
-      applicationId: ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.applicationId,
-      userVersion: ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.userVersion
+      applicationId: ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.applicationId,
+      userVersion: ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.userVersion
     });
   }
   if (userVersion > USER_VERSION) {
@@ -333,18 +346,35 @@ function initializeSchema(wasEmpty) {
     );
   }
   if (
-    applicationId !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.applicationId
-    || userVersion !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.userVersion
+    applicationId !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.applicationId
+    || (userVersion !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V1.userVersion
+      && userVersion !== ATTUNEGRAPH_PHYSICAL_SCHEMA_V2.userVersion)
   ) {
     fail("CORRUPT_STORE", "local AttuneGraph store has a foreign physical identity");
   }
   return Object.freeze({ applicationId, userVersion });
 }
 
-function prepareStatements() {
+/** @param {1 | 2} schemaVersion */
+function prepareStatements(schemaVersion) {
   return {
-    read: database.prepare(`
-      SELECT j.generation, j.commit_id AS commitId, j.projection_json AS projectionJson,
+    read: database.prepare(schemaVersion === 1 ? `
+      SELECT j.generation, j.commit_id AS commitId,
+             j.projection_json AS projectionJson,
+             j.projection_fingerprint AS projectionFingerprint
+      FROM attunegraph_projection_head AS h
+      JOIN attunegraph_projection_journal AS j
+        ON j.source_id = h.source_id
+        AND j.thread_id = h.thread_id
+        AND j.generation = h.generation
+        AND j.commit_id = h.commit_id
+      WHERE h.source_id = ? AND h.thread_id = ?
+    ` : `
+      SELECT j.generation, j.commit_id AS commitId,
+             j.projection_encoding AS projectionEncoding,
+             j.projection_payload AS projectionPayload,
+             j.projection_uncompressed_bytes AS projectionUncompressedBytes,
+             j.projection_payload_sha256 AS projectionPayloadSha256,
              j.projection_fingerprint AS projectionFingerprint
       FROM attunegraph_projection_head AS h
       JOIN attunegraph_projection_journal AS j
@@ -359,10 +389,16 @@ function prepareStatements() {
       FROM attunegraph_projection_head
       WHERE source_id = ? AND thread_id = ?
     `),
-    insertJournal: database.prepare(`
+    insertJournal: database.prepare(schemaVersion === 1 ? `
       INSERT INTO attunegraph_projection_journal (
         source_id, thread_id, generation, commit_id, projection_json, projection_fingerprint
       ) VALUES (?, ?, ?, ?, ?, ?)
+    ` : `
+      INSERT INTO attunegraph_projection_journal (
+        source_id, thread_id, generation, commit_id,
+        projection_encoding, projection_payload, projection_uncompressed_bytes,
+        projection_payload_sha256, projection_fingerprint
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `),
     insertHead: database.prepare(`
       INSERT INTO attunegraph_projection_head (source_id, thread_id, generation, commit_id)
@@ -481,14 +517,15 @@ async function initialize(payload) {
       fail("UNSUPPORTED_STORE_PROFILE", "SQLite safety pragmas could not be established");
     }
     assertDatabaseIntegrity(physicalIdentity);
-    statements = prepareStatements();
+    physicalSchemaVersion = /** @type {1 | 2} */ (physicalIdentity.userVersion);
+    statements = prepareStatements(physicalSchemaVersion);
     initialized = true;
     return {
       applicationId: APPLICATION_ID,
       profileVersion: 1,
       protocolVersion: PROTOCOL_VERSION,
       sqliteVersion: /** @type {string} */ (process.versions.sqlite),
-      userVersion: USER_VERSION
+      userVersion: physicalSchemaVersion
     };
   } catch (cause) {
     try {
@@ -517,16 +554,35 @@ function decodeStoredProjection(row, scope) {
     MAX_TEXT,
     "CORRUPT_STORE"
   );
-  if (
-    typeof row.projectionJson !== "string"
-    || Buffer.byteLength(row.projectionJson, "utf8") > MAX_PROJECTION_BYTES
-  ) {
-    fail("CORRUPT_STORE", "journal projection payload is oversized or invalid");
+  let projectionJson;
+  if (physicalSchemaVersion === 1) {
+    if (
+      typeof row.projectionJson !== "string"
+      || Buffer.byteLength(row.projectionJson, "utf8") > MAX_PROJECTION_BYTES
+    ) fail("CORRUPT_STORE", "journal projection payload is oversized or invalid");
+    projectionJson = row.projectionJson;
+  } else {
+    let uncompressedBytes;
+    try {
+      uncompressedBytes = safeInteger(
+        row.projectionUncompressedBytes,
+        "journal projection uncompressed bytes",
+        1n
+      );
+      projectionJson = decodeAttuneGraphProjectionJson({
+        encoding: row.projectionEncoding,
+        payload: row.projectionPayload,
+        payloadFingerprint: row.projectionPayloadSha256,
+        uncompressedBytes
+      });
+    } catch (cause) {
+      fail("CORRUPT_STORE", "journal compressed projection payload is invalid", cause);
+    }
   }
   /** @type {unknown} */
   let parsed;
   try {
-    parsed = /** @type {unknown} */ (JSON.parse(row.projectionJson));
+    parsed = /** @type {unknown} */ (JSON.parse(projectionJson));
   } catch (cause) {
     fail("CORRUPT_STORE", "journal projection payload is malformed JSON", cause);
   }
@@ -536,7 +592,7 @@ function decodeStoredProjection(row, scope) {
   } catch (cause) {
     fail("CORRUPT_STORE", "journal projection payload is structurally invalid", cause);
   }
-  if (JSON.stringify(projection) !== row.projectionJson) {
+  if (JSON.stringify(projection) !== projectionJson) {
     fail("CORRUPT_STORE", "journal projection payload is not canonical JSON");
   }
   if (
@@ -560,7 +616,12 @@ function read(payload) {
   const rows = sqlRows(
     allSql(statements.read, scope.sourceId, scope.threadId),
     "journal read rows",
-    ["generation", "commitId", "projectionJson", "projectionFingerprint"],
+    physicalSchemaVersion === 1
+      ? ["generation", "commitId", "projectionJson", "projectionFingerprint"]
+      : [
+          "generation", "commitId", "projectionEncoding", "projectionPayload",
+          "projectionUncompressedBytes", "projectionPayloadSha256", "projectionFingerprint"
+        ],
     "CORRUPT_STORE"
   );
   if (rows.length > 1) fail("CORRUPT_STORE", "scope has more than one head");
@@ -630,6 +691,14 @@ function compareAndSwap(payload) {
     ? undefined
     : parseSnapshot(input.expected, scope, "expected snapshot");
   const proposed = validateProjection(input.proposed, scope);
+  let encoded;
+  if (physicalSchemaVersion === 2) {
+    try {
+      encoded = encodeAttuneGraphProjectionJson(proposed.json);
+    } catch (cause) {
+      fail("STORE_FAILURE", "proposed projection could not be encoded", cause);
+    }
+  }
   execSql("BEGIN IMMEDIATE", "compare-and-swap begin");
   try {
     const current = currentSnapshot(scope);
@@ -644,15 +713,31 @@ function compareAndSwap(payload) {
     ) {
       fail("STORE_FAILURE", "proposed snapshot does not advance the pinned head exactly once");
     }
-    runSql(
-      statements.insertJournal,
-      scope.sourceId,
-      scope.threadId,
-      BigInt(proposed.snapshot.generation),
-      proposed.snapshot.commitId,
-      proposed.json,
-      proposed.fingerprint
-    );
+    if (physicalSchemaVersion === 1) {
+      runSql(
+        statements.insertJournal,
+        scope.sourceId,
+        scope.threadId,
+        BigInt(proposed.snapshot.generation),
+        proposed.snapshot.commitId,
+        proposed.json,
+        proposed.fingerprint
+      );
+    } else {
+      if (encoded === undefined) fail("STORE_FAILURE", "encoded projection is unavailable");
+      runSql(
+        statements.insertJournal,
+        scope.sourceId,
+        scope.threadId,
+        BigInt(proposed.snapshot.generation),
+        proposed.snapshot.commitId,
+        encoded.encoding,
+        encoded.payload,
+        BigInt(encoded.uncompressedBytes),
+        encoded.payloadFingerprint,
+        proposed.fingerprint
+      );
+    }
     runSql(
       statements.insertHead,
       scope.sourceId,
@@ -755,17 +840,25 @@ function mutateForTesting(payload) {
   const input = payload;
   switch (input.mutation) {
     case "future-user-version":
-      execSql("PRAGMA user_version = 2", "future-version test mutation");
+      execSql("PRAGMA user_version = 3", "future-version test mutation");
       break;
     case "wrong-application-id":
       execSql("PRAGMA application_id = 1", "application-id test mutation");
       break;
     case "malformed-projection-json":
-      runSql(database.prepare(
-        "UPDATE attunegraph_projection_journal SET projection_json = '{' "
-          + "WHERE (source_id, thread_id, generation) IN "
-          + "(SELECT source_id, thread_id, generation FROM attunegraph_projection_head)"
-      ));
+      if (physicalSchemaVersion === 1) {
+        runSql(database.prepare(
+          "UPDATE attunegraph_projection_journal SET projection_json = '{' "
+            + "WHERE (source_id, thread_id, generation) IN "
+            + "(SELECT source_id, thread_id, generation FROM attunegraph_projection_head)"
+        ));
+      } else {
+        runSql(database.prepare(
+          "UPDATE attunegraph_projection_journal SET projection_payload = x'00' "
+            + "WHERE (source_id, thread_id, generation) IN "
+            + "(SELECT source_id, thread_id, generation FROM attunegraph_projection_head)"
+        ));
+      }
       break;
     case "missing-journal-row":
       execSql("PRAGMA foreign_keys = OFF", "disable foreign keys for test mutation");
@@ -786,14 +879,25 @@ function mutateForTesting(payload) {
         "disable check constraints for oversized-row test"
       );
       try {
-        runSql(
-          database.prepare(
-            "UPDATE attunegraph_projection_journal SET projection_json = ? "
-              + "WHERE (source_id, thread_id, generation) IN "
-              + "(SELECT source_id, thread_id, generation FROM attunegraph_projection_head)"
-          ),
-          "x".repeat(MAX_PROJECTION_BYTES + 1)
-        );
+        if (physicalSchemaVersion === 1) {
+          runSql(
+            database.prepare(
+              "UPDATE attunegraph_projection_journal SET projection_json = ? "
+                + "WHERE (source_id, thread_id, generation) IN "
+                + "(SELECT source_id, thread_id, generation FROM attunegraph_projection_head)"
+            ),
+            "x".repeat(MAX_PROJECTION_BYTES + 1)
+          );
+        } else {
+          runSql(
+            database.prepare(
+              "UPDATE attunegraph_projection_journal SET projection_uncompressed_bytes = ? "
+                + "WHERE (source_id, thread_id, generation) IN "
+                + "(SELECT source_id, thread_id, generation FROM attunegraph_projection_head)"
+            ),
+            BigInt(MAX_PROJECTION_BYTES + 1)
+          );
+        }
       } finally {
         execSql(
           "PRAGMA ignore_check_constraints = OFF",

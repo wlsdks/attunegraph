@@ -386,7 +386,7 @@ it("reports a thrown SQLite close as one code-only Worker failure", async () => 
 it("does not let cleanup close failure replace an earlier inspector code", async () => {
   const fixture = await createDatabaseFixture();
   const source = new DatabaseSync(fixture.databasePath, { readBigInts: true });
-  source.exec("PRAGMA user_version = 2");
+  source.exec("PRAGMA user_version = 3");
   source.close();
   const lease = await acquireAttuneGraphAdminReadonlySnapshot({
     databasePath: fixture.databasePath,
@@ -869,7 +869,7 @@ it("preserves a genuine inspector FUTURE_STORE_STATE code", async () => {
   const database = new DatabaseSync(fixture.databasePath, {
     readBigInts: true
   });
-  database.exec("PRAGMA user_version = 2");
+  database.exec("PRAGMA user_version = 3");
   database.close();
 
   await expect(openAttuneGraphAdminReadonlyApplication({
