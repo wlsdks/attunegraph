@@ -10,6 +10,7 @@ import {
   CanonicalImmutableEnvelopeError,
   canonicalizeImmutableEnvelope,
   canonicalizeImmutableEnvelopeForInternalUse,
+  contentIdFromFrozenUnsignedForInternalUse,
   mintCanonicalImmutableEnvelopeFromFrozenUnsignedForInternalUse
 } from "./canonical-immutable-envelope.js";
 
@@ -1130,6 +1131,60 @@ describe("canonical immutable envelope", () => {
       Buffer.from(expected.canonicalJson).toString("hex")
     );
     assertFrozenTree(minted.envelope);
+  });
+
+  it("derives the exact minted content ID without materializing a full envelope", () => {
+    const inputs = [
+      fixture(),
+      {
+        schemaVersion: 1,
+        values: ["한글", "emoji-😀", { nested: true }]
+      },
+      {
+        empty: [],
+        ordered: { z: 1, a: 2 },
+        value: Number.MAX_SAFE_INTEGER
+      }
+    ] as const;
+    for (const input of inputs) {
+      const frozenUnsigned = frozenCopy(input);
+      const minted =
+        mintCanonicalImmutableEnvelopeFromFrozenUnsignedForInternalUse(
+          frozenUnsigned,
+          SPEC
+        );
+      expect(contentIdFromFrozenUnsignedForInternalUse(
+        frozenUnsigned,
+        SPEC
+      )).toBe(minted.contentId);
+    }
+
+    expectError(
+      () => contentIdFromFrozenUnsignedForInternalUse(
+        frozenCopy(signedMutable(fixture())),
+        SPEC
+      ),
+      "INVALID_INPUT",
+      "expected-unsigned-root"
+    );
+    expectError(
+      () => contentIdFromFrozenUnsignedForInternalUse(
+        frozenCopy({ value: -0 }),
+        SPEC
+      ),
+      "INVALID_INPUT",
+      "unsupported-number"
+    );
+    const overflow = expectError(
+      () => contentIdFromFrozenUnsignedForInternalUse(
+        frozenCopy(bodyFixtureAtBytes(
+          CANONICAL_IMMUTABLE_ENVELOPE_LIMITS.maxCanonicalBodyBytes + 1
+        )),
+        SPEC
+      ),
+      "BUDGET_EXCEEDED"
+    );
+    expect(overflow.details.axis).toBe("canonical-body-bytes");
   });
 
   it("rejects hostile or invalid internal byte limits without invoking getters or proxy traps", () => {

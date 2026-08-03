@@ -2,7 +2,7 @@ import { Buffer } from "node:buffer";
 
 import { AttuneGraphError } from "./attunegraph-error.js";
 import type { AttuneGraphStoredProjection } from "./attunegraph-backend.js";
-import { mintCanonicalImmutableEnvelopeFromFrozenUnsignedForInternalUse } from "./canonical-immutable-envelope.js";
+import { contentIdFromFrozenUnsignedForInternalUse } from "./canonical-immutable-envelope.js";
 import type {
   AttuneGraphOperatorResult,
   AttuneGraphSnapshot,
@@ -186,14 +186,14 @@ export function selectedWorkingGraphContentId(
   assertions: readonly GraphAssertion[],
   seed: GraphRef
 ): string {
-  return mintCanonicalImmutableEnvelopeFromFrozenUnsignedForInternalUse(
+  return contentIdFromFrozenUnsignedForInternalUse(
     Object.freeze({
       schemaVersion: 1 as const,
       assertions: Object.freeze([...assertions]),
       seed: Object.freeze({ ...seed })
     }),
     SELECTED_WORKING_GRAPH_SPEC
-  ).contentId;
+  );
 }
 
 export function dedupeGraphAssertions(

@@ -1,7 +1,7 @@
 # First-principles performance decisions
 
 Status: accepted method; candidate states are evidence-gated.
-Last reviewed: 2026-08-02.
+Last reviewed: 2026-08-03.
 
 ## Decision
 
@@ -65,6 +65,7 @@ priced away.
 | Reuse a prepared Working Graph plan only under exact-head equality | `now` | Avoids repeated full projection admission on an unchanged handle while retaining query-time temporal and budget work | Reject on any mixed-generation result, missed invalidation, changed temporal-boundary result, or extra cache authority |
 | Fuse admission safe-JSON inspection with normalization | `measure-first` | Could remove one object-graph walk, but descriptor, proxy, alias, sparse-array, hidden-field, and malformed-Unicode rejection must remain exact | First add per-phase descriptor/normalization counters; reject if any hostile-input case changes or paired admission measurements do not isolate a consistent reduction |
 | Reduce duplicate canonical receipt parsing, serialization, or hashing during admission | `measure-first` | The supplied receipt is canonicalized and the normalized result is independently resealed; a safe implementation may share immutable intermediate bytes | Reject unless receipt ID/canonical JSON remain exact for every remint test and paired `decision-query@1` admission/end-to-end evidence isolates fewer canonical byte passes without moving work outside the timer |
+| Derive the selected Working Graph content ID without materializing an unused envelope | `verified-current` | The caller needs only the domain-separated digest. Reusing the same frozen-input inspection and canonical-body encoder removes two full-envelope encodes plus detached-tree freeze/reverification without changing the ID contract. | Reject on any content-ID, Working Graph golden anchor, hostile-input, Unicode, numeric, budget, result, or admission differential, or if alternating paired evidence does not improve the 32-witness end-to-end boundary. |
 | Add package-private phase counters for decision-query production and admission | `measure-first` | Attribution is required before choosing another optimization; wall time alone cannot identify traversal, serialization, hashing, or transport | Reject the counter design if it changes public output, observes secret/source payloads, is unbounded, or cannot be recomputed from a deterministic fixture |
 | Seed the prepared Working Graph plan from the already admitted projection after a successful CAS or exact replay/winner convergence | `now` | Deletes the first post-commit full projection read and repeat admission while retaining one exact-head check before every reuse | Reject on any mixed-generation cache use, missed epoch invalidation, or result/receipt byte drift; the deterministic part-count cell must remain at zero full reads for the seeded first query and one for the equivalent cold-handle query |
 | Remove the SQLite parent backend's extra JSON stringify/parse detachment | `now` | Worker structured clone plus `parseWorkerResponse -> parseWorkerResult -> parseProjection` already descriptor-admit, rebuild, and deeply freeze a new parent-side projection, so the parent copy was one duplicate stringify/parse pass | Reject unless malformed-worker/protocol fail-stop, direct-backend mutation isolation, deep freezing, and Engine canonical Store admission remain exact; the deterministic intrinsic counter must retain the two protocol-size stringifications and remove exactly one stringify plus one parse |
@@ -154,6 +155,76 @@ the target phase is mixed/noisy, when an adjacent phase regresses enough to
 erase the boundary reduction, or when the part counter does not move as
 predicted. The existing qualification policy, tail-eligibility rules, and
 independent calibration requirements still apply.
+
+### Selected Working Graph content-ID specialization (2026-08-03)
+
+Accepted as a bounded TypeScript optimization. The pre-change path called the
+general frozen-unsigned envelope minter although `selectedWorkingGraphContentId`
+discarded the envelope and retained only `contentId`. That path performed one
+canonical-body encode, two full-envelope encodes, detached-tree freezing, and
+full frozen-output traversal. The specialized package-private path preserves
+the same frozen-input inspection, canonical-body ceiling, UTF-16 code-unit key
+ordering, UTF-8 bytes, hash domain, NUL separator, SHA-256 digest, and ID prefix,
+then returns the ID after the single required canonical-body encode.
+
+The change does not alter a public export, schema, wire format, persistence
+format, hash domain, receipt, or admission rule. It is not a shortcut for code
+that needs canonical envelope bytes; those callers remain on the full minter.
+The focused differential matrix covers nested values, unordered keys, Korean
+and astral Unicode, hostile signed roots, negative zero, and the canonical-body
+byte ceiling. Existing golden and transported-admission gates remain the
+semantic authority.
+
+Clean-revision paired evidence used Node 24.16.0 on an Apple M2 Max with two
+warmups and ten repetitions per artifact. Three base/candidate pairs ran in
+alternating order with exact anchors and admissions required in every artifact:
+
+| `agent-decision-read@1` p50 median of three artifacts | Base `ecaa1e6` | Candidate `a7b7909` | Delta |
+| --- | ---: | ---: | ---: |
+| 32-witness producer | 1.435 ms | 0.910 ms | -36.6% |
+| 32-witness admission | 2.283 ms | 1.739 ms | -23.8% |
+| 32-witness end to end | 3.860 ms | 2.757 ms | -28.6% |
+| 1-witness producer | 1.462 ms | 0.951 ms | -35.0% |
+| 1-witness admission | 2.250 ms | 1.719 ms | -23.6% |
+| 1-witness end to end | 3.796 ms | 2.699 ms | -28.9% |
+
+Reproduction command for each clean revision:
+
+```sh
+pnpm benchmark:agent-decision-read -- \
+  --workload=agent-decision-read@1 \
+  --warmups=2 \
+  --repetitions=10 \
+  --output=/absolute/non-symlinked/path/result.json
+```
+
+These are local measurement-only medians, not cross-host tails or a competitor
+claim. Ten repetitions do not qualify p95 or p99 under the repository policy.
+The benchmark exercises the in-memory semantic reference path; it does not
+measure SQLite open, worker lifecycle, journal growth, or durable recovery.
+
+One narrower precursor was rejected and deleted. A package-private fast path
+that avoided cloning an already frozen decision receipt passed focused tests,
+but the critical 32-witness admission p50 changed from 2.218 ms to 2.225 ms
+(+0.3%) and end to end regressed by about 0.7% in the paired artifact. It did
+not remove the dominant proof-assembly parts and was not retained.
+
+Research classification for this decision:
+
+| Source or technique | Class | Consequence |
+| --- | --- | --- |
+| RFC 8785 JSON Canonicalization Scheme | `adopt` | Keep invariant JSON serialization, code-unit ordering, UTF-8 generation, and invalid-Unicode rejection; optimize around the canonical representation, not through a second encoding. |
+| W3C Verifiable Credential Data Integrity 1.0 | `adopt` | Treat canonicalization correctness as an integrity boundary and choose the simplest transformation that satisfies the JSON-only security contract. |
+| Zep/Graphiti temporal knowledge graph paper | `reference-only` | Temporal agent memory supports the product direction, but its published retrieval results do not justify changing AttuneGraph's proof-ID algorithm or claiming parity. |
+| SQLite NGQP and plan-stability guidance | `reference-only` | Preserve the embedded storage direction and revision-bound plan evidence; it does not address this in-memory proof-assembly bottleneck. |
+| Replace SQLite or add a graph server for this slice | `unnecessary` | The measured cost was above the storage boundary, so a storage-engine replacement would add deployment and semantic risk without removing the observed work. |
+
+Primary sources: [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html),
+[W3C Data Integrity 1.0](https://www.w3.org/TR/vc-data-integrity/),
+[Zep/Graphiti paper](https://arxiv.org/abs/2501.13956), and
+[SQLite NGQP](https://www.sqlite.org/queryplanner-ng.html). The Zep benchmark
+numbers are author-reported and not comparable to AttuneGraph's local semantic
+boundary; no raw superiority claim is made from them.
 
 ## Current structural limit
 

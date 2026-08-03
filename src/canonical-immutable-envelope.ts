@@ -924,6 +924,32 @@ export function mintCanonicalImmutableEnvelopeFromFrozenUnsignedForInternalUse(
   );
 }
 
+/**
+ * Computes the content ID for a trusted, frozen unsigned body without
+ * materializing the signed envelope. This package-private path retains the
+ * exact inspection, canonical-body budget, domain separator, and digest used
+ * by the full mint path; callers must not use it when they need envelope bytes.
+ */
+export function contentIdFromFrozenUnsignedForInternalUse(
+  input: unknown,
+  spec: CanonicalImmutableEnvelopeSpec
+): string {
+  validateContract("attunegraph-frozen", spec);
+  const inspected = inspectEnvelope(
+    input,
+    "attunegraph-frozen",
+    spec,
+    true,
+    true
+  );
+  const unsigned = encodeCanonical(
+    inspected.body,
+    DEFAULT_CANONICAL_BYTE_LIMITS.maxCanonicalBodyBytes,
+    "canonical-body-bytes"
+  );
+  return `${spec.idPrefix}${digest(spec.hashDomain, unsigned.json)}`;
+}
+
 function canonicalizeImmutableEnvelopeWithInternalOptions(
   input: unknown,
   profile: CanonicalImmutableEnvelopeProfile,
