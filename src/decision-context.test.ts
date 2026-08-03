@@ -1,7 +1,9 @@
 import { expect, it } from "vitest";
 
 import {
+  admitAgentDecisionBundle,
   admitDecisionContextResult,
+  compileAgentDecisionBundle,
   openAttuneGraph,
   type AttuneGraphScope,
   type GraphAssertion,
@@ -156,6 +158,36 @@ function resealAuthorityEvaluation(candidate: any): void {
       idPrefix: "attunegraph-authority-evaluation:"
     })
   );
+}
+
+function resealAgentContext(candidate: any): any {
+  const unsigned = JSON.parse(JSON.stringify(candidate));
+  delete unsigned.contextId;
+  return JSON.parse(JSON.stringify(
+    mintCanonicalImmutableEnvelopeFromFrozenUnsignedForInternalUse(
+      freezeJson(unsigned),
+      Object.freeze({
+        hashDomain: "attunegraph.agent-decision-view.v1",
+        idField: "contextId",
+        idPrefix: "attunegraph-agent-context:"
+      })
+    ).envelope
+  ));
+}
+
+function resealAgentProof(candidate: any): any {
+  const unsigned = JSON.parse(JSON.stringify(candidate));
+  delete unsigned.proofId;
+  return JSON.parse(JSON.stringify(
+    mintCanonicalImmutableEnvelopeFromFrozenUnsignedForInternalUse(
+      freezeJson(unsigned),
+      Object.freeze({
+        hashDomain: "attunegraph.decision-context-proof-bundle.v1",
+        idField: "proofId",
+        idPrefix: "attunegraph-decision-proof:"
+      })
+    ).envelope
+  ));
 }
 
 function replaceSelectedWorkingGraph(candidate: any, assertions: readonly GraphAssertion[]): void {
@@ -876,4 +908,173 @@ it("fails closed below the minimum budget for its transported authority frontier
   expect(result.diagnostics.truncationReasons).toContain("token-budget");
   expect(result.diagnostics.estimatedTokens).toBe(8_827);
   await graph.close();
+});
+
+it("compiles a prompt-bounded agent context that stays bound to its admitted full proof", async () => {
+  const proof = await completeResult();
+
+  const bundle = compileAgentDecisionBundle(proof);
+  const context = bundle.context;
+
+  expect(context).toMatchObject({
+    operator: "agent-decision-view@1",
+    status: "complete",
+    decisionReadyAtDeclaredSnapshot: true,
+    executionCapability: "none",
+    decision: {
+      scope: SCOPE,
+      seed: ROOT,
+      action: ACTION,
+      threadRoot: ROOT,
+      asOf: NOW,
+      head: proof.snapshot
+    },
+    authority: {
+      state: "authorized",
+      witnessAssertionIds: ["authorized", "evidence-scope", "governed", "policy-scope"]
+    },
+    proof: {
+      mediaType: "application/vnd.attunegraph.decision-context-proof+json;version=1",
+      proofId: bundle.proof.proofId,
+      byteLength: Buffer.byteLength(JSON.stringify(bundle.proof), "utf8"),
+      decisionReceiptId: proof.receipt.receiptId,
+      admission: "proof-bundle-replay-required"
+    },
+    trust: {
+      contentIntegrity: "self-consistent-content-addressed",
+      producerAuthenticity: "not-provided",
+      sourceTruth: "not-provided",
+      headCurrency: "not-checked"
+    }
+  });
+  expect(context.evidence.map((entry) => entry.assertionId)).toEqual(
+    proof.workingGraph.assertions.map((entry) => entry.id)
+  );
+  expect(context.diagnostics.estimatedTokens).toBe(
+    Math.ceil(Buffer.byteLength(JSON.stringify(context), "utf8") / 4)
+  );
+  expect(context.diagnostics.estimatedTokens).toBeLessThan(proof.diagnostics.estimatedTokens);
+  expect(JSON.stringify(context)).not.toContain("canonicalProjection");
+  expect(JSON.stringify(context)).not.toContain("canonicalJson");
+  expect(bundle.proof.projection?.canonicalProjection).toBeTruthy();
+  expect(JSON.stringify(bundle.proof)).not.toContain("workingGraph");
+  expect(JSON.stringify(bundle.proof)).not.toContain("frontier");
+  expect(JSON.stringify(bundle.proof)).not.toContain("witnessAssertions");
+  expect(JSON.stringify(bundle.proof)).not.toContain("canonicalJson");
+
+  const admitted = admitAgentDecisionBundle(JSON.parse(JSON.stringify(bundle)));
+  expect(admitted).toEqual(bundle);
+  expectDeepFrozen(admitted);
+});
+
+it("rejects a self-consistently resealed compact context that differs from its full proof", async () => {
+  const proof = await completeResult();
+  const bundle = compileAgentDecisionBundle(proof);
+  const context = bundle.context;
+  const mutations: Array<(candidate: any) => void> = [
+    (candidate) => { candidate.status = "partial"; },
+    (candidate) => { candidate.evidence[0].assertionId = "fabricated"; },
+    (candidate) => { candidate.authority.witnessAssertionIds = []; },
+    (candidate) => { candidate.proof.decisionReceiptId = "attunegraph-decision-context:fabricated"; },
+    (candidate) => { candidate.diagnostics.estimatedTokens += 1; }
+  ];
+  for (const mutate of mutations) {
+    const candidate = JSON.parse(JSON.stringify(context));
+    mutate(candidate);
+    expect(() => admitAgentDecisionBundle({
+      context: resealAgentContext(candidate),
+      proof: JSON.parse(JSON.stringify(bundle.proof))
+    })).toThrow();
+  }
+  expect(() => admitAgentDecisionBundle({ context, proof: {} })).toThrow();
+});
+
+it("rejects a resealed proof bundle with altered query, snapshot, projection, receipt, or schema", async () => {
+  const bundle = compileAgentDecisionBundle(await completeResult());
+  const mutations: Array<(candidate: any) => void> = [
+    (candidate) => { candidate.query.action.id = "action:substituted"; },
+    (candidate) => { candidate.snapshot.commitId = "attunegraph-commit:substituted"; },
+    (candidate) => { candidate.projection.canonicalProjection += " "; },
+    (candidate) => { candidate.expectedDecisionReceiptId = "attunegraph-decision-context:substituted"; },
+    (candidate) => { candidate.unrecognized = true; }
+  ];
+  for (const mutate of mutations) {
+    const proof = JSON.parse(JSON.stringify(bundle.proof));
+    mutate(proof);
+    expect(() => admitAgentDecisionBundle({
+      context: JSON.parse(JSON.stringify(bundle.context)),
+      proof: resealAgentProof(proof)
+    })).toThrow();
+  }
+});
+
+it("keeps detached head currency explicitly unchecked after the live Store advances", async () => {
+  const graph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(new InMemoryAttuneGraphStoreBackend())
+  });
+  const firstSnapshot = await graph.project({
+    operator: "canonical-projection@2",
+    observation: {
+      schemaVersion: 2,
+      observationKey: "agent-bundle-before",
+      scope: SCOPE,
+      threadRoot: ROOT,
+      observedAt: NOW,
+      sourceFreshness: { state: "fresh", observedAt: NOW },
+      assertions: completeAssertions()
+    }
+  });
+  const bundle = compileAgentDecisionBundle(
+    await graph.queryDecisionContext(decisionContextQuery())
+  );
+  await graph.project({
+    operator: "canonical-projection@2",
+    expectedSnapshot: firstSnapshot,
+    observation: {
+      schemaVersion: 2,
+      observationKey: "agent-bundle-after",
+      scope: SCOPE,
+      threadRoot: ROOT,
+      observedAt: NOW,
+      sourceFreshness: { state: "fresh", observedAt: NOW },
+      assertions: completeAssertions()
+    }
+  });
+
+  const admitted = admitAgentDecisionBundle(JSON.parse(JSON.stringify(bundle)));
+
+  expect(admitted.context.trust.headCurrency).toBe("not-checked");
+  expect(admitted.context.decision.head).toEqual(bundle.context.decision.head);
+  await graph.close();
+});
+
+it("replays a no-head abstention without inventing projection or evidence", async () => {
+  const graph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(new InMemoryAttuneGraphStoreBackend())
+  });
+  const result = await graph.queryDecisionContext(decisionContextQuery());
+  const bundle = compileAgentDecisionBundle(result);
+
+  expect(bundle.proof.snapshot).toBeNull();
+  expect(bundle.proof.sourceFreshness).toBeNull();
+  expect(bundle.proof.projection).toBeNull();
+  expect(bundle.context.status).toBe("abstained");
+  expect(bundle.context.decisionReadyAtDeclaredSnapshot).toBe(false);
+  expect(bundle.context.evidence).toEqual([]);
+  expect(bundle.context.diagnostics.terminalReasons).toContain("no-head");
+  expect(admitAgentDecisionBundle(JSON.parse(JSON.stringify(bundle)))).toEqual(bundle);
+  await graph.close();
+});
+
+it("rejects divergent content for one assertion identity before compact role union", async () => {
+  const forged: any = JSON.parse(JSON.stringify(await completeResult()));
+  const witnessId = forged.authority.witnessAssertions[0].id;
+  expect(forged.workingGraph.assertions.some((entry: GraphAssertion) => entry.id === witnessId)).toBe(true);
+  forged.authority.witnessAssertions[0].sourceRefs[0].id = "source:divergent";
+
+  expect(() => compileAgentDecisionBundle(forged)).toThrow(
+    "decision evidence identity has inconsistent content"
+  );
 });

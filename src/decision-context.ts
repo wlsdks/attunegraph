@@ -5,6 +5,7 @@ import type { AttuneGraphStoredProjection } from "./attunegraph-backend.js";
 import type {
   AttuneGraphAuthorityQuery,
   AttuneGraphAuthorityQueryResult,
+  AttuneGraphDecisionContextProofBundle,
   AttuneGraphDecisionContextDiagnostics,
   AttuneGraphDecisionContextQuery,
   AttuneGraphDecisionContextReceipt,
@@ -489,6 +490,55 @@ export function compileDecisionContext(
     invalid("decision context budget cannot represent its mandatory result metadata");
   }
   return result;
+}
+
+/** Package-private semantic replay for the compact agent proof bundle. */
+export function replayDecisionContextProofBundle(
+  value: AttuneGraphDecisionContextProofBundle
+): AttuneGraphDecisionContextResult {
+  const query = normalizeDecisionContextQuery(value.query);
+  const snapshot = value.snapshot === null
+    ? undefined
+    : normalizeAdmissionSnapshot(value.snapshot, query);
+  const sourceFreshness = value.sourceFreshness === null
+    ? undefined
+    : normalizeAdmissionFreshness(value.sourceFreshness);
+  const evaluationProjection = normalizeAdmissionAuthorityProjection(value.projection);
+  let projection: AttuneGraphStoredProjection | undefined;
+  if (evaluationProjection === null) {
+    if (snapshot !== undefined || sourceFreshness !== undefined) {
+      invalid("no-head decision proof must not carry snapshot or freshness metadata");
+    }
+  } else {
+    if (snapshot === undefined || sourceFreshness === undefined) {
+      invalid("decision proof projection requires snapshot and freshness metadata");
+    }
+    if (snapshot.commitId !== `attunegraph-commit:${evaluationProjection.observationId}`) {
+      invalid("decision proof projection observation does not match its snapshot commit");
+    }
+    const canonicalAssertions = admitAuthorityCanonicalProjection(
+      evaluationProjection,
+      query,
+      sourceFreshness
+    );
+    projection = Object.freeze({
+      schemaVersion: 1,
+      snapshot,
+      observationId: evaluationProjection.observationId,
+      canonicalProjection: evaluationProjection.canonicalProjection,
+      projectionFingerprint: evaluationProjection.observationId,
+      observedAt: evaluationProjection.observedAt,
+      sourceFreshness,
+      assertions: Object.freeze([...canonicalAssertions].sort((left, right) =>
+        left.id < right.id ? -1 : left.id > right.id ? 1 : 0
+      ))
+    });
+  }
+  const replayed = compileDecisionContext(projection, query);
+  if (replayed.receipt.receiptId !== value.expectedDecisionReceiptId) {
+    invalid("decision proof does not reproduce its expected receipt");
+  }
+  return replayed;
 }
 
 /**

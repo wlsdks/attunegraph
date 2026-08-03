@@ -7,6 +7,9 @@
 Graph with source references. Its fixed-profile Decision Query can be expressed
 as a typed object or bounded AttuneQL and returns an explicit `complete`,
 `partial`, or `abstained` result plus a content-addressed evidence receipt.
+For action decisions, it can split the verified result into a small
+`agent-decision-view@1` for the model and a detached
+`decision-context-proof-bundle@1` for deterministic host-side replay.
 
 **Project status:** usable from source today · not yet published to a package registry · no hosted service · Apache-2.0
 
@@ -91,6 +94,49 @@ export, and rejects private source subpaths.
 
 AttuneGraph is not a smaller Neo4j. It decides which relationships an agent may use as evidence **now**, under time, provenance, freshness, and context budgets.
 
+### Give the model context, keep the proof with the host
+
+```mermaid
+flowchart LR
+  Q[decision-context@1] --> V[compact agent view]
+  Q --> P[detached proof bundle]
+  V --> M[AI model]
+  P --> R[host-side semantic replay]
+  R -->|exact match| V
+```
+
+```ts
+import {
+  admitAgentDecisionBundle,
+  compileAgentDecisionBundle
+} from "@attunegraph/core";
+
+const full = await graph.queryDecisionContext(decisionContextQuery);
+const bundle = compileAgentDecisionBundle(full);
+
+// Send only this compact, source-linked view to the model.
+const modelContext = bundle.context;
+
+// Store or transport the proof separately, then replay before trusting a
+// detached bundle. Any changed view, query, snapshot, projection, or receipt
+// fails admission.
+const admitted = admitAgentDecisionBundle(
+  JSON.parse(JSON.stringify(bundle))
+);
+
+if (!admitted.context.decisionReadyAtDeclaredSnapshot) {
+  // Abstain or repair; never infer permission from proximity.
+}
+```
+
+The view explicitly reports its own estimated tokens and the full proof's
+estimated tokens. It contains no canonical projection, authority scan
+frontier, or duplicated canonical receipt JSON. The proof bundle contains one
+canonical projection and enough exact metadata to replay the existing Decision
+Context compiler. Its trust posture remains explicit: content addressing proves
+self-consistency, not producer authenticity, source truth, current-head status,
+or permission to execute.
+
 ## Current measured baseline
 
 The clean 2026-08-02 macOS arm64, Node 24.16 10K storage-primitive run gives a
@@ -147,7 +193,7 @@ or weaken explanation, invalidation, or replay. Raw records stay at the source.
 
 | Contract | Available now | Explicit boundary |
 | --- | --- | --- |
-| Decision evidence | `decision-query@1`, bounded AttuneQL, and `decision-context@1` with a same-head bounded authority frontier, selected Working Graph, receipt, and explicit `complete` / `partial` / `abstained` | No general provenance proof, policy engine, or action execution |
+| Decision evidence | `decision-query@1`, bounded AttuneQL, `decision-context@1`, and a compact `agent-decision-view@1` plus detached replayable `decision-context-proof-bundle@1` | Content integrity is not producer authenticity, current-head proof, general policy, or action execution |
 | Action authority | Typed `authority-query@1`, bitemporal exact-root witnesses, conflict abstention, and a result-bounded receipt | No general policy engine, historical-head read, AttuneQL authority grammar, or action execution |
 | Time and provenance | Valid and recorded time, supersession, freshness, and exact source refs | Does not independently prove an external source true or current |
 | Embedded storage and portability | In-memory oracle, worker-isolated local SQLite, canonical `.atgx`, and fixtures | No distributed, multi-tenant, hosted database, or compatibility aliases for superseded identities |
@@ -241,6 +287,13 @@ one work-cut lookahead. This verifies transport integrity only—not producer
 authenticity, external truth, or whether the producer head is still current.
 The full canonical projection and bounded frontier are mandatory transport
 costs, so a small token budget can fail closed instead of returning a result.
+When the result is going into a model prompt, prefer
+`compileAgentDecisionBundle(context)`: pass only `bundle.context` to the model
+and retain `bundle.proof` for `admitAgentDecisionBundle`. The compact view
+deduplicates Working Graph and authority witnesses by assertion identity while
+preserving their roles, exact decision scope/head/time, source references,
+closure, conflicts, exclusions, truncation, abstention, and a proof descriptor.
+See the [decision and measured payload qualification](docs/decisions/agent-decision-view-proof-bundle-v1.md).
 
 ## When to choose AttuneGraph
 

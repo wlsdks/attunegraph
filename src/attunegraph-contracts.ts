@@ -369,6 +369,86 @@ export interface AttuneGraphDecisionContextResult {
   readonly receipt: AttuneGraphDecisionContextReceipt;
 }
 
+/**
+ * Prompt-facing projection of one fully admitted Decision Context. The compact
+ * value is not a substitute for its proof: detached admission requires the
+ * exact full `decision-context@1` result named by
+ * `proof.expectedDecisionReceiptId`.
+ */
+export interface AttuneGraphAgentDecisionContext {
+  readonly operator: "agent-decision-view@1";
+  readonly contextId: string;
+  readonly status: "complete" | "partial" | "abstained";
+  readonly decisionReadyAtDeclaredSnapshot: boolean;
+  readonly executionCapability: "none";
+  readonly decision: Readonly<{
+    readonly scope: AttuneGraphScope;
+    readonly seed: GraphRef;
+    readonly action: GraphRef & Readonly<{ readonly kind: "action" }>;
+    readonly threadRoot: GraphRef & Readonly<{ readonly kind: "thread" }>;
+    readonly asOf: string;
+    readonly head: AttuneGraphSnapshot | null;
+    readonly sourceFreshness: AttuneGraphSourceFreshness | null;
+  }>;
+  readonly evidence: readonly Readonly<{
+    readonly assertionId: string;
+    readonly roles: readonly ("working-evidence" | "authority-witness")[];
+    readonly subject: GraphAssertion["subject"];
+    readonly predicate: GraphAssertion["predicate"];
+    readonly object: GraphAssertion["object"];
+    readonly epistemicClass: GraphAssertion["epistemicClass"];
+    readonly sourceRefs: GraphAssertion["sourceRefs"];
+    readonly validFrom?: string;
+    readonly validTo?: string;
+    readonly recordedAt: string;
+    readonly supersededAt?: string;
+    readonly derivation: GraphAssertion["derivation"];
+  }>[];
+  readonly authority: Readonly<{
+    readonly state: "authorized" | "undetermined";
+    readonly witnessAssertionIds: readonly string[];
+    readonly conflicts: readonly AttuneGraphAuthorityConflict[];
+    readonly exclusions: readonly AttuneGraphAuthorityExclusion[];
+  }>;
+  readonly diagnostics: Readonly<{
+    readonly estimatedTokens: number;
+    readonly fullProofEstimatedTokens: number;
+    readonly evidenceClosure: "complete" | "incomplete";
+    readonly authorityClosure: "complete" | "incomplete";
+    readonly conflictClosure: "complete" | "conflict" | "incomplete";
+    readonly truncationReasons: AttuneGraphDecisionContextDiagnostics["truncationReasons"];
+    readonly terminalReasons: AttuneGraphDecisionContextDiagnostics["terminalReasons"];
+  }>;
+  readonly proof: Readonly<{
+    readonly mediaType: "application/vnd.attunegraph.decision-context-proof+json;version=1";
+    readonly proofId: string;
+    readonly byteLength: number;
+    readonly decisionReceiptId: string;
+    readonly admission: "proof-bundle-replay-required";
+  }>;
+  readonly trust: Readonly<{
+    readonly contentIntegrity: "self-consistent-content-addressed";
+    readonly producerAuthenticity: "not-provided";
+    readonly sourceTruth: "not-provided";
+    readonly headCurrency: "not-checked";
+  }>;
+}
+
+export interface AttuneGraphDecisionContextProofBundle {
+  readonly operator: "decision-context-proof-bundle@1";
+  readonly proofId: string;
+  readonly query: AttuneGraphDecisionContextQuery;
+  readonly snapshot: AttuneGraphSnapshot | null;
+  readonly sourceFreshness: AttuneGraphSourceFreshness | null;
+  readonly projection: AttuneGraphDecisionContextAuthority["projection"];
+  readonly expectedDecisionReceiptId: string;
+}
+
+export interface AttuneGraphAgentDecisionBundle {
+  readonly context: AttuneGraphAgentDecisionContext;
+  readonly proof: AttuneGraphDecisionContextProofBundle;
+}
+
 export interface AttuneGraphRevocationSelector {
   readonly assertionIds?: readonly string[];
   readonly graphRefs?: readonly GraphRef[];

@@ -24,6 +24,7 @@
     "docs/decisions/sqlite-normalized-current-head-index-v3.md",
     "docs/decisions/sqlite-exact-witness-current-head-v4.md",
     "docs/decisions/proof-closed-decision-context-v1.md",
+    "docs/decisions/agent-decision-view-proof-bundle-v1.md",
     "BENCHMARKS.md",
     "PERFORMANCE-QUALIFICATION.md",
     "READINESS.md",
@@ -37,6 +38,7 @@
     "fixtures/working-graph-v1",
     "fixtures/decision-context-v1",
     "scripts/benchmark-attunegraph-agent-decision-read.mjs",
+    "scripts/benchmark-attunegraph-agent-context.mjs",
     "scripts/benchmark-attunegraph-prepared-plan-seed.mjs",
     "scripts/benchmark-attunegraph-agent-decision-read-scale.mjs",
     "scripts/benchmark-attunegraph-agent-decision-durable.mjs",
@@ -118,6 +120,7 @@
     }
   },
   "scripts": {
+    "benchmark:agent-context": "node scripts/prepare-attunegraph-runtime.mjs && node scripts/benchmark-attunegraph-agent-context.mjs",
     "benchmark:agent-decision-read": "node scripts/prepare-attunegraph-runtime.mjs && node scripts/benchmark-attunegraph-agent-decision-read.mjs",
     "benchmark:prepared-plan-seed-parts": "node scripts/prepare-attunegraph-runtime.mjs && node scripts/benchmark-attunegraph-prepared-plan-seed.mjs",
     "benchmark:agent-decision-read-scale": "node scripts/prepare-attunegraph-runtime.mjs && node scripts/benchmark-attunegraph-agent-decision-read-scale.mjs",
@@ -139,7 +142,7 @@
     "test:benchmark-qualification": "pnpm build && vitest run --config vitest.benchmark-qualification.config.ts",
     "test:cross-platform": "pnpm build && vitest run --config vitest.cross-platform.config.ts --exclude scripts/benchmark-attunegraph-current-head-materialization-fault.test.mjs && vitest run --no-file-parallelism scripts/benchmark-attunegraph-current-head-materialization-fault.test.mjs",
     "test:local-profile": "pnpm build && vitest run --config vitest.local-profile.config.ts",
-    "test:performance": "pnpm build && vitest run scripts/benchmark-attunegraph-agent-decision-read.test.mjs scripts/benchmark-attunegraph-agent-decision-read-scale.test.mjs scripts/benchmark-attunegraph-normalized-decision-endpoint.test.mjs scripts/benchmark-attunegraph-prepared-plan-seed.test.mjs scripts/benchmark-attunegraph-performance.test.mjs scripts/qualify-attunegraph-performance.test.mjs scripts/verify-attunegraph-performance-regression.test.mjs",
+    "test:performance": "pnpm build && vitest run scripts/benchmark-attunegraph-agent-context.test.mjs scripts/benchmark-attunegraph-agent-decision-read.test.mjs scripts/benchmark-attunegraph-agent-decision-read-scale.test.mjs scripts/benchmark-attunegraph-normalized-decision-endpoint.test.mjs scripts/benchmark-attunegraph-prepared-plan-seed.test.mjs scripts/benchmark-attunegraph-performance.test.mjs scripts/qualify-attunegraph-performance.test.mjs scripts/verify-attunegraph-performance-regression.test.mjs",
     "test:readiness": "vitest run --no-file-parallelism scripts/capture-attunegraph-readiness.test.mjs scripts/capture-attunegraph-measurement.test.mjs scripts/readiness-measurement-contracts.test.mjs scripts/score-attunegraph-readiness.test.mjs",
     "test:supported": "pnpm build && vitest run",
     "test:focused": "pnpm build && vitest run src/attunegraph-engine.test.ts src/authority-query.test.ts src/decision-query.test.ts src/decision-context.test.ts src/attuneql.test.ts src/revocation-impact.test.ts src/revocation-transition.test.ts",

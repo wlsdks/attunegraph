@@ -19,6 +19,15 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add `agent-decision-view@1` and
+  `decision-context-proof-bundle@1`. `compileAgentDecisionBundle` separates one
+  same-process Decision Context into a compact model-facing assertion union and
+  one canonical-projection replay proof; `admitAgentDecisionBundle` rebuilds
+  the full fixed-profile result and exact-compares the view. The executable
+  four-scenario payload gate records 74.2–95.1% prompt-byte reduction and
+  41.9–62.3% combined view-plus-proof reduction on Node 24.16 without claiming
+  producer authenticity, live-head currency, source truth, model quality, or
+  execution permission.
 - Add `decision-query@1`, the first agent-native evidence compiler over the
   current exact head. Typed objects and bounded AttuneQL normalize to one
   canonical query, require fresh source state, reuse deterministic Working

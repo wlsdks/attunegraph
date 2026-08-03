@@ -16,8 +16,15 @@ export { AttuneQLSyntaxError, parseAttuneQL } from "./attuneql.js";
 export { createAttuneGraphEngine, openAttuneGraph } from "./attunegraph-engine.js";
 export { admitDecisionQueryResult } from "./decision-query.js";
 export { admitDecisionContextResult } from "./decision-context.js";
+export {
+  admitAgentDecisionBundle,
+  compileAgentDecisionBundle
+} from "./agent-decision-context.js";
 export type {
   AttuneGraph,
+  AttuneGraphAgentDecisionBundle,
+  AttuneGraphAgentDecisionContext,
+  AttuneGraphDecisionContextProofBundle,
   AttuneGraphAuthorityConflict,
   AttuneGraphAuthorityDiagnostics,
   AttuneGraphAuthorityExclusion,
