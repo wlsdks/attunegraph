@@ -565,6 +565,14 @@ export interface AttuneGraph {
   queryDecisionContext(
     command: AttuneGraphDecisionContextQuery
   ): Promise<AttuneGraphDecisionContextResult>;
+  /**
+   * Admits a detached agent bundle, then requires its exact projection to be
+   * the current Store head for this opened scope. Success is an instantaneous
+   * check, not a lock, lease, source-truth claim, or execution capability.
+   */
+  admitAgentDecisionBundleAtCurrentHead(
+    value: unknown
+  ): Promise<AttuneGraphAgentDecisionBundle>;
   /** Read-only revocation planning. Apply, retention, and compaction remain separate operations. */
   planRevocationImpact(
     command: AttuneGraphRevocationImpactCommand

@@ -3,6 +3,7 @@ import { types as nodeTypes } from "node:util";
 import { createAttuneGraphStore } from "./attunegraph-backend.js";
 import type {
   AttuneGraph,
+  AttuneGraphAgentDecisionBundle,
   AttuneGraphAuthorityQuery,
   AttuneGraphAuthorityQueryResult,
   AttuneGraphDecisionQuery,
@@ -224,6 +225,11 @@ async function openLocalAttuneGraphSessionWithStoreOptions(
       command: AttuneGraphDecisionContextQuery
     ): Promise<AttuneGraphDecisionContextResult> {
       return begin(() => engine.queryDecisionContext(command));
+    },
+    admitAgentDecisionBundleAtCurrentHead(
+      value: unknown
+    ): Promise<AttuneGraphAgentDecisionBundle> {
+      return begin(() => engine.admitAgentDecisionBundleAtCurrentHead(value));
     },
     planRevocationImpact(
       command: AttuneGraphRevocationImpactCommand

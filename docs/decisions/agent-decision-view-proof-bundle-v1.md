@@ -1,8 +1,8 @@
 # Agent decision view and proof bundle
 
-Status: verified-current in this source-changing slice. Focused correctness,
-deterministic payload qualification, FULL gates, and independent evaluation
-pass. Landing and release integration remain pending.
+Status: compact view and detached replay are verified-current on `main`.
+Store-current admission is verified-current in this evaluated source-changing
+slice; landing remains pending.
 
 Last reviewed: 2026-08-04.
 
@@ -17,7 +17,11 @@ needs to replay and verify one Decision Context:
   projection, and the expected full Decision Context receipt ID;
 - `compileAgentDecisionBundle` creates both from one same-process Engine result;
 - `admitAgentDecisionBundle` re-admits the proof, reruns the existing full
-  Decision Context compiler, regenerates the view, and requires exact equality.
+  Decision Context compiler, regenerates the view, and requires exact equality;
+- `graph.admitAgentDecisionBundleAtCurrentHead` performs that admission before
+  Store I/O, then requires the exact scope, snapshot, canonical projection,
+  observed time, and source freshness to equal a head-stable current Store
+  projection.
 
 No SQLite schema, persisted format, source observation, authority rule, Working
 Graph selection rule, or `decision-context@1` receipt changes in this slice.
@@ -77,8 +81,11 @@ The view never grants an execution capability.
 Admission proves self-consistency at the declared snapshot. It deliberately
 does not consult the Store. A later head or source revocation therefore does
 not silently change a detached result; the view says `headCurrency:
-not-checked`. A host requiring current-world use must compare the declared
-snapshot with its current Store head before acting.
+not-checked`. A host requiring current-world use calls
+`graph.admitAgentDecisionBundleAtCurrentHead`. Success returns the same bundle
+unchanged and means only that it matched a read whose head remained stable
+through the final confirmation; it is not a lock, lease, future-current
+guarantee, or action capability.
 
 ## Deterministic payload qualification
 
@@ -128,7 +135,7 @@ code is copied into the runtime.
 | Minimal portable proof bundle and exact view replay | `verified-current` in this evaluated slice |
 | Prompt and total deterministic payload regression gate | `verified-current` in this evaluated slice |
 | Producer authentication or signatures | `deferred` until a trust/key contract exists |
-| Store-current proof resolution | `missing`; host must compare current head |
+| Store-current proof resolution | `verified-current` in this evaluated slice |
 | 100K/1M replay and model-quality evaluation | `missing` |
 | Merkle/succinct proof | `deferred` pending measured replacement trigger |
 
@@ -136,8 +143,9 @@ code is copied into the runtime.
 
 - The proof is deterministic and content-addressed, not signed. A malicious
   producer can create a different self-consistent observation and proof.
-- Detached admission proves the declared snapshot, not that it is still the
-  Store head or that the source remains true.
+- Detached admission alone proves the declared snapshot, not that it is still
+  the Store head. Store-current admission ends at a stable-head confirmation,
+  but does not create a lease or prove that the external source remains true.
 - Canonical projection replay remains linear in projection bytes. The slice
   removes repeated transport and prompt bytes; it does not make replay
   sublinear.

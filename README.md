@@ -107,7 +107,6 @@ flowchart LR
 
 ```ts
 import {
-  admitAgentDecisionBundle,
   compileAgentDecisionBundle
 } from "@attunegraph/core";
 
@@ -117,10 +116,10 @@ const bundle = compileAgentDecisionBundle(full);
 // Send only this compact, source-linked view to the model.
 const modelContext = bundle.context;
 
-// Store or transport the proof separately, then replay before trusting a
-// detached bundle. Any changed view, query, snapshot, projection, or receipt
-// fails admission.
-const admitted = admitAgentDecisionBundle(
+// Store or transport the proof separately. This Engine method first replays
+// the detached bundle, then requires its exact projection to remain the current
+// Store head for this opened scope.
+const admitted = await graph.admitAgentDecisionBundleAtCurrentHead(
   JSON.parse(JSON.stringify(bundle))
 );
 
@@ -133,9 +132,10 @@ The view explicitly reports its own estimated tokens and the full proof's
 estimated tokens. It contains no canonical projection, authority scan
 frontier, or duplicated canonical receipt JSON. The proof bundle contains one
 canonical projection and enough exact metadata to replay the existing Decision
-Context compiler. Its trust posture remains explicit: content addressing proves
-self-consistency, not producer authenticity, source truth, current-head status,
-or permission to execute.
+Context compiler. The portable view still says `headCurrency: not-checked`:
+successful Engine admission is an instantaneous Store check, not a durable lease.
+Neither path proves producer authenticity, external source truth, or permission
+to execute.
 
 ## Current measured baseline
 
@@ -289,7 +289,9 @@ The full canonical projection and bounded frontier are mandatory transport
 costs, so a small token budget can fail closed instead of returning a result.
 When the result is going into a model prompt, prefer
 `compileAgentDecisionBundle(context)`: pass only `bundle.context` to the model
-and retain `bundle.proof` for `admitAgentDecisionBundle`. The compact view
+and retain `bundle.proof`. Use `admitAgentDecisionBundle` for detached replay,
+or `graph.admitAgentDecisionBundleAtCurrentHead` when the exact projection must
+also match the opened Store's current head. The compact view
 deduplicates Working Graph and authority witnesses by assertion identity while
 preserving their roles, exact decision scope/head/time, source references,
 closure, conflicts, exclusions, truncation, abstention, and a proof descriptor.

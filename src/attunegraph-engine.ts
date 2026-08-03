@@ -12,9 +12,11 @@ import {
   MAX_ACTIVATION_ESTIMATED_TOKENS
 } from "./constants.js";
 import { AttuneGraphError } from "./attunegraph-error.js";
+import { admitAgentDecisionBundle } from "./agent-decision-context.js";
 import type { AttuneGraphStoredProjection } from "./attunegraph-backend.js";
 import type {
   AttuneGraph,
+  AttuneGraphAgentDecisionBundle,
   AttuneGraphAuthorityQuery,
   AttuneGraphAuthorityQueryResult,
   AttuneGraphDecisionQuery,
@@ -630,6 +632,20 @@ function sameSnapshot(left: AttuneGraphSnapshot | undefined, right: AttuneGraphS
   return left?.generation === right?.generation && left?.commitId === right?.commitId && left !== undefined && right !== undefined && sameScope(left.scope, right.scope);
 }
 
+function sameStoredProjectionIdentity(
+  left: AttuneGraphStoredProjection | undefined,
+  right: AttuneGraphStoredProjection | undefined
+): boolean {
+  if (left === undefined || right === undefined) return left === right;
+  return sameSnapshot(left.snapshot, right.snapshot)
+    && left.observationId === right.observationId
+    && left.projectionFingerprint === right.projectionFingerprint
+    && left.canonicalProjection === right.canonicalProjection
+    && left.observedAt === right.observedAt
+    && left.sourceFreshness.state === right.sourceFreshness.state
+    && left.sourceFreshness.observedAt === right.sourceFreshness.observedAt;
+}
+
 export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<AttuneGraph> {
   const input = record(options, "open AttuneGraph options", ["scope", "store"], ["scope", "store"]);
   const openedScope = normalizeAttuneGraphScope(input.scope, "open AttuneGraph options.scope");
@@ -982,6 +998,68 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
           attuneGraphError("SNAPSHOT_CONFLICT", "decision context exact head does not match the current head");
         }
         return compileDecisionContext(projection, normalized);
+      });
+    },
+    admitAgentDecisionBundleAtCurrentHead(
+      value: unknown
+    ): Promise<AttuneGraphAgentDecisionBundle> {
+      return begin(async () => {
+        // Fully admit untrusted transport before consulting Store state.
+        const bundle = admitAgentDecisionBundle(value);
+        if (!sameScope(bundle.proof.query.scope, openedScope)) {
+          attuneGraphError(
+            "INVALID_SCOPE",
+            "agent decision bundle scope does not match the opened scope"
+          );
+        }
+        let current: AttuneGraphStoredProjection | undefined;
+        if (readHead === undefined) {
+          current = await read();
+          const confirmation = await read();
+          if (!sameStoredProjectionIdentity(current, confirmation)) {
+            attuneGraphError(
+              "SNAPSHOT_CONFLICT",
+              "Store head changed while admitting the agent decision bundle"
+            );
+          }
+        } else {
+          const before = await readHead();
+          current = await read();
+          const after = await readHead();
+          if (
+            !(before === undefined && current === undefined && after === undefined)
+            && (
+              current === undefined
+              || !sameSnapshot(before, current.snapshot)
+              || !sameSnapshot(current.snapshot, after)
+            )
+          ) {
+            attuneGraphError(
+              "SNAPSHOT_CONFLICT",
+              "Store head changed while admitting the agent decision bundle"
+            );
+          }
+        }
+        const declaredSnapshot = bundle.proof.snapshot ?? undefined;
+        if (current === undefined && declaredSnapshot === undefined) return bundle;
+        if (
+          current === undefined
+          || declaredSnapshot === undefined
+          || !sameSnapshot(current.snapshot, declaredSnapshot)
+          || bundle.proof.projection === null
+          || bundle.proof.sourceFreshness === null
+          || current.observationId !== bundle.proof.projection.observationId
+          || current.canonicalProjection !== bundle.proof.projection.canonicalProjection
+          || current.observedAt !== bundle.proof.projection.observedAt
+          || current.sourceFreshness.state !== bundle.proof.sourceFreshness.state
+          || current.sourceFreshness.observedAt !== bundle.proof.sourceFreshness.observedAt
+        ) {
+          attuneGraphError(
+            "SNAPSHOT_CONFLICT",
+            "agent decision bundle does not match the exact current Store head"
+          );
+        }
+        return bundle;
       });
     },
     planRevocationImpact(

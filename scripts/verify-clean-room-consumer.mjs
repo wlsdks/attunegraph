@@ -221,7 +221,7 @@ await assert.rejects(
   "private source subpaths must reject"
 );
 
-const { openAttuneGraph } = await import(packageName);
+const { compileAgentDecisionBundle, openAttuneGraph } = await import(packageName);
 const {
   defineAttuneGraphSourceAdapter,
   projectAttuneGraphSource
@@ -292,6 +292,21 @@ try {
     now: later,
     maxEstimatedTokens: 500
   });
+  const decisionContext = await graph.queryDecisionContext({
+    operator: "decision-context@1",
+    scope,
+    seed: threadRoot,
+    action: { id: "action:clean-room", kind: "action" },
+    threadRoot,
+    asOf: later,
+    head: { mode: "current" },
+    freshness: { require: "fresh" },
+    budget: { maxEstimatedTokens: 16000 }
+  });
+  const bundle = compileAgentDecisionBundle(decisionContext);
+  const currentBundle = await graph.admitAgentDecisionBundleAtCurrentHead(
+    JSON.parse(JSON.stringify(bundle))
+  );
   assert.equal(snapshot.scope.threadId, scope.threadId);
   assert.equal(firstProjection.snapshot.generation, 1);
   assert.equal(firstProjection.observation.schemaVersion, 2);
@@ -300,6 +315,9 @@ try {
   assert.equal(result.status, "complete");
   assert.deepEqual(result.workingGraph.seed, threadRoot);
   assert.equal(result.workingGraph.assertions.length, 1);
+  assert.deepEqual(currentBundle, bundle);
+  assert.equal(currentBundle.context.trust.headCurrency, "not-checked");
+  assert.equal(currentBundle.context.executionCapability, "none");
 } finally {
   await graph.close();
 }

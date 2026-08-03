@@ -19,6 +19,12 @@ All notable changes to AttuneGraph are recorded here.
 
 ### Added
 
+- Add `graph.admitAgentDecisionBundleAtCurrentHead` as the live Store boundary
+  for detached agent bundles. It fully re-admits untrusted bytes before Store
+  I/O, then requires exact scope, snapshot, canonical projection, observed time,
+  and source freshness to match a head-stable current projection read window.
+  Success returns the unchanged frozen bundle and grants no lock, lease, source
+  truth, or execution capability.
 - Add `agent-decision-view@1` and
   `decision-context-proof-bundle@1`. `compileAgentDecisionBundle` separates one
   same-process Decision Context into a compact model-facing assertion union and

@@ -2,6 +2,7 @@ import { types as nodeTypes } from "node:util";
 
 import type {
   AttuneGraph,
+  AttuneGraphAgentDecisionBundle,
   AttuneGraphAuthorityQuery,
   AttuneGraphAuthorityQueryResult,
   AttuneGraphDecisionQuery,
@@ -200,6 +201,11 @@ export async function openLocalAttuneGraph(options: OpenLocalAttuneGraphOptions)
       return lifecycle === "open"
         ? engine.queryDecisionContext(command)
         : rejectClosed<AttuneGraphDecisionContextResult>();
+    },
+    admitAgentDecisionBundleAtCurrentHead(value: unknown) {
+      return lifecycle === "open"
+        ? engine.admitAgentDecisionBundleAtCurrentHead(value)
+        : rejectClosed<AttuneGraphAgentDecisionBundle>();
     },
     planRevocationImpact(command: AttuneGraphRevocationImpactCommand) {
       return lifecycle === "open"

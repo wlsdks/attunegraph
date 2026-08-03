@@ -1046,6 +1046,213 @@ it("keeps detached head currency explicitly unchecked after the live Store advan
 
   expect(admitted.context.trust.headCurrency).toBe("not-checked");
   expect(admitted.context.decision.head).toEqual(bundle.context.decision.head);
+  await expect(
+    graph.admitAgentDecisionBundleAtCurrentHead(JSON.parse(JSON.stringify(bundle)))
+  ).rejects.toMatchObject({ code: "SNAPSHOT_CONFLICT" });
+  await graph.close();
+});
+
+it("admits an exact detached bundle as current without inflating authority", async () => {
+  const graph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(new InMemoryAttuneGraphStoreBackend())
+  });
+  const snapshot = await graph.project({
+    operator: "canonical-projection@2",
+    observation: {
+      schemaVersion: 2,
+      observationKey: "agent-bundle-current",
+      scope: SCOPE,
+      threadRoot: ROOT,
+      observedAt: NOW,
+      sourceFreshness: { state: "fresh", observedAt: NOW },
+      assertions: completeAssertions()
+    }
+  });
+  const bundle = compileAgentDecisionBundle(
+    await graph.queryDecisionContext(decisionContextQuery())
+  );
+
+  const admission = await graph.admitAgentDecisionBundleAtCurrentHead(
+    JSON.parse(JSON.stringify(bundle))
+  );
+
+  expect(admission).toEqual(bundle);
+  expect(admission.context.decision.head).toEqual(snapshot);
+  expect(admission.context.executionCapability).toBe("none");
+  expect(admission.context.trust).toEqual({
+    contentIntegrity: "self-consistent-content-addressed",
+    producerAuthenticity: "not-provided",
+    sourceTruth: "not-provided",
+    headCurrency: "not-checked"
+  });
+  expectDeepFrozen(admission);
+  await graph.close();
+});
+
+it("fails closed when readHead advances around current bundle admission", async () => {
+  const base = new InMemoryAttuneGraphStoreBackend();
+  const producer = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(base)
+  });
+  const snapshot = await producer.project({
+    operator: "canonical-projection@2",
+    observation: {
+      schemaVersion: 2,
+      observationKey: "agent-bundle-racing-head",
+      scope: SCOPE,
+      threadRoot: ROOT,
+      observedAt: NOW,
+      sourceFreshness: { state: "fresh", observedAt: NOW },
+      assertions: completeAssertions()
+    }
+  });
+  const bundle = compileAgentDecisionBundle(
+    await producer.queryDecisionContext(decisionContextQuery())
+  );
+  const stored = await base.read(SCOPE);
+  expect(stored).toBeDefined();
+  await producer.close();
+
+  let headReads = 0;
+  const graph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore({
+      async read() {
+        return stored;
+      },
+      async readHead() {
+        headReads += 1;
+        return headReads === 1
+          ? snapshot
+          : {
+              ...snapshot,
+              generation: snapshot.generation + 1,
+              commitId: "attunegraph-commit:advanced-during-admission"
+            };
+      },
+      async compareAndSwap() {
+        return false;
+      }
+    })
+  });
+
+  await expect(
+    graph.admitAgentDecisionBundleAtCurrentHead(JSON.parse(JSON.stringify(bundle)))
+  ).rejects.toMatchObject({ code: "SNAPSHOT_CONFLICT" });
+  expect(headReads).toBe(2);
+  await graph.close();
+});
+
+it("fails closed when a Store without readHead changes between confirmations", async () => {
+  const base = new InMemoryAttuneGraphStoreBackend();
+  const producer = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(base)
+  });
+  await producer.project({
+    operator: "canonical-projection@2",
+    observation: {
+      schemaVersion: 2,
+      observationKey: "agent-bundle-racing-full-read",
+      scope: SCOPE,
+      threadRoot: ROOT,
+      observedAt: NOW,
+      sourceFreshness: { state: "fresh", observedAt: NOW },
+      assertions: completeAssertions()
+    }
+  });
+  const bundle = compileAgentDecisionBundle(
+    await producer.queryDecisionContext(decisionContextQuery())
+  );
+  const stored = await base.read(SCOPE);
+  expect(stored).toBeDefined();
+  await producer.close();
+
+  let reads = 0;
+  const graph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore({
+      async read() {
+        reads += 1;
+        return reads === 1 ? stored : undefined;
+      },
+      async compareAndSwap() {
+        return false;
+      }
+    })
+  });
+
+  await expect(
+    graph.admitAgentDecisionBundleAtCurrentHead(JSON.parse(JSON.stringify(bundle)))
+  ).rejects.toMatchObject({ code: "SNAPSHOT_CONFLICT" });
+  expect(reads).toBe(2);
+  await graph.close();
+});
+
+it("admits no-head only while the opened scope is actually empty", async () => {
+  const graph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(new InMemoryAttuneGraphStoreBackend())
+  });
+  const bundle = compileAgentDecisionBundle(
+    await graph.queryDecisionContext(decisionContextQuery())
+  );
+
+  await expect(
+    graph.admitAgentDecisionBundleAtCurrentHead(JSON.parse(JSON.stringify(bundle)))
+  ).resolves.toEqual(bundle);
+
+  await graph.project({
+    operator: "canonical-projection@2",
+    observation: {
+      schemaVersion: 2,
+      observationKey: "agent-bundle-after-no-head",
+      scope: SCOPE,
+      threadRoot: ROOT,
+      observedAt: NOW,
+      sourceFreshness: { state: "fresh", observedAt: NOW },
+      assertions: completeAssertions()
+    }
+  });
+  await expect(
+    graph.admitAgentDecisionBundleAtCurrentHead(JSON.parse(JSON.stringify(bundle)))
+  ).rejects.toMatchObject({ code: "SNAPSHOT_CONFLICT" });
+  await graph.close();
+});
+
+it("rejects invalid or cross-scope current admission before trusting Store state", async () => {
+  let reads = 0;
+  const graph = await openAttuneGraph({
+    scope: { sourceId: "other-source", threadId: "other-thread" },
+    store: createAttuneGraphStore({
+      async read() {
+        reads += 1;
+        return undefined;
+      },
+      async compareAndSwap() {
+        return false;
+      }
+    })
+  });
+
+  const accessorBundle = Object.defineProperties({}, {
+    context: { get: () => ({}) },
+    proof: { get: () => ({}) }
+  });
+  for (const candidate of [{}, new Proxy({}, {}), accessorBundle]) {
+    await expect(
+      graph.admitAgentDecisionBundleAtCurrentHead(candidate)
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+  }
+  expect(reads).toBe(0);
+
+  const bundle = compileAgentDecisionBundle(await completeResult());
+  await expect(
+    graph.admitAgentDecisionBundleAtCurrentHead(JSON.parse(JSON.stringify(bundle)))
+  ).rejects.toMatchObject({ code: "INVALID_SCOPE" });
+  expect(reads).toBe(0);
   await graph.close();
 });
 

@@ -42,6 +42,7 @@ import {
   MAX_GRAPH_ASSERTION_SOURCE_REFS
 } from "./constants.js";
 import { createAttuneGraphAdminReadOnlyInspector } from "./attunegraph-admin-readonly-inspector.mjs";
+import { compileAgentDecisionBundle } from "./agent-decision-context.js";
 import { canonicalAssertion, normalizeGraphAssertion } from "./validation.js";
 
 const NOW = "2026-07-30T00:00:00.000Z";
@@ -1779,6 +1780,41 @@ it("awaits request and close timeout termination before the file can reopen", as
     afterCloseTimeout.project(command("after-close-timeout"))
   ).resolves.toMatchObject({ generation: 1 });
   await afterCloseTimeout.close();
+});
+
+it("matches current agent-bundle admission semantics through the SQLite local facade", async () => {
+  const databasePath = await temporaryDatabase("current-agent-bundle.sqlite");
+  const graph = await openLocalAttuneGraph({ databasePath, scope: SCOPE });
+  const firstSnapshot = await graph.project(command("current-agent-bundle-first"));
+  const threadRoot = { kind: "thread" as const, id: SCOPE.threadId };
+  const bundle = compileAgentDecisionBundle(await graph.queryDecisionContext({
+    operator: "decision-context@1",
+    scope: SCOPE,
+    seed: threadRoot,
+    action: { kind: "action", id: "action:local-admission" },
+    threadRoot,
+    asOf: NOW,
+    head: { mode: "current" },
+    freshness: { require: "fresh" },
+    budget: { maxEstimatedTokens: 16_000 }
+  }));
+
+  await expect(
+    graph.admitAgentDecisionBundleAtCurrentHead(JSON.parse(JSON.stringify(bundle)))
+  ).resolves.toEqual(bundle);
+
+  await graph.project({
+    ...command("current-agent-bundle-second"),
+    expectedSnapshot: firstSnapshot
+  });
+  await expect(
+    graph.admitAgentDecisionBundleAtCurrentHead(JSON.parse(JSON.stringify(bundle)))
+  ).rejects.toMatchObject({ code: "SNAPSHOT_CONFLICT" });
+
+  await graph.close();
+  await expect(
+    graph.admitAgentDecisionBundleAtCurrentHead(JSON.parse(JSON.stringify(bundle)))
+  ).rejects.toMatchObject({ code: "CLOSED" });
 });
 
 it("measures exact package-private SQLite CAS parts without changing the stored head", async () => {
