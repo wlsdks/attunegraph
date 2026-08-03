@@ -1780,3 +1780,41 @@ it("awaits request and close timeout termination before the file can reopen", as
   ).resolves.toMatchObject({ generation: 1 });
   await afterCloseTimeout.close();
 });
+
+it("measures exact package-private SQLite CAS parts without changing the stored head", async () => {
+  const databasePath = await temporaryDatabase("cas-phase-measurement.sqlite");
+  const resource = await openSqliteAttuneGraphStore({ databasePath });
+  const graph = await openAttuneGraph({
+    scope: SCOPE,
+    store: createAttuneGraphStore(resource.backend)
+  });
+  await resource.startSqliteCasPhaseMeasurementForMeasurement();
+  const snapshot = await graph.project(command("cas-phase-measurement"));
+  const stored = await resource.backend.read(SCOPE);
+  expect(stored).toBeDefined();
+  expect(await resource.backend.compareAndSwap(SCOPE, undefined, stored!)).toBe(false);
+  const measurement = await resource.finishSqliteCasPhaseMeasurementForMeasurement();
+
+  expect(measurement).toMatchObject({
+    schema: "attunegraph-sqlite-cas-phases@1",
+    attempts: 2,
+    committed: 1,
+    assertionRows: 2,
+    sourceRefRows: 2,
+    endpointDegreeRows: 4,
+    sqliteWriteStatements: 8,
+    sqliteExecStatements: 4
+  });
+  expect(measurement.phaseMs.rollback).toBeGreaterThanOrEqual(0);
+  expect(Object.values(measurement.phaseMs).every((value) => (
+    Number.isFinite(value) && value >= 0
+  ))).toBe(true);
+  expect(measurement.phaseMs.total).toBeGreaterThanOrEqual(
+    Object.entries(measurement.phaseMs)
+      .filter(([name]) => name !== "total")
+      .reduce((total, [, value]) => total + value, 0)
+  );
+  expect(await graph.head()).toEqual(snapshot);
+  await graph.close();
+  await resource.close();
+});

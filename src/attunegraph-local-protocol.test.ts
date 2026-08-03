@@ -228,6 +228,60 @@ it.each([
   }, type)).toThrow();
 });
 
+it("admits bounded package-private SQLite CAS phase measurement envelopes", () => {
+  expect(createWorkerRequest(7, "inspectForTesting", { performance: "start" })).toEqual({
+    protocolVersion: 1,
+    id: 7,
+    type: "inspectForTesting",
+    payload: { performance: "start" }
+  });
+  const performance = {
+    schema: "attunegraph-sqlite-cas-phases@1",
+    attempts: 2,
+    committed: 2,
+    assertionRows: 64,
+    sourceRefRows: 64,
+    endpointDegreeRows: 66,
+    sqliteWriteStatements: 202,
+    sqliteExecStatements: 4,
+    phaseMs: {
+      admission: 1,
+      projectionEncoding: 2,
+      currentIndexMaterialization: 3,
+      headCheck: 4,
+      journalWrite: 5,
+      currentIndexDelete: 6,
+      headWrite: 7,
+      currentIndexWrite: 8,
+      commit: 9,
+      rollback: 0,
+      total: 46
+    }
+  };
+  expect(parseWorkerResponse({
+    protocolVersion: 1,
+    id: 8,
+    ok: true,
+    result: { headRows: 2, journalRows: 2, maxGeneration: 1, performance }
+  }, "inspectForTesting")).toEqual({
+    protocolVersion: 1,
+    id: 8,
+    ok: true,
+    result: { headRows: 2, journalRows: 2, maxGeneration: 1, performance }
+  });
+  expect(() => parseWorkerResponse({
+    protocolVersion: 1,
+    id: 9,
+    ok: true,
+    result: {
+      headRows: 2,
+      journalRows: 2,
+      maxGeneration: 1,
+      performance: { ...performance, phaseMs: { ...performance.phaseMs, total: 0 } }
+    }
+  }, "inspectForTesting")).toThrow();
+});
+
 it("accepts exact initialize and close terminal envelopes", () => {
   for (const userVersion of [1, 2]) {
     expect(parseWorkerResponse({

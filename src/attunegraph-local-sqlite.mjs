@@ -1,5 +1,6 @@
 import { Buffer } from "node:buffer";
 import { closeSync, openSync } from "node:fs";
+import { performance } from "node:perf_hooks";
 import process from "node:process";
 import { setTimeout } from "node:timers";
 import { types as nodeTypes } from "node:util";
@@ -60,6 +61,37 @@ let statements;
 /** @type {1 | 2 | 3 | 4} */
 let physicalSchemaVersion;
 let initialized = false;
+/** @typedef {{ admission: number, projectionEncoding: number, currentIndexMaterialization: number, headCheck: number, journalWrite: number, currentIndexDelete: number, headWrite: number, currentIndexWrite: number, commit: number, rollback: number, total: number }} MutableSqliteCasPhaseMs */
+/** @typedef {{ schema: "attunegraph-sqlite-cas-phases@1", attempts: number, committed: number, assertionRows: number, sourceRefRows: number, endpointDegreeRows: number, sqliteWriteStatements: number, sqliteExecStatements: number, phaseMs: MutableSqliteCasPhaseMs }} MutableSqliteCasPerformance */
+/** @type {undefined | MutableSqliteCasPerformance} */
+let compareAndSwapMeasurement;
+let measuringCompareAndSwap = false;
+
+function newCompareAndSwapMeasurement() {
+  return {
+    schema: /** @type {const} */ ("attunegraph-sqlite-cas-phases@1"),
+    attempts: 0,
+    committed: 0,
+    assertionRows: 0,
+    sourceRefRows: 0,
+    endpointDegreeRows: 0,
+    sqliteWriteStatements: 0,
+    sqliteExecStatements: 0,
+    phaseMs: {
+      admission: 0,
+      projectionEncoding: 0,
+      currentIndexMaterialization: 0,
+      headCheck: 0,
+      journalWrite: 0,
+      currentIndexDelete: 0,
+      headWrite: 0,
+      currentIndexWrite: 0,
+      commit: 0,
+      rollback: 0,
+      total: 0
+    }
+  };
+}
 let closing = false;
 /** @typedef {"before-commit" | "after-commit-before-ack" | "hang-read" | "hang-close"} TestFault */
 const TEST_FAULTS = /** @type {ReadonlySet<TestFault>} */ (new Set([
@@ -142,6 +174,9 @@ function mapSqliteFailure(cause, context, corruptionContext = false) {
 
 /** @param {string} sql @param {string} [context] @param {boolean} [corruptionContext] */
 function execSql(sql, context = "SQLite statement", corruptionContext = false) {
+  if (measuringCompareAndSwap && compareAndSwapMeasurement !== undefined) {
+    compareAndSwapMeasurement.sqliteExecStatements += 1;
+  }
   try {
     database.exec(sql);
   } catch (cause) {
@@ -200,6 +235,9 @@ function allSql(statement, ...parameters) {
 
 /** @param {import("node:sqlite").StatementSync} statement @param {import("node:sqlite").SQLInputValue[]} parameters */
 function runSql(statement, ...parameters) {
+  if (measuringCompareAndSwap && compareAndSwapMeasurement !== undefined) {
+    compareAndSwapMeasurement.sqliteWriteStatements += 1;
+  }
   try {
     const result = sqlRow(
       /** @type {unknown} */ (statement.run(...parameters)),
@@ -839,6 +877,21 @@ function insertCurrentHeadIndex(currentIndex) {
 /** @param {import("./attunegraph-local-protocol.mjs").CompareAndSwapPayload} payload @returns {import("./attunegraph-local-protocol.mjs").CompareAndSwapResult} */
 function compareAndSwap(payload) {
   assertReady();
+  const measurement = compareAndSwapMeasurement;
+  const totalStarted = measurement === undefined ? 0 : performance.now();
+  /** @type {undefined | keyof MutableSqliteCasPhaseMs} */
+  let activeMeasurementPhase;
+  let activeMeasurementPhaseStarted = 0;
+  if (measurement !== undefined) {
+    measurement.attempts += 1;
+    measuringCompareAndSwap = true;
+  }
+  try {
+  const admissionStarted = measurement === undefined ? 0 : performance.now();
+  if (measurement !== undefined) {
+    activeMeasurementPhase = "admission";
+    activeMeasurementPhaseStarted = admissionStarted;
+  }
   const input = plainRecord(payload, "compare-and-swap payload", [
     "scope",
     "expected",
@@ -849,7 +902,16 @@ function compareAndSwap(payload) {
     ? undefined
     : parseSnapshot(input.expected, scope, "expected snapshot");
   const proposed = validateProjection(input.proposed, scope);
+  if (measurement !== undefined) {
+    measurement.phaseMs.admission += performance.now() - admissionStarted;
+    activeMeasurementPhase = undefined;
+  }
   let encoded;
+  const encodingStarted = measurement === undefined ? 0 : performance.now();
+  if (measurement !== undefined) {
+    activeMeasurementPhase = "projectionEncoding";
+    activeMeasurementPhaseStarted = encodingStarted;
+  }
   if (physicalSchemaVersion !== 1) {
     try {
       encoded = encodeAttuneGraphProjectionJson(proposed.json);
@@ -857,16 +919,54 @@ function compareAndSwap(payload) {
       fail("STORE_FAILURE", "proposed projection could not be encoded", cause);
     }
   }
+  if (measurement !== undefined) {
+    measurement.phaseMs.projectionEncoding += performance.now() - encodingStarted;
+    activeMeasurementPhase = undefined;
+  }
+  const materializationStarted = measurement === undefined ? 0 : performance.now();
+  if (measurement !== undefined) {
+    activeMeasurementPhase = "currentIndexMaterialization";
+    activeMeasurementPhaseStarted = materializationStarted;
+  }
   const currentIndex = physicalSchemaVersion === 4
     ? materializeAttuneGraphCurrentHeadIndexV4(proposed.projection)
     : physicalSchemaVersion === 3
       ? materializeAttuneGraphCurrentHeadIndex(proposed.projection)
       : undefined;
+  if (measurement !== undefined) {
+    measurement.phaseMs.currentIndexMaterialization += performance.now() - materializationStarted;
+    activeMeasurementPhase = undefined;
+    if (currentIndex !== undefined) {
+      measurement.assertionRows += currentIndex.assertions.length;
+      measurement.sourceRefRows += currentIndex.sourceRefs.length;
+      measurement.endpointDegreeRows += "endpointDegrees" in currentIndex
+        ? currentIndex.endpointDegrees.length
+        : 0;
+    }
+  }
+  const headCheckStarted = measurement === undefined ? 0 : performance.now();
+  if (measurement !== undefined) {
+    activeMeasurementPhase = "headCheck";
+    activeMeasurementPhaseStarted = headCheckStarted;
+  }
   execSql("BEGIN IMMEDIATE", "compare-and-swap begin");
   try {
     const current = currentSnapshot(scope);
+    if (measurement !== undefined) {
+      measurement.phaseMs.headCheck += performance.now() - headCheckStarted;
+      activeMeasurementPhase = undefined;
+    }
     if (!sameSnapshot(current, expected)) {
+      const rollbackStarted = measurement === undefined ? 0 : performance.now();
+      if (measurement !== undefined) {
+        activeMeasurementPhase = "rollback";
+        activeMeasurementPhaseStarted = rollbackStarted;
+      }
       execSql("ROLLBACK", "compare-and-swap rollback");
+      if (measurement !== undefined) {
+        measurement.phaseMs.rollback += performance.now() - rollbackStarted;
+        activeMeasurementPhase = undefined;
+      }
       return { committed: false };
     }
     if (
@@ -875,6 +975,11 @@ function compareAndSwap(payload) {
       || proposed.snapshot.scope.threadId !== scope.threadId
     ) {
       fail("STORE_FAILURE", "proposed snapshot does not advance the pinned head exactly once");
+    }
+    const journalStarted = measurement === undefined ? 0 : performance.now();
+    if (measurement !== undefined) {
+      activeMeasurementPhase = "journalWrite";
+      activeMeasurementPhaseStarted = journalStarted;
     }
     if (physicalSchemaVersion === 1) {
       runSql(
@@ -901,7 +1006,25 @@ function compareAndSwap(payload) {
         proposed.fingerprint
       );
     }
+    if (measurement !== undefined) {
+      measurement.phaseMs.journalWrite += performance.now() - journalStarted;
+      activeMeasurementPhase = undefined;
+    }
+    const indexDeleteStarted = measurement === undefined ? 0 : performance.now();
+    if (measurement !== undefined) {
+      activeMeasurementPhase = "currentIndexDelete";
+      activeMeasurementPhaseStarted = indexDeleteStarted;
+    }
     if (currentIndex !== undefined) clearCurrentHeadIndex(currentIndex.manifest);
+    if (measurement !== undefined) {
+      measurement.phaseMs.currentIndexDelete += performance.now() - indexDeleteStarted;
+      activeMeasurementPhase = undefined;
+    }
+    const headWriteStarted = measurement === undefined ? 0 : performance.now();
+    if (measurement !== undefined) {
+      activeMeasurementPhase = "headWrite";
+      activeMeasurementPhaseStarted = headWriteStarted;
+    }
     runSql(
       statements.insertHead,
       scope.sourceId,
@@ -909,18 +1032,68 @@ function compareAndSwap(payload) {
       BigInt(proposed.snapshot.generation),
       proposed.snapshot.commitId
     );
+    if (measurement !== undefined) {
+      measurement.phaseMs.headWrite += performance.now() - headWriteStarted;
+      activeMeasurementPhase = undefined;
+    }
+    const indexWriteStarted = measurement === undefined ? 0 : performance.now();
+    if (measurement !== undefined) {
+      activeMeasurementPhase = "currentIndexWrite";
+      activeMeasurementPhaseStarted = indexWriteStarted;
+    }
     if (currentIndex !== undefined) insertCurrentHeadIndex(currentIndex);
+    if (measurement !== undefined) {
+      measurement.phaseMs.currentIndexWrite += performance.now() - indexWriteStarted;
+      activeMeasurementPhase = undefined;
+    }
     if (testFault === "before-commit") process.exit(71);
+    const commitStarted = measurement === undefined ? 0 : performance.now();
+    if (measurement !== undefined) {
+      activeMeasurementPhase = "commit";
+      activeMeasurementPhaseStarted = commitStarted;
+    }
     execSql("COMMIT", "compare-and-swap commit");
+    if (measurement !== undefined) {
+      measurement.phaseMs.commit += performance.now() - commitStarted;
+      activeMeasurementPhase = undefined;
+      measurement.committed += 1;
+    }
     if (testFault === "after-commit-before-ack") process.exit(72);
     return { committed: true };
   } catch (cause) {
+    if (measurement !== undefined && activeMeasurementPhase !== undefined) {
+      const phaseMs = /** @type {Record<string, number>} */ (measurement.phaseMs);
+      phaseMs[activeMeasurementPhase] = (phaseMs[activeMeasurementPhase] ?? 0)
+        + performance.now() - activeMeasurementPhaseStarted;
+      activeMeasurementPhase = undefined;
+    }
+    const rollbackStarted = measurement === undefined ? 0 : performance.now();
+    if (measurement !== undefined) {
+      activeMeasurementPhase = "rollback";
+      activeMeasurementPhaseStarted = rollbackStarted;
+    }
     try {
-      database.exec("ROLLBACK");
+      execSql("ROLLBACK", "compare-and-swap failure rollback");
     } catch {
       // Preserve the typed transaction failure.
+    } finally {
+      if (measurement !== undefined) {
+        measurement.phaseMs.rollback += performance.now() - rollbackStarted;
+        activeMeasurementPhase = undefined;
+      }
     }
     throw cause;
+  }
+  } finally {
+    if (measurement !== undefined) {
+      if (activeMeasurementPhase !== undefined) {
+        const phaseMs = /** @type {Record<string, number>} */ (measurement.phaseMs);
+        phaseMs[activeMeasurementPhase] = (phaseMs[activeMeasurementPhase] ?? 0)
+          + performance.now() - activeMeasurementPhaseStarted;
+      }
+      measurement.phaseMs.total += performance.now() - totalStarted;
+      measuringCompareAndSwap = false;
+    }
   }
 }
 
@@ -980,21 +1153,53 @@ function holdWriteLockForTesting(payload) {
   return { acquired: true };
 }
 
-/** @param {import("./attunegraph-local-protocol.mjs").EmptyPayload} payload @returns {import("./attunegraph-local-protocol.mjs").InspectResult} */
+/** @param {import("./attunegraph-local-protocol.mjs").InspectPayload} payload @returns {import("./attunegraph-local-protocol.mjs").InspectResult} */
 function inspectForTesting(payload) {
   assertReady();
-  if (!testFixtureMode) fail("STORE_FAILURE", "worker test fixture mode is disabled");
-  plainRecord(payload, "inspection payload", []);
+  const input = plainRecord(payload, "inspection payload", ["performance"], []);
+  if (!testFixtureMode && !Object.hasOwn(input, "performance")) {
+    fail("STORE_FAILURE", "worker test fixture mode is disabled");
+  }
+  const performanceAction = input.performance;
+  if (performanceAction === "start") {
+    if (compareAndSwapMeasurement !== undefined || measuringCompareAndSwap) {
+      fail("STORE_FAILURE", "SQLite CAS performance measurement is already active");
+    }
+  } else if (
+    Object.hasOwn(input, "performance")
+    && performanceAction !== "finish"
+  ) {
+    fail("STORE_FAILURE", "SQLite CAS performance action is invalid");
+  }
+  let measured;
+  if (performanceAction === "finish") {
+    if (compareAndSwapMeasurement === undefined || measuringCompareAndSwap) {
+      fail("STORE_FAILURE", "SQLite CAS performance measurement is not ready");
+    }
+    measured = compareAndSwapMeasurement;
+    compareAndSwapMeasurement = undefined;
+  }
   const row = sqlRow(getSql(database.prepare(`
     SELECT
       (SELECT COUNT(*) FROM attunegraph_projection_head) AS headRows,
       (SELECT COUNT(*) FROM attunegraph_projection_journal) AS journalRows,
       COALESCE((SELECT MAX(generation) FROM attunegraph_projection_journal), 0) AS maxGeneration
   `)), "inspection row", ["headRows", "journalRows", "maxGeneration"]);
-  return {
+  const inspection = {
     headRows: safeInteger(row.headRows, "inspection head count", 0n),
     journalRows: safeInteger(row.journalRows, "inspection journal count", 0n),
     maxGeneration: safeInteger(row.maxGeneration, "inspection max generation", 0n)
+  };
+  if (performanceAction === "start") {
+    compareAndSwapMeasurement = newCompareAndSwapMeasurement();
+  }
+  if (measured === undefined) return inspection;
+  return {
+    ...inspection,
+    performance: Object.freeze({
+      ...measured,
+      phaseMs: Object.freeze({ ...measured.phaseMs })
+    })
   };
 }
 

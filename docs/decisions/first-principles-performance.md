@@ -67,6 +67,7 @@ priced away.
 | Reduce duplicate canonical receipt parsing, serialization, or hashing during admission | `measure-first` | The supplied receipt is canonicalized and the normalized result is independently resealed; a safe implementation may share immutable intermediate bytes | Reject unless receipt ID/canonical JSON remain exact for every remint test and paired `decision-query@1` admission/end-to-end evidence isolates fewer canonical byte passes without moving work outside the timer |
 | Derive the selected Working Graph content ID without materializing an unused envelope | `verified-current` | The caller needs only the domain-separated digest. Reusing the same frozen-input inspection and canonical-body encoder removes two full-envelope encodes plus detached-tree freeze/reverification without changing the ID contract. | Reject on any content-ID, Working Graph golden anchor, hostile-input, Unicode, numeric, budget, result, or admission differential, or if alternating paired evidence does not improve the 32-witness end-to-end boundary. |
 | Add package-private phase counters for decision-query production and admission | `measure-first` | Attribution is required before choosing another optimization; wall time alone cannot identify traversal, serialization, hashing, or transport | Reject the counter design if it changes public output, observes secret/source payloads, is unbounded, or cannot be recomputed from a deterministic fixture |
+| Add package-private SQLite CAS phase and statement counters | `verified-current` | Separates admission, compression, normalized-index construction, transaction writes, and commit without exposing payloads or changing the public API | Reject if exact statement/row counts drift from the deterministic corpus, stored heads differ, measurement can be activated through `./local`, or phase collection remains active after the bounded finish request |
 | Seed the prepared Working Graph plan from the already admitted projection after a successful CAS or exact replay/winner convergence | `now` | Deletes the first post-commit full projection read and repeat admission while retaining one exact-head check before every reuse | Reject on any mixed-generation cache use, missed epoch invalidation, or result/receipt byte drift; the deterministic part-count cell must remain at zero full reads for the seeded first query and one for the equivalent cold-handle query |
 | Remove the SQLite parent backend's extra JSON stringify/parse detachment | `now` | Worker structured clone plus `parseWorkerResponse -> parseWorkerResult -> parseProjection` already descriptor-admit, rebuild, and deeply freeze a new parent-side projection, so the parent copy was one duplicate stringify/parse pass | Reject unless malformed-worker/protocol fail-stop, direct-backend mutation isolation, deep freezing, and Engine canonical Store admission remain exact; the deterministic intrinsic counter must retain the two protocol-size stringifications and remove exactly one stringify plus one parse |
 | Add an optional atomic head-pinned projection read backend primitive | `measure-first` | SQLite can observe the current head and its journal row in one statement, potentially replacing two worker requests; generic backends can retain the retry fallback | Reject on any writer/reader interleaving divergence, changed snapshot conflict, or weakened current-head semantics; falsify if cold preparation does not fall from two requests to one |
@@ -225,6 +226,51 @@ Primary sources: [RFC 8785](https://www.rfc-editor.org/rfc/rfc8785.html),
 [SQLite NGQP](https://www.sqlite.org/queryplanner-ng.html). The Zep benchmark
 numbers are author-reported and not comparable to AttuneGraph's local semantic
 boundary; no raw superiority claim is made from them.
+
+## Durable v4 write attribution (2026-08-03)
+
+Two plausible constant-factor changes were implemented, measured, rejected,
+and deleted before adding durable attribution:
+
+| Candidate | Base median | Candidate median | Decision |
+| --- | ---: | ---: | --- |
+| Fuse three v4 assertion traversals and replace endpoint JSON keys | v4/v3 `1.04519`; v4 `1429.36 ms` | v4/v3 `1.05007`; v4 `1434.99 ms` | `rejected`: normalized ratio regressed about 0.47%; absolute v4 time regressed about 0.39% |
+| Insert v4 normalized rows in prepared 16-row SQL batches | v4/v3 `1.04519`; v4 `1429.36 ms` | v4/v3 `1.05734`; v4 `1457.14 ms` | `rejected`: normalized ratio regressed about 1.16%; absolute v4 time regressed about 1.94% |
+
+Each median is from three local 10K runs on Node 24.16.0. Every artifact kept
+the same semantic aggregate, physical row count, and settled database bytes.
+These short dirty-tree experiments are falsification evidence only; they are
+not release-qualified latency claims.
+
+The retained `attunegraph-sqlite-cas-phases@1` probe is package-owned and
+bounded. It records only counts and durations, never assertion content. The
+v4 storage artifact schema is now `attunegraph-current-head-v4-storage-profile@2`
+and its paired schema is `attunegraph-current-head-v4-storage-paired@2`.
+For the same 10K diagnostic corpus it observed:
+
+| Boundary | v3 | v4 | v4 minus v3 |
+| --- | ---: | ---: | ---: |
+| Outer `graph.project` write boundary | 1391.69 ms | 1444.33 ms | +52.63 ms |
+| Worker CAS total | 356.36 ms | 385.93 ms | +29.58 ms |
+| Projection admission | 140.31 ms | 140.20 ms | -0.11 ms |
+| Projection compression/encoding | 23.61 ms | 24.10 ms | +0.48 ms |
+| Current-index materialization | 13.72 ms | 40.33 ms | +26.61 ms |
+| Current-index writes | 56.62 ms | 78.82 ms | +22.20 ms |
+| Commit | 110.08 ms | 89.53 ms | -20.55 ms |
+| SQLite write statements | 21,252 | 31,565 | +10,313 |
+
+This changes the next optimization target. The rejected single-pass change
+could affect at most a small fraction of the measured outer boundary, while
+the positive v4 worker delta in this run is concentrated in added endpoint
+materialization and endpoint-row writes. Commit moved in the opposite direction,
+so it remains noisy and needs alternating repetitions before optimization.
+About 73.3% of the v4 outer write boundary is outside the worker CAS timer;
+that remainder combines Engine preparation, protocol/structured-clone,
+scheduling, and other uninstrumented work and must be split before assigning
+it to any one component. Replacing SQLite is not yet justified: the evidence
+instead requires measuring the parent/Engine boundary and proving a public
+read benefit for the 10,313 extra endpoint rows before paying further write
+cost.
 
 ## Current structural limit
 

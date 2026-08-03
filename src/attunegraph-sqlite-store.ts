@@ -34,6 +34,30 @@ export interface SqliteAttuneGraphTestInspection {
   readonly maxGeneration: number;
 }
 
+export interface SqliteCasPhaseMeasurement {
+  readonly schema: "attunegraph-sqlite-cas-phases@1";
+  readonly attempts: number;
+  readonly committed: number;
+  readonly assertionRows: number;
+  readonly sourceRefRows: number;
+  readonly endpointDegreeRows: number;
+  readonly sqliteWriteStatements: number;
+  readonly sqliteExecStatements: number;
+  readonly phaseMs: Readonly<{
+    readonly admission: number;
+    readonly projectionEncoding: number;
+    readonly currentIndexMaterialization: number;
+    readonly headCheck: number;
+    readonly journalWrite: number;
+    readonly currentIndexDelete: number;
+    readonly headWrite: number;
+    readonly currentIndexWrite: number;
+    readonly commit: number;
+    readonly rollback: number;
+    readonly total: number;
+  }>;
+}
+
 export interface SqliteWorkerHeapStatistics {
   readonly detachedContexts: number;
   readonly externalMemoryBytes: number;
@@ -91,6 +115,10 @@ export interface OpenedSqliteAttuneGraphStore {
   holdWriteLockForTesting(durationMs: number): Promise<void>;
   /** Internal physical-state fixture; never exported from the public local subpath. */
   inspectForTesting(): Promise<SqliteAttuneGraphTestInspection>;
+  /** Package-owned bounded performance probe; never exported from the public local subpath. */
+  startSqliteCasPhaseMeasurementForMeasurement(): Promise<void>;
+  /** Package-owned bounded performance probe; never exported from the public local subpath. */
+  finishSqliteCasPhaseMeasurementForMeasurement(): Promise<SqliteCasPhaseMeasurement>;
   /** Package-owned measurement probe; never exported from the public local subpath. */
   inspectWorkerHeapStatisticsForMeasurement(): Promise<SqliteWorkerHeapStatistics>;
 }
@@ -631,6 +659,26 @@ export async function openSqliteAttuneGraphStore(
       maxGeneration: response.maxGeneration as number
     });
   };
+  const startSqliteCasPhaseMeasurementForMeasurement = async (): Promise<void> => {
+    await request("inspectForTesting", { performance: "start" });
+  };
+  const finishSqliteCasPhaseMeasurementForMeasurement = async (): Promise<SqliteCasPhaseMeasurement> => {
+    const response = plainRecord(
+      await request("inspectForTesting", { performance: "finish" }),
+      "worker SQLite CAS performance result",
+      ["headRows", "journalRows", "maxGeneration", "performance"]
+    );
+    if (
+      response.performance === null
+      || typeof response.performance !== "object"
+      || Array.isArray(response.performance)
+    ) {
+      return rejectAfterFailStop(
+        storeFailure("local AttuneGraph worker returned invalid SQLite CAS performance")
+      );
+    }
+    return response.performance as SqliteCasPhaseMeasurement;
+  };
   const inspectWorkerHeapStatisticsForMeasurement = (): Promise<SqliteWorkerHeapStatistics> =>
     begin(async () => {
       const statistics: unknown = await worker.getHeapStatistics();
@@ -715,6 +763,8 @@ export async function openSqliteAttuneGraphStore(
     mutateForTesting,
     holdWriteLockForTesting,
     inspectForTesting,
+    startSqliteCasPhaseMeasurementForMeasurement,
+    finishSqliteCasPhaseMeasurementForMeasurement,
     inspectWorkerHeapStatisticsForMeasurement
   });
 }

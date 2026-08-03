@@ -587,7 +587,11 @@ function exactProfileDatabase(value, profile, scale, scopeCount, includeEndpoint
 function exactMaterializationProfile(
   value,
   expectedProfile,
-  { schema = "attunegraph-current-head-materialization-profile@2", includeEndpointDegreeRows = false } = {}
+  {
+    schema = "attunegraph-current-head-materialization-profile@2",
+    includeEndpointDegreeRows = false,
+    includeCasPhases = false
+  } = {}
 ) {
   exactRecord(value, [
     "schema", "measurementOnly", "claimEligible", "profile", "scale", "provenance", "corpus",
@@ -633,11 +637,17 @@ function exactMaterializationProfile(
     || correctness.expectedAssertions !== scale || correctness.observedAssertionRows !== scale
   ) throw new Error("materialization profile correctness invariants are invalid");
 
-  const materialization = exactRecord(value.materialization, [
+  const materializationFields = [
     "writeDurationMs", "reopenValidationDurationMs", "adminFullIntegrityDurationMs", "committedScopes",
     "committedAssertions", "finalPhysicalRows", "finalPhysicalRowsPerAssertion",
     "projectionUncompressedBytes", "projectionCompressedBytes"
-  ], "materialization profile measurements");
+  ];
+  if (includeCasPhases) materializationFields.push("casPhases");
+  const materialization = exactRecord(
+    value.materialization,
+    materializationFields,
+    "materialization profile measurements"
+  );
   for (const key of ["writeDurationMs", "reopenValidationDurationMs", "adminFullIntegrityDurationMs"]) {
     exactFiniteNumber(materialization[key], `materialization profile ${key}`, { positive: true });
   }
@@ -663,6 +673,38 @@ function exactMaterializationProfile(
     scopeCount,
     includeEndpointDegreeRows
   );
+  if (includeCasPhases) {
+    const phases = exactRecord(materialization.casPhases, [
+      "schema", "attempts", "committed", "assertionRows", "sourceRefRows",
+      "endpointDegreeRows", "sqliteWriteStatements", "sqliteExecStatements", "phaseMs"
+    ], "materialization SQLite CAS phases");
+    if (phases.schema !== "attunegraph-sqlite-cas-phases@1") {
+      throw new Error("materialization SQLite CAS phase schema is invalid");
+    }
+    for (const key of [
+      "attempts", "committed", "assertionRows", "sourceRefRows", "endpointDegreeRows",
+      "sqliteWriteStatements", "sqliteExecStatements"
+    ]) exactInteger(phases[key], `materialization SQLite CAS ${key}`);
+    const phaseMs = exactRecord(phases.phaseMs, [
+      "admission", "projectionEncoding", "currentIndexMaterialization", "headCheck",
+      "journalWrite", "currentIndexDelete", "headWrite", "currentIndexWrite", "commit", "rollback", "total"
+    ], "materialization SQLite CAS phase durations");
+    for (const key of Object.keys(phaseMs)) {
+      exactFiniteNumber(phaseMs[key], `materialization SQLite CAS phase ${key}`);
+    }
+    const measuredSubtotal = Object.entries(phaseMs)
+      .filter(([key]) => key !== "total")
+      .reduce((total, [, duration]) => total + duration, 0);
+    if (
+      phases.attempts !== scopeCount || phases.committed !== scopeCount
+      || phases.assertionRows !== scale || phases.sourceRefRows !== scale
+      || phases.endpointDegreeRows !== database.endpointDegreeRows
+      || phases.sqliteWriteStatements
+        !== (4 * scopeCount) + (2 * scale) + database.endpointDegreeRows
+      || phases.sqliteExecStatements !== 2 * scopeCount
+      || phaseMs.total < measuredSubtotal
+    ) throw new Error("materialization SQLite CAS part counts are invalid");
+  }
   exactStorageSnapshot(storage.openStorageSnapshot, "materialization open storage snapshot");
   exactStorageSnapshot(storage.settledStorageSnapshot, "materialization settled storage snapshot");
   exactFiniteNumber(
@@ -718,7 +760,8 @@ async function measureCurrentHeadMaterializationProfile({
   scale,
   databasePath,
   schema,
-  includeEndpointDegreeRows
+  includeEndpointDegreeRows,
+  includeCasPhases = false
 }) {
   if (
     (profile !== "v2" && profile !== "v3" && profile !== "v4") || !Number.isSafeInteger(scale)
@@ -739,6 +782,7 @@ async function measureCurrentHeadMaterializationProfile({
   let writeDurationMs = 0;
   const resource = await openSqliteAttuneGraphStore({ databasePath });
   try {
+    if (includeCasPhases) await resource.startSqliteCasPhaseMeasurementForMeasurement();
     for (let scopeIndex = 0; scopeIndex < shardCount; scopeIndex += 1) {
       const shard = corpusShard(scale, scopeIndex);
       corpusHash.update(JSON.stringify(shard));
@@ -774,6 +818,9 @@ async function measureCurrentHeadMaterializationProfile({
         );
       }
     }
+    const casPhases = includeCasPhases
+      ? await resource.finishSqliteCasPhaseMeasurementForMeasurement()
+      : undefined;
     const openStorageSnapshot = storageSnapshot(databasePath);
     await resource.close();
     const reopenStarted = performance.now();
@@ -822,7 +869,8 @@ async function measureCurrentHeadMaterializationProfile({
         finalPhysicalRows: database.finalPhysicalRows,
         finalPhysicalRowsPerAssertion: database.finalPhysicalRows / scale,
         projectionUncompressedBytes: database.projectionUncompressedBytes,
-        projectionCompressedBytes: database.projectionCompressedBytes
+        projectionCompressedBytes: database.projectionCompressedBytes,
+        ...(casPhases === undefined ? {} : { casPhases })
       }),
       storage: Object.freeze({
         database,
@@ -848,7 +896,11 @@ async function measureCurrentHeadMaterializationProfile({
         "no-inherited-performance-threshold"
       ])
     });
-    exactMaterializationProfile(report, profile, { schema, includeEndpointDegreeRows });
+    exactMaterializationProfile(report, profile, {
+      schema,
+      includeEndpointDegreeRows,
+      includeCasPhases
+    });
     if (Buffer.byteLength(JSON.stringify(report), "utf8") > MAX_REPORT_BYTES) {
       throw new Error("materialization profile report exceeded its byte bound");
     }
@@ -880,8 +932,9 @@ export async function runV4StorageCostProfile({ profile, scale, databasePath }) 
     profile,
     scale,
     databasePath,
-    schema: "attunegraph-current-head-v4-storage-profile@1",
-    includeEndpointDegreeRows: true
+    schema: "attunegraph-current-head-v4-storage-profile@2",
+    includeEndpointDegreeRows: true,
+    includeCasPhases: true
   });
 }
 
@@ -1016,8 +1069,9 @@ export function pairCurrentHeadMaterializationProfiles(v2, v3, admission) {
 
 export function pairV4StorageCostProfiles(v3, v4, admission) {
   const exactProfile = (value, profile) => exactMaterializationProfile(value, profile, {
-    schema: "attunegraph-current-head-v4-storage-profile@1",
-    includeEndpointDegreeRows: true
+    schema: "attunegraph-current-head-v4-storage-profile@2",
+    includeEndpointDegreeRows: true,
+    includeCasPhases: true
   });
   const { provenance } = admitMaterializationPair(
     v3,
@@ -1028,7 +1082,7 @@ export function pairV4StorageCostProfiles(v3, v4, admission) {
     exactProfile
   );
   const body = Object.freeze({
-    schema: "attunegraph-current-head-v4-storage-paired@1",
+    schema: "attunegraph-current-head-v4-storage-paired@2",
     measurementOnly: true,
     claimEligible: false,
     provenance,
@@ -1059,7 +1113,8 @@ export function pairV4StorageCostProfiles(v3, v4, admission) {
       queryLatencyMeasured: false,
       cumulativeWalWriteAmplificationMeasured: false,
       competitorComparisonMeasured: false,
-      resourceRatiosMeasured: false
+      resourceRatiosMeasured: false,
+      casPhaseAttributionMeasured: true
     })
   });
   return sealMaterializationPair(body);
@@ -1112,8 +1167,9 @@ export function runV4StorageCostBenchmark(argv = process.argv.slice(2)) {
       if (child.status !== 0) throw new Error(child.stderr.trim() || `${profile} storage cost child failed`);
       profiles[profile] = JSON.parse(child.stdout);
       exactMaterializationProfile(profiles[profile], profile, {
-        schema: "attunegraph-current-head-v4-storage-profile@1",
-        includeEndpointDegreeRows: true
+        schema: "attunegraph-current-head-v4-storage-profile@2",
+        includeEndpointDegreeRows: true,
+        includeCasPhases: true
       });
       requireIdenticalMaterializationIdentity(
         parentIdentity,

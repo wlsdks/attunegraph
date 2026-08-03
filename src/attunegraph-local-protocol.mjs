@@ -20,6 +20,7 @@ const SUPPORTED_USER_VERSIONS = new Set([1, 2, 3, USER_VERSION]);
 /** @typedef {{ readonly scope: AttuneGraphScope }} ReadHeadPayload */
 /** @typedef {{ readonly scope: AttuneGraphScope, readonly expected: AttuneGraphSnapshot | null, readonly proposed: AttuneGraphStoredProjection }} CompareAndSwapPayload */
 /** @typedef {{ readonly durationMs: number }} HoldWriteLockPayload */
+/** @typedef {{ readonly performance?: "start" | "finish" }} InspectPayload */
 /** @typedef {{ readonly mutation: TestMutation }} MutatePayload */
 /** @typedef {Readonly<Record<never, never>>} EmptyPayload */
 
@@ -28,7 +29,7 @@ const SUPPORTED_USER_VERSIONS = new Set([1, 2, 3, USER_VERSION]);
 /** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "readHead", readonly payload: ReadHeadPayload }} ReadHeadRequest */
 /** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "compareAndSwap", readonly payload: CompareAndSwapPayload }} CompareAndSwapRequest */
 /** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "holdWriteLockForTesting", readonly payload: HoldWriteLockPayload }} HoldWriteLockRequest */
-/** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "inspectForTesting", readonly payload: EmptyPayload }} InspectRequest */
+/** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "inspectForTesting", readonly payload: InspectPayload }} InspectRequest */
 /** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "mutateForTesting", readonly payload: MutatePayload }} MutateRequest */
 /** @typedef {{ readonly protocolVersion: 1, readonly id: number, readonly type: "close", readonly payload: EmptyPayload }} CloseRequest */
 /** @typedef {InitializeRequest | ReadRequest | ReadHeadRequest | CompareAndSwapRequest | HoldWriteLockRequest | InspectRequest | MutateRequest | CloseRequest} WorkerRequest */
@@ -37,7 +38,8 @@ const SUPPORTED_USER_VERSIONS = new Set([1, 2, 3, USER_VERSION]);
 /** @typedef {{ readonly found: false } | { readonly found: true, readonly snapshot: AttuneGraphSnapshot }} ReadHeadResult */
 /** @typedef {{ readonly committed: boolean }} CompareAndSwapResult */
 /** @typedef {{ readonly acquired: true }} HoldWriteLockResult */
-/** @typedef {{ readonly headRows: number, readonly journalRows: number, readonly maxGeneration: number }} InspectResult */
+/** @typedef {{ readonly schema: "attunegraph-sqlite-cas-phases@1", readonly attempts: number, readonly committed: number, readonly assertionRows: number, readonly sourceRefRows: number, readonly endpointDegreeRows: number, readonly sqliteWriteStatements: number, readonly sqliteExecStatements: number, readonly phaseMs: Readonly<{ readonly admission: number, readonly projectionEncoding: number, readonly currentIndexMaterialization: number, readonly headCheck: number, readonly journalWrite: number, readonly currentIndexDelete: number, readonly headWrite: number, readonly currentIndexWrite: number, readonly commit: number, readonly rollback: number, readonly total: number }> }} SqliteCasPerformance */
+/** @typedef {{ readonly headRows: number, readonly journalRows: number, readonly maxGeneration: number, readonly performance?: SqliteCasPerformance }} InspectResult */
 /** @typedef {{ readonly mutated: true }} MutateResult */
 /** @typedef {{ readonly closed: true }} CloseResult */
 /** @typedef {InitializeResult | ReadResult | ReadHeadResult | CompareAndSwapResult | HoldWriteLockResult | InspectResult | MutateResult | CloseResult} WorkerResult */
@@ -326,7 +328,7 @@ export function parseSnapshot(value, scope, label = "snapshot") {
 /**
  * @param {WorkerRequestType} type
  * @param {unknown} value
- * @returns {InitializePayload | ReadPayload | ReadHeadPayload | CompareAndSwapPayload | HoldWriteLockPayload | InspectRequest["payload"] | MutatePayload | CloseRequest["payload"]}
+ * @returns {InitializePayload | ReadPayload | ReadHeadPayload | CompareAndSwapPayload | HoldWriteLockPayload | InspectPayload | MutatePayload | CloseRequest["payload"]}
  */
 export function parseRequestPayload(type, value) {
   switch (type) {
@@ -363,7 +365,14 @@ export function parseRequestPayload(type, value) {
       if (!isTestMutation(input.mutation)) fail("STORE_FAILURE", "worker test mutation is unknown");
       return Object.freeze({ mutation: input.mutation });
     }
-    case "inspectForTesting":
+    case "inspectForTesting": {
+      const input = plainRecord(value, "inspection payload", ["performance"], []);
+      if (!Object.hasOwn(input, "performance")) return Object.freeze({});
+      if (input.performance !== "start" && input.performance !== "finish") {
+        fail("STORE_FAILURE", "inspection performance action is invalid");
+      }
+      return Object.freeze({ performance: input.performance });
+    }
     case "close":
       plainRecord(value, `${type} payload`, []);
       return Object.freeze({});
@@ -389,7 +398,7 @@ export function createWorkerRequest(id, type, payload) {
     case "readHead": request = { protocolVersion: PROTOCOL_VERSION, id, type, payload: /** @type {ReadHeadPayload} */ (parsedPayload) }; break;
     case "compareAndSwap": request = { protocolVersion: PROTOCOL_VERSION, id, type, payload: /** @type {CompareAndSwapPayload} */ (parsedPayload) }; break;
     case "holdWriteLockForTesting": request = { protocolVersion: PROTOCOL_VERSION, id, type, payload: /** @type {HoldWriteLockPayload} */ (parsedPayload) }; break;
-    case "inspectForTesting": request = { protocolVersion: PROTOCOL_VERSION, id, type, payload: /** @type {EmptyPayload} */ (parsedPayload) }; break;
+    case "inspectForTesting": request = { protocolVersion: PROTOCOL_VERSION, id, type, payload: /** @type {InspectPayload} */ (parsedPayload) }; break;
     case "mutateForTesting": request = { protocolVersion: PROTOCOL_VERSION, id, type, payload: /** @type {MutatePayload} */ (parsedPayload) }; break;
     case "close": request = { protocolVersion: PROTOCOL_VERSION, id, type, payload: /** @type {EmptyPayload} */ (parsedPayload) }; break;
   }
@@ -440,6 +449,57 @@ export function parseSerializedError(value) {
     code: /** @type {SerializedErrorCode} */ (input.code),
     message: input.message
   });
+}
+
+/** @param {unknown} value @returns {SqliteCasPerformance} */
+function parseSqliteCasPerformance(value) {
+  const input = plainRecord(value, "SQLite CAS performance", [
+    "schema", "attempts", "committed", "assertionRows", "sourceRefRows",
+    "endpointDegreeRows", "sqliteWriteStatements", "sqliteExecStatements", "phaseMs"
+  ]);
+  const integerFields = [
+    "attempts", "committed", "assertionRows", "sourceRefRows", "endpointDegreeRows",
+    "sqliteWriteStatements", "sqliteExecStatements"
+  ];
+  if (
+    input.schema !== "attunegraph-sqlite-cas-phases@1"
+    || integerFields.some((field) => (
+      typeof input[field] !== "number"
+      || !Number.isSafeInteger(input[field])
+      || /** @type {number} */ (input[field]) < 0
+    ))
+    || /** @type {number} */ (input.committed) > /** @type {number} */ (input.attempts)
+  ) fail("STORE_FAILURE", "SQLite CAS performance counts are invalid");
+  const phaseFields = [
+    "admission", "projectionEncoding", "currentIndexMaterialization", "headCheck",
+    "journalWrite", "currentIndexDelete", "headWrite", "currentIndexWrite", "commit", "rollback", "total"
+  ];
+  const phaseInput = plainRecord(input.phaseMs, "SQLite CAS performance phases", phaseFields);
+  if (phaseFields.some((field) => (
+    typeof phaseInput[field] !== "number"
+    || !Number.isFinite(phaseInput[field])
+    || phaseInput[field] < 0
+  ))) fail("STORE_FAILURE", "SQLite CAS performance phases are invalid");
+  const phaseMs = Object.freeze(Object.fromEntries(
+    phaseFields.map((field) => [field, phaseInput[field]])
+  ));
+  const measuredSubtotal = phaseFields
+    .filter((field) => field !== "total")
+    .reduce((total, field) => total + /** @type {number} */ (phaseInput[field]), 0);
+  if (/** @type {number} */ (phaseInput.total) < measuredSubtotal) {
+    fail("STORE_FAILURE", "SQLite CAS performance total is smaller than its phases");
+  }
+  return /** @type {SqliteCasPerformance} */ (Object.freeze({
+    schema: "attunegraph-sqlite-cas-phases@1",
+    attempts: input.attempts,
+    committed: input.committed,
+    assertionRows: input.assertionRows,
+    sourceRefRows: input.sourceRefRows,
+    endpointDegreeRows: input.endpointDegreeRows,
+    sqliteWriteStatements: input.sqliteWriteStatements,
+    sqliteExecStatements: input.sqliteExecStatements,
+    phaseMs
+  }));
 }
 
 /**
@@ -514,8 +574,8 @@ export function parseWorkerResult(type, value) {
       return Object.freeze({ acquired: true });
     case "inspectForTesting": {
       const input = plainRecord(value, "worker inspection result", [
-        "headRows", "journalRows", "maxGeneration"
-      ]);
+        "headRows", "journalRows", "maxGeneration", "performance"
+      ], ["headRows", "journalRows", "maxGeneration"]);
       if (
         !Number.isSafeInteger(input.headRows)
         || !Number.isSafeInteger(input.journalRows)
@@ -524,11 +584,14 @@ export function parseWorkerResult(type, value) {
         || /** @type {number} */ (input.journalRows) < 0
         || /** @type {number} */ (input.maxGeneration) < 0
       ) fail("STORE_FAILURE", "invalid inspection result");
-      return Object.freeze({
+      const inspection = {
         headRows: /** @type {number} */ (input.headRows),
         journalRows: /** @type {number} */ (input.journalRows),
         maxGeneration: /** @type {number} */ (input.maxGeneration)
-      });
+      };
+      return Object.freeze(Object.hasOwn(input, "performance")
+        ? { ...inspection, performance: parseSqliteCasPerformance(input.performance) }
+        : inspection);
     }
     case "mutateForTesting":
       if (plainRecord(value, "worker mutation result", ["mutated"]).mutated !== true) {

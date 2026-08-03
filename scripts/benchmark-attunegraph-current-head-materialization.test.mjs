@@ -55,8 +55,18 @@ it("pairs v2 and v3 materialization with exact semantic bytes and explicit non-q
 
     expect(paired.schema).toBe("attunegraph-current-head-materialization-paired@2");
     expect(v2.schema).toBe("attunegraph-current-head-materialization-profile@2");
-    expect(v3Storage.schema).toBe("attunegraph-current-head-v4-storage-profile@1");
-    expect(v4.schema).toBe("attunegraph-current-head-v4-storage-profile@1");
+    expect(v3Storage.schema).toBe("attunegraph-current-head-v4-storage-profile@2");
+    expect(v4.schema).toBe("attunegraph-current-head-v4-storage-profile@2");
+    expect(v4.materialization.casPhases).toMatchObject({
+      schema: "attunegraph-sqlite-cas-phases@1",
+      attempts: 2,
+      committed: 2,
+      assertionRows: 64,
+      sourceRefRows: 64,
+      endpointDegreeRows: 66,
+      sqliteWriteStatements: 202,
+      sqliteExecStatements: 4
+    });
     expect(paired.provenance).toEqual(v2.provenance);
     expect(paired.provenance).toEqual(v3.provenance);
     expect(pairedV3V4.provenance).toEqual(v4.provenance);
@@ -130,7 +140,7 @@ it("pairs v2 and v3 materialization with exact semantic bytes and explicit non-q
       finalPhysicalRows: 200
     });
     expect(pairedV3V4).toMatchObject({
-      schema: "attunegraph-current-head-v4-storage-paired@1",
+      schema: "attunegraph-current-head-v4-storage-paired@2",
       measurementOnly: true,
       claimEligible: false,
       correctness: {
@@ -148,7 +158,8 @@ it("pairs v2 and v3 materialization with exact semantic bytes and explicit non-q
       },
       qualification: {
         competitorComparisonMeasured: false,
-        resourceRatiosMeasured: false
+        resourceRatiosMeasured: false,
+        casPhaseAttributionMeasured: true
       }
     });
     expect(v3.materialization.reopenValidationDurationMs).toBeGreaterThan(0);
