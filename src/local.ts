@@ -6,6 +6,8 @@ import type {
   AttuneGraphAuthorityQueryResult,
   AttuneGraphDecisionQuery,
   AttuneGraphDecisionQueryResult,
+  AttuneGraphDecisionContextQuery,
+  AttuneGraphDecisionContextResult,
   AttuneGraphExecuteCommand,
   AttuneGraphOperatorResult,
   AttuneGraphProjectAgainstHeadCommand,
@@ -193,6 +195,11 @@ export async function openLocalAttuneGraph(options: OpenLocalAttuneGraphOptions)
       return lifecycle === "open"
         ? engine.queryAuthority(command)
         : rejectClosed<AttuneGraphAuthorityQueryResult>();
+    },
+    queryDecisionContext(command: AttuneGraphDecisionContextQuery) {
+      return lifecycle === "open"
+        ? engine.queryDecisionContext(command)
+        : rejectClosed<AttuneGraphDecisionContextResult>();
     },
     planRevocationImpact(command: AttuneGraphRevocationImpactCommand) {
       return lifecycle === "open"

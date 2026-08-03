@@ -279,6 +279,96 @@ export interface AttuneGraphAuthorityQueryResult {
   readonly receipt: AttuneGraphAuthorityQueryReceipt;
 }
 
+export interface AttuneGraphDecisionContextQuery {
+  readonly operator: "decision-context@1";
+  readonly scope: AttuneGraphScope;
+  readonly seed: GraphRef;
+  readonly action: GraphRef & Readonly<{ readonly kind: "action" }>;
+  readonly threadRoot: GraphRef & Readonly<{ readonly kind: "thread" }>;
+  readonly asOf: string;
+  readonly head: AttuneGraphDecisionHead;
+  readonly freshness: Readonly<{ readonly require: "fresh" }>;
+  readonly budget: Readonly<{ readonly maxEstimatedTokens: number }>;
+}
+
+export interface AttuneGraphDecisionContextAuthority {
+  readonly authority: "authorized" | "undetermined";
+  /** Exact producer projection posture used before bounded authority evaluation. */
+  readonly projection: Readonly<{
+    readonly profile: "canonical-projection@1" | "canonical-projection@2";
+    readonly observationId: string;
+    /** Exact canonical source-observation envelope whose content ID is observationId. */
+    readonly canonicalProjection: string;
+    readonly observedAt: string;
+    readonly threadRoot: (GraphRef & Readonly<{ readonly kind: "thread" }>) | null;
+  }> | null;
+  /** Every assertion evaluated by the fixed authority scan, plus one real overflow assertion on a work cut. */
+  readonly frontier: Readonly<{
+    readonly assertions: readonly GraphAssertion[];
+    readonly evaluatedAssertions: number;
+    readonly totalAssertions: number;
+    readonly scanClosure: "complete" | "work-cut" | "not-performed";
+  }>;
+  /** Complete immutable proof content, not merely assertion identifiers. */
+  readonly witnessAssertions: readonly GraphAssertion[];
+  readonly conflicts: readonly AttuneGraphAuthorityConflict[];
+  readonly exclusions: readonly AttuneGraphAuthorityExclusion[];
+  readonly diagnostics: AttuneGraphAuthorityDiagnostics;
+}
+
+export interface AttuneGraphDecisionContextDiagnostics {
+  readonly estimatedTokens: number;
+  readonly evidenceClosure: "complete" | "incomplete";
+  readonly authorityClosure: "complete" | "incomplete";
+  readonly conflictClosure: "complete" | "conflict" | "incomplete";
+  readonly truncationReasons: readonly (
+    | "token-budget"
+    | "traversal-budget"
+    | "authority-work-budget"
+    | "authority-token-budget"
+  )[];
+  readonly terminalReasons: readonly (
+    | AttuneGraphAuthorityTerminalReason
+    | "no-eligible-evidence"
+  )[];
+}
+
+export interface AttuneGraphDecisionContextReceipt {
+  readonly contractRevision: 1;
+  readonly receiptId: string;
+  readonly canonicalJson: string;
+  readonly use: "decision-context";
+  readonly query: AttuneGraphDecisionContextQuery;
+  readonly snapshot: AttuneGraphSnapshot | null;
+  readonly sourceFreshness: AttuneGraphSourceFreshness | null;
+  readonly selectedWorkingGraphId: string;
+  readonly selectedAssertions: readonly GraphAssertion[];
+  /** Domain-separated identity of exact authority projection posture, scan metadata, and frontier assertions. */
+  readonly authorityEvaluationId: string;
+  readonly authorityWitnessAssertions: readonly GraphAssertion[];
+  readonly conflicts: readonly AttuneGraphAuthorityConflict[];
+  readonly exclusions: readonly AttuneGraphAuthorityExclusion[];
+  readonly status: "complete" | "partial" | "abstained";
+  readonly decisionReady: boolean;
+  readonly executionCapability: "none";
+  readonly diagnostics: AttuneGraphDecisionContextDiagnostics;
+}
+
+export interface AttuneGraphDecisionContextResult {
+  readonly operator: "decision-context@1";
+  readonly use: "decision-context";
+  readonly status: "complete" | "partial" | "abstained";
+  readonly decisionReady: boolean;
+  /** A context receipt proves no action permission and carries no executor. */
+  readonly executionCapability: "none";
+  readonly snapshot?: AttuneGraphSnapshot;
+  readonly sourceFreshness?: AttuneGraphSourceFreshness;
+  readonly workingGraph: AttuneGraphWorkingGraph;
+  readonly authority: AttuneGraphDecisionContextAuthority;
+  readonly diagnostics: AttuneGraphDecisionContextDiagnostics;
+  readonly receipt: AttuneGraphDecisionContextReceipt;
+}
+
 export interface AttuneGraphRevocationSelector {
   readonly assertionIds?: readonly string[];
   readonly graphRefs?: readonly GraphRef[];
@@ -391,6 +481,10 @@ export interface AttuneGraph {
   query(command: AttuneGraphDecisionQuery): Promise<AttuneGraphDecisionQueryResult>;
   /** Proves current action authority from one fixed, exact, fail-closed frontier. */
   queryAuthority(command: AttuneGraphAuthorityQuery): Promise<AttuneGraphAuthorityQueryResult>;
+  /** Atomically compiles bounded decision evidence and action-authority proof from one head. */
+  queryDecisionContext(
+    command: AttuneGraphDecisionContextQuery
+  ): Promise<AttuneGraphDecisionContextResult>;
   /** Read-only revocation planning. Apply, retention, and compaction remain separate operations. */
   planRevocationImpact(
     command: AttuneGraphRevocationImpactCommand

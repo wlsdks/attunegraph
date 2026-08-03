@@ -19,6 +19,8 @@ import type {
   AttuneGraphAuthorityQueryResult,
   AttuneGraphDecisionQuery,
   AttuneGraphDecisionQueryResult,
+  AttuneGraphDecisionContextQuery,
+  AttuneGraphDecisionContextResult,
   AttuneGraphExecuteCommand,
   AttuneGraphOperatorResult,
   AttuneGraphProjectAgainstHeadCommand,
@@ -42,6 +44,10 @@ import {
   normalizeDecisionQuery,
   sealDecisionQueryReceipt
 } from "./decision-query.js";
+import {
+  compileDecisionContext,
+  normalizeDecisionContextQuery
+} from "./decision-context.js";
 import {
   admitRevocationImpactReceiptCanonicalJson,
   compileRevocationImpact,
@@ -951,6 +957,31 @@ export async function openAttuneGraph(options: OpenAttuneGraphOptions): Promise<
           attuneGraphError("SNAPSHOT_CONFLICT", "authority query exact head does not match the current head");
         }
         return compileAuthorityQuery(projection, normalized);
+      });
+    },
+    queryDecisionContext(
+      command: AttuneGraphDecisionContextQuery
+    ): Promise<AttuneGraphDecisionContextResult> {
+      return begin(async () => {
+        const normalized = normalizeDecisionContextQuery(command);
+        if (!sameScope(normalized.scope, openedScope)) {
+          attuneGraphError("INVALID_SCOPE", "decision context query scope does not match the opened scope");
+        }
+        const projection = await readHeadPinnedProjection();
+        if (projection === undefined && normalized.head.mode === "exact") {
+          attuneGraphError("SNAPSHOT_CONFLICT", "decision context exact head does not exist");
+        }
+        if (
+          projection !== undefined
+          && normalized.head.mode === "exact"
+          && (
+            normalized.head.generation !== projection.snapshot.generation
+            || normalized.head.commitId !== projection.snapshot.commitId
+          )
+        ) {
+          attuneGraphError("SNAPSHOT_CONFLICT", "decision context exact head does not match the current head");
+        }
+        return compileDecisionContext(projection, normalized);
       });
     },
     planRevocationImpact(

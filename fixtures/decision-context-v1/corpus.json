@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "operator": "decision-context@1",
+  "reportAxes": [
+    "correctness",
+    "terminalState",
+    "witnessClosure",
+    "outputBytes",
+    "estimatedTokens",
+    "latencyMilliseconds"
+  ],
+  "cases": [
+    {
+      "id": "contradictory-backfilled-evidence",
+      "expectedStatus": "abstained",
+      "expectedDecisionReady": false,
+      "test": "abstains for a governance conflict even when the conflict is outside selected evidence"
+    },
+    {
+      "id": "revoked-or-stale-source",
+      "expectedStatus": "abstained",
+      "expectedDecisionReady": false,
+      "test": "abstains when source freshness is stale"
+    },
+    {
+      "id": "stale-exact-head",
+      "expectedError": "SNAPSHOT_CONFLICT",
+      "test": "rejects an exact head mismatch before compiling any context"
+    },
+    {
+      "id": "authority-injection",
+      "expectedStatus": "abstained",
+      "expectedDecisionReady": false,
+      "test": "never treats a model-hypothesis authority-chain edge as action authority"
+    },
+    {
+      "id": "tight-budget",
+      "expectedStatus": "partial",
+      "expectedDecisionReady": false,
+      "test": "returns partial without decision readiness when authorized evidence is token-cut"
+    }
+  ],
+  "nonClaims": [
+    "agent-quality",
+    "cross-product-equivalence",
+    "latency-threshold-qualification"
+  ]
+}

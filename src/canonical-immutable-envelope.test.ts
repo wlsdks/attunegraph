@@ -1349,6 +1349,7 @@ describe("canonical immutable envelope", () => {
       "MAX_GRAPH_QUERY_DEPTH",
       "MAX_GRAPH_QUERY_SEEDS",
       "MAX_GRAPH_QUERY_VISITED_REFS",
+      "admitDecisionContextResult",
       "admitDecisionQueryResult",
       "compileActivationSubgraph",
       "createAttuneGraphEngine",

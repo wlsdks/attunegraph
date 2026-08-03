@@ -147,7 +147,7 @@ or weaken explanation, invalidation, or replay. Raw records stay at the source.
 
 | Contract | Available now | Explicit boundary |
 | --- | --- | --- |
-| Decision evidence | `decision-query@1`, bounded AttuneQL, exact-head token-bounded Working Graph, receipt, and explicit `complete` / `partial` / `abstained` | No proof-closed `DecisionContext` with completed authority and conflict evaluation |
+| Decision evidence | `decision-query@1`, bounded AttuneQL, and `decision-context@1` with a same-head bounded authority frontier, selected Working Graph, receipt, and explicit `complete` / `partial` / `abstained` | No general provenance proof, policy engine, or action execution |
 | Action authority | Typed `authority-query@1`, bitemporal exact-root witnesses, conflict abstention, and a result-bounded receipt | No general policy engine, historical-head read, AttuneQL authority grammar, or action execution |
 | Time and provenance | Valid and recorded time, supersession, freshness, and exact source refs | Does not independently prove an external source true or current |
 | Embedded storage and portability | In-memory oracle, worker-isolated local SQLite, canonical `.atgx`, and fixtures | No distributed, multi-tenant, hosted database, or compatibility aliases for superseded identities |
@@ -210,6 +210,37 @@ if (authority.status === "complete" && authority.authority === "authorized") {
 `action AUTHORIZED_BY evidence`, and `evidence OBSERVED_DURING threadRoot`.
 Any missing closure, root uncertainty, stale/future posture, conflict, or work
 cut remains `undetermined`; the host still owns action execution.
+
+For one same-head evidence-and-authority result, use the fixed Decision Context
+profile and re-admit detached JSON before use:
+
+```ts
+const context = await graph.queryDecisionContext({
+  operator: "decision-context@1",
+  scope,
+  seed: threadRoot,
+  action: { kind: "action", id: "action:publish" },
+  threadRoot,
+  asOf: now,
+  head: { mode: "current" },
+  freshness: { require: "fresh" },
+  budget: { maxEstimatedTokens: 16_000 }
+});
+
+const admitted = admitDecisionContextResult(
+  JSON.parse(JSON.stringify(context))
+);
+```
+
+Admission treats the one transported canonical projection as its semantic
+source, reconstructs the full stored projection, and replays the complete
+fixed-profile Decision Context compile. Supplied evidence, refs, diagnostics,
+authority outputs, status, readiness, token estimate, and receipt must match
+that replay. Authority scanning remains bounded to 32 evaluated assertions plus
+one work-cut lookahead. This verifies transport integrity only—not producer
+authenticity, external truth, or whether the producer head is still current.
+The full canonical projection and bounded frontier are mandatory transport
+costs, so a small token budget can fail closed instead of returning a result.
 
 ## When to choose AttuneGraph
 
@@ -373,6 +404,7 @@ budget, and partiality semantics.
 | Document | Question answered |
 | --- | --- |
 | [First principles](docs/architecture/first-principles.md) | Why does this database exist, and what belongs in the graph? |
+| [Same-head fixed-profile replay](docs/decisions/proof-closed-decision-context-v1.md) | What does `decision-context@1` close, transport, and deliberately not prove? |
 | [First-principles performance](docs/decisions/first-principles-performance.md) | Which implementation parts are candidates now, which require measurement, and what would falsify them? |
 | [Source adapters](SOURCE-ADAPTERS.md) | How does a host connect structured and unstructured sources? |
 | [Portable format](PORTABLE-FORMAT.md) | How are `.atgx` artifacts framed and admitted? |

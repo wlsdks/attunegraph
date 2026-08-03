@@ -15,6 +15,7 @@ export { AttuneGraphError, type AttuneGraphErrorCode } from "./attunegraph-error
 export { AttuneQLSyntaxError, parseAttuneQL } from "./attuneql.js";
 export { createAttuneGraphEngine, openAttuneGraph } from "./attunegraph-engine.js";
 export { admitDecisionQueryResult } from "./decision-query.js";
+export { admitDecisionContextResult } from "./decision-context.js";
 export type {
   AttuneGraph,
   AttuneGraphAuthorityConflict,
@@ -27,6 +28,11 @@ export type {
   AttuneGraphAuthorityTruncationReason,
   AttuneGraphAuthorityWitness,
   AttuneGraphDecisionHead,
+  AttuneGraphDecisionContextAuthority,
+  AttuneGraphDecisionContextDiagnostics,
+  AttuneGraphDecisionContextQuery,
+  AttuneGraphDecisionContextReceipt,
+  AttuneGraphDecisionContextResult,
   AttuneGraphDecisionQuery,
   AttuneGraphDecisionQueryReceipt,
   AttuneGraphDecisionQueryResult,

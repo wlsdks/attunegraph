@@ -7,6 +7,8 @@ import type {
   AttuneGraphAuthorityQueryResult,
   AttuneGraphDecisionQuery,
   AttuneGraphDecisionQueryResult,
+  AttuneGraphDecisionContextQuery,
+  AttuneGraphDecisionContextResult,
   AttuneGraphExecuteCommand,
   AttuneGraphOperatorResult,
   AttuneGraphProjectAgainstHeadCommand,
@@ -217,6 +219,11 @@ async function openLocalAttuneGraphSessionWithStoreOptions(
     },
     queryAuthority(command: AttuneGraphAuthorityQuery): Promise<AttuneGraphAuthorityQueryResult> {
       return begin(() => engine.queryAuthority(command));
+    },
+    queryDecisionContext(
+      command: AttuneGraphDecisionContextQuery
+    ): Promise<AttuneGraphDecisionContextResult> {
+      return begin(() => engine.queryDecisionContext(command));
     },
     planRevocationImpact(
       command: AttuneGraphRevocationImpactCommand
